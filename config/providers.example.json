@@ -1,0 +1,17 @@
+{
+  "images": {
+    "provider": "gemini",
+    "model": "nano-banana-2",
+    "variantsPerPrompt": 3
+  },
+  "reviewer": {
+    "provider": "gemini",
+    "model": "gemini-3.5-flash",
+    "maxRounds": 6
+  },
+  "render": {
+    "format": "A4",
+    "printBackground": true,
+    "preferCSSPageSize": true
+  }
+}

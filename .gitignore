@@ -1,0 +1,6 @@
+node_modules/
+config/providers.json
+projects/*/out/
+projects/*/images/*/
+.DS_Store
+.env
