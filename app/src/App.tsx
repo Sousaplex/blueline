@@ -1,6 +1,7 @@
-import { Download, FolderOpen, Play, Plus, RefreshCw } from "lucide-react";
+import { Download, FolderOpen, Play, Plus, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentPane, type FeedItem } from "./components/AgentPane";
+import { HomeScreen } from "./components/HomeScreen";
 import { LeftPane } from "./components/LeftPane";
 import { NewProjectDialog } from "./components/NewProjectDialog";
 import { PreviewPane } from "./components/PreviewPane";
@@ -73,6 +74,10 @@ export function App() {
           void refresh();
           void client.listProjects().then(setProjects);
           break;
+        case "projects_changed":
+          void refresh();
+          void client.listProjects().then(setProjects);
+          break;
         case "files_changed":
           window.clearTimeout(refreshTimer.current);
           refreshTimer.current = window.setTimeout(() => {
@@ -112,24 +117,7 @@ export function App() {
   if (!project) return <div className="flex h-screen items-center justify-center text-sm text-muted-foreground">loading…</div>;
 
   if (!project.slug) {
-    return (
-      <div className="flex h-screen flex-col items-center justify-center gap-4 bg-background text-foreground">
-        <h1 className="text-lg font-semibold">presscheck</h1>
-        <p className="text-sm text-muted-foreground">
-          Workspace: <code className="rounded bg-muted px-1.5 py-0.5">{project.workspaceRoot}</code>
-        </p>
-        <p className="text-sm text-muted-foreground">No projects here yet.</p>
-        <div className="flex gap-2">
-          <Button onClick={() => setNewProjectOpen(true)}>
-            <Plus data-slot="icon" /> New project
-          </Button>
-          <Button variant="outline" onClick={() => void client.chooseWorkspace()}>
-            <FolderOpen data-slot="icon" /> Change workspace
-          </Button>
-        </div>
-        <NewProjectDialog client={client} open={newProjectOpen} onOpenChange={setNewProjectOpen} />
-      </div>
-    );
+    return <HomeScreen client={client} workspaceRoot={project.workspaceRoot} projects={projects} />;
   }
 
   return (
@@ -141,6 +129,7 @@ export function App() {
           onValueChange={(value) => {
             if (value === "__new") return setNewProjectOpen(true);
             if (value === "__workspace") return void client.chooseWorkspace();
+            if (value === "__close") return void client.closeProject();
             const target = projects.find((p) => p.slug === value);
             if (target && !target.current) void client.openProject(target.dir);
           }}
@@ -157,6 +146,9 @@ export function App() {
             ))}
             <SelectItem value="__new">
               <Plus className="size-3.5" /> New project…
+            </SelectItem>
+            <SelectItem value="__close">
+              <X className="size-3.5" /> Close project
             </SelectItem>
             <SelectItem value="__workspace">
               <FolderOpen className="size-3.5" /> Change workspace…

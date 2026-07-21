@@ -4,7 +4,7 @@
 //
 // Usage: npm run serve -- projects/<slug> [--port 7717]
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { extname, join, normalize, resolve } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { WebSocketServer, type WebSocket } from "ws";
@@ -53,8 +53,38 @@ class Bridge {
     return this.project;
   }
 
-  listProjects(): { dir: string; slug: string; hasBrief: boolean; current: boolean }[] {
-    return this.workspace.listProjects().map((p) => ({ ...p, current: p.slug === this.project?.slug }));
+  listProjects(): { dir: string; slug: string; hasBrief: boolean; current: boolean; rounds: number; hasProof: boolean }[] {
+    return this.workspace.listProjects().map((p) => ({
+      ...p,
+      current: p.slug === this.project?.slug,
+      rounds: existsSync(join(p.dir, "review"))
+        ? readdirSync(join(p.dir, "review")).filter((f) => /^round-\d+\.json$/.test(f)).length
+        : 0,
+      hasProof: existsSync(join(p.dir, "out", "proof.pdf")),
+    }));
+  }
+
+  async closeProject(): Promise<void> {
+    if (this.running) throw new Error("Stop the current run before closing the project");
+    if (this.pc) {
+      await this.pc.dispose();
+      this.pc = undefined;
+    }
+    this.project = undefined;
+    this.buffer = [];
+    this.workspace.persist(undefined);
+    this.broadcast({ type: "project_changed", slug: null });
+  }
+
+  async deleteProject(slug: string): Promise<void> {
+    if (!/^[a-z0-9-]+$/.test(slug)) throw new Error(`Invalid project slug: ${slug}`);
+    const dir = join(this.workspace.projectsDir, slug);
+    if (!existsSync(dir)) throw new Error(`No such project: ${slug}`);
+    const deletingCurrent = this.project?.slug === slug;
+    if (deletingCurrent && this.running) throw new Error("Stop the current run before deleting this project");
+    if (deletingCurrent) await this.closeProject();
+    rmSync(dir, { recursive: true, force: true });
+    this.broadcast({ type: "projects_changed" });
   }
 
   async openProject(projectDir: string): Promise<void> {
@@ -267,7 +297,9 @@ async function readBody(req: IncomingMessage): Promise<any> {
 export async function startServer(projectDirArg: string | undefined, port: number): Promise<void> {
   const { workspace, lastProject } = Workspace.load();
   let project: Project | undefined;
-  const candidate = projectDirArg ?? lastProject ?? workspace.listProjects().find((p) => p.hasBrief)?.slug;
+  // Only restore an explicitly-requested or last-opened project — never auto-grab
+  // one, so the home screen is a real state.
+  const candidate = projectDirArg ?? lastProject;
   if (candidate) {
     try {
       project = new Project(candidate, workspace);
@@ -332,6 +364,16 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
         const body = await readBody(req);
         if (!body.name) return json(res, 400, { error: "name required" });
         await bridge.createProject(body.name, body.brief);
+        return json(res, 200, { ok: true });
+      }
+      if (req.method === "POST" && url.pathname === "/api/project/close") {
+        await bridge.closeProject();
+        return json(res, 200, { ok: true });
+      }
+      if (req.method === "POST" && url.pathname === "/api/project/delete") {
+        const body = await readBody(req);
+        if (!body.slug) return json(res, 400, { error: "slug required" });
+        await bridge.deleteProject(body.slug);
         return json(res, 200, { ok: true });
       }
       if (url.pathname === "/api/workspace") {

@@ -62,8 +62,9 @@ export type EngineEvent =
   | { type: "status"; running: boolean }
   | { type: "files_changed" }
   | { type: "settings_changed" }
-  | { type: "project_changed"; slug: string }
+  | { type: "project_changed"; slug: string | null }
   | { type: "workspace_changed"; root: string; slug: string | null }
+  | { type: "projects_changed" }
   | { type: "error"; message: string };
 
 export interface ProjectListing {
@@ -71,6 +72,8 @@ export interface ProjectListing {
   slug: string;
   hasBrief: boolean;
   current: boolean;
+  rounds: number;
+  hasProof: boolean;
 }
 
 /** Injected by the Electron preload script; absent in browser mode. */
@@ -89,6 +92,8 @@ export interface EngineClient {
   listProjects(): Promise<ProjectListing[]>;
   openProject(projectDir: string): Promise<void>;
   createProject(name: string, brief?: string): Promise<void>;
+  closeProject(): Promise<void>;
+  deleteProject(slug: string): Promise<void>;
   /** Pick a workspace dir (native dialog in Electron, path prompt in browser) and switch to it. */
   chooseWorkspace(): Promise<boolean>;
   /** Returns the saved path (Electron printToPDF) or null (browser fallback opened the proof). */
@@ -170,6 +175,8 @@ export class BrowserEngineClient implements EngineClient {
   openProject(projectDir: string) { return post("/api/open", { projectDir }); }
 
   createProject(name: string, brief?: string) { return post("/api/project/new", { name, brief }); }
+  closeProject() { return post("/api/project/close"); }
+  deleteProject(slug: string) { return post("/api/project/delete", { slug }); }
 
   async chooseWorkspace(): Promise<boolean> {
     const root = window.presscheck
