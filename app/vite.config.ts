@@ -1,4 +1,6 @@
+import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 
 // The bridge (toolkit: npm run serve) owns /api, /files, /ws. Proxying them here
@@ -6,7 +8,10 @@ import { defineConfig } from "vite";
 // into its DOM. In M3, Electron serves the renderer and the EngineClient
 // switches to IPC — this proxy is browser-mode only.
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
+  },
   server: {
     port: 5177,
     proxy: {

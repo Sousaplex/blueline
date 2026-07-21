@@ -1,4 +1,5 @@
-import { existsSync } from "node:fs";
+import { copyFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import { GoogleGenAI, Type as GType } from "@google/genai";
 import type { ReviewResult } from "../providers/types.ts";
 import type { PresscheckConfig } from "./config.ts";
@@ -98,5 +99,7 @@ export async function runReview(
   }
   const round = completed + 1;
   project.writeReview(round, result);
+  // Archive the exact proof this verdict was issued against — makes rounds navigable in the viewer.
+  copyFileSync(project.proofPdf, join(project.reviewDir, `round-${round}.pdf`));
   return { round, result, pageCount: pages.length };
 }

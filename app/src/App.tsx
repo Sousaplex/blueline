@@ -1,7 +1,11 @@
+import { Play, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentPane, type FeedItem } from "./components/AgentPane";
 import { LeftPane } from "./components/LeftPane";
 import { PreviewPane } from "./components/PreviewPane";
+import { SettingsDialog } from "./components/SettingsDialog";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { BrowserEngineClient, type EngineEvent, type ProjectState } from "./engine-client";
 
 export function App() {
@@ -11,7 +15,7 @@ export function App() {
   const [running, setRunning] = useState(false);
   const [feed, setFeed] = useState<FeedItem[]>([]);
   const [cacheKey, setCacheKey] = useState(() => Date.now());
-  const [selectedRound, setSelectedRound] = useState<number | null>(null);
+  const [viewRound, setViewRound] = useState<number | null>(null); // null = latest
   const refreshTimer = useRef<number | undefined>(undefined);
 
   const refresh = useCallback(async () => {
@@ -30,9 +34,7 @@ export function App() {
         case "text_delta":
           setFeed((f) => {
             const last = f.at(-1);
-            if (last?.kind === "text") {
-              return [...f.slice(0, -1), { ...last, text: last.text + event.delta }];
-            }
+            if (last?.kind === "text") return [...f.slice(0, -1), { ...last, text: last.text + event.delta }];
             return [...f, { kind: "text", text: event.delta, at: Date.now() }];
           });
           break;
@@ -49,8 +51,10 @@ export function App() {
           setRunning(event.running);
           void refresh();
           break;
+        case "settings_changed":
+          void refresh();
+          break;
         case "files_changed":
-          // debounce bursts of file changes into one refresh + preview reload
           window.clearTimeout(refreshTimer.current);
           refreshTimer.current = window.setTimeout(() => {
             setCacheKey(Date.now());
@@ -74,35 +78,39 @@ export function App() {
 
   if (bridgeError) {
     return (
-      <div className="bridge-error">
-        <h1>presscheck</h1>
-        <p>{bridgeError}</p>
-        <p className="hint">
-          Start the bridge: <code>cd toolkit && npm run serve -- projects/demo</code>
+      <div className="flex h-screen flex-col items-center justify-center gap-3 text-center">
+        <h1 className="text-xl font-semibold">presscheck</h1>
+        <p className="max-w-md text-sm text-muted-foreground">{bridgeError}</p>
+        <p className="text-sm text-muted-foreground">
+          Start the bridge: <code className="rounded bg-muted px-1.5 py-0.5">cd toolkit && npm run serve -- projects/demo</code>
         </p>
-        <button onClick={() => void refresh()}>Retry</button>
+        <Button variant="outline" size="sm" onClick={() => void refresh()}>
+          Retry
+        </Button>
       </div>
     );
   }
-  if (!project) return <div className="bridge-error">loading…</div>;
+  if (!project) return <div className="flex h-screen items-center justify-center text-sm text-muted-foreground">loading…</div>;
 
   return (
-    <div className="workspace">
-      <header className="topbar">
-        <span className="brand">● presscheck</span>
-        <span className="project-name">▸ {project.slug}</span>
-        <span className="spacer" />
-        <span className="engine-chip">Engine: {project.designerModel}</span>
-        <button className="primary" disabled={running} onClick={() => void actions.run()}>
-          {running ? "Running…" : "Run ▶"}
-        </button>
-        <button disabled={!project.hasPage} onClick={() => void actions.render()}>
-          Re-render ⎙
-        </button>
+    <div className="flex h-screen flex-col bg-background text-foreground">
+      <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
+        <span className="text-sm font-semibold tracking-tight">presscheck</span>
+        <span className="text-sm text-muted-foreground">/ {project.slug}</span>
+        {running && <Badge variant="secondary" className="animate-pulse">running</Badge>}
+        <div className="flex-1" />
+        <Badge variant="outline" className="font-mono text-xs">{project.designerModel}</Badge>
+        <Button size="sm" disabled={running} onClick={() => void actions.run()}>
+          <Play data-slot="icon" /> Run
+        </Button>
+        <Button size="sm" variant="outline" disabled={!project.hasPage} onClick={() => void actions.render()}>
+          <RefreshCw data-slot="icon" /> Re-render
+        </Button>
+        <SettingsDialog client={client} />
       </header>
-      <div className="panes">
-        <LeftPane project={project} selectedRound={selectedRound} onSelectRound={setSelectedRound} />
-        <PreviewPane project={project} client={client} cacheKey={cacheKey} actions={actions} />
+      <div className="grid min-h-0 flex-1 grid-cols-[260px_1fr_340px]">
+        <LeftPane project={project} viewRound={viewRound} onViewRound={setViewRound} />
+        <PreviewPane project={project} client={client} cacheKey={cacheKey} actions={actions} viewRound={viewRound} onViewRound={setViewRound} />
         <AgentPane feed={feed} running={running} onChat={(t) => void actions.chat(t)} />
       </div>
     </div>

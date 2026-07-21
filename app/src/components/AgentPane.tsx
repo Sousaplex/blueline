@@ -1,4 +1,8 @@
+import { CircleX, Download, Hammer, Image as ImageIcon, Pencil, Printer, ScanEye, SendHorizontal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 
 export type FeedItem =
   | { kind: "text"; text: string; at: number }
@@ -6,15 +10,18 @@ export type FeedItem =
   | { kind: "tool_result"; tool: string; summary: string; at: number }
   | { kind: "error"; message: string; at: number };
 
-const TOOL_ICONS: Record<string, string> = {
-  render: "⎙",
-  review: "✓",
-  gen_images: "▣",
-  web_fetch: "⇩",
-  read: "▤",
-  write: "✎",
-  edit: "✎",
-};
+function ToolIcon({ tool }: { tool: string }) {
+  const cls = "size-3.5";
+  switch (tool) {
+    case "render": return <Printer className={cls} />;
+    case "review": return <ScanEye className={cls} />;
+    case "gen_images": return <ImageIcon className={cls} />;
+    case "web_fetch": return <Download className={cls} />;
+    case "write":
+    case "edit": return <Pencil className={cls} />;
+    default: return <Hammer className={cls} />;
+  }
+}
 
 export function AgentPane({
   feed,
@@ -41,53 +48,61 @@ export function AgentPane({
   };
 
   return (
-    <aside className="agent-pane">
-      <div className="agent-header">
-        <h3>Agent</h3>
-        <span className={`status-dot ${running ? "running" : "idle"}`} title={running ? "running" : "idle"} />
+    <aside className="flex min-h-0 flex-col border-l">
+      <div className="flex h-11 shrink-0 items-center gap-2 border-b px-4">
+        <h3 className="text-sm font-medium">Agent</h3>
+        <span
+          className={cn("size-2 rounded-full", running ? "animate-pulse bg-emerald-500" : "bg-muted-foreground/40")}
+          title={running ? "running" : "idle"}
+        />
       </div>
-      <div className="agent-feed" ref={scroller}>
+      <div ref={scroller} className="flex-1 space-y-2 overflow-y-auto p-4 text-sm">
         {feed.map((item, i) => {
           switch (item.kind) {
             case "text":
               return (
-                <div className="feed-text" key={i}>
+                <p key={i} className="whitespace-pre-wrap leading-relaxed">
                   {item.text}
-                </div>
+                </p>
               );
             case "tool":
               return (
-                <div className="feed-tool" key={i}>
-                  {TOOL_ICONS[item.tool] ?? "⚙"} {item.tool}
-                  <span className="tool-args">{compactArgs(item.args)}</span>
+                <div key={i} className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
+                  <ToolIcon tool={item.tool} />
+                  {item.tool}
+                  <span className="truncate opacity-70">{compactArgs(item.args)}</span>
                 </div>
               );
             case "tool_result":
               return item.tool === "review" ? (
-                <div className="feed-review" key={i}>
+                <p key={i} className="text-xs font-medium">
                   {reviewSummary(item.summary)}
-                </div>
+                </p>
               ) : null;
             case "error":
               return (
-                <div className="feed-error" key={i}>
-                  ✗ {item.message}
-                </div>
+                <p key={i} className="flex items-center gap-1.5 text-xs text-destructive">
+                  <CircleX className="size-3.5" /> {item.message}
+                </p>
               );
           }
         })}
-        {!feed.length && <p className="dim">No activity yet. Run ▶ starts the design loop; type below to steer.</p>}
+        {!feed.length && (
+          <p className="text-sm text-muted-foreground">
+            No activity yet. <strong>Run</strong> starts the design loop; type below to steer.
+          </p>
+        )}
       </div>
-      <div className="chat-box">
-        <input
+      <div className="flex shrink-0 gap-2 border-t p-3">
+        <Input
           value={draft}
           placeholder={running ? "steer the agent…" : 'e.g. "make the headline punchier"'}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && send()}
         />
-        <button onClick={send} disabled={!draft.trim()}>
-          Send
-        </button>
+        <Button size="icon" variant="secondary" onClick={send} disabled={!draft.trim()}>
+          <SendHorizontal />
+        </Button>
       </div>
     </aside>
   );
@@ -96,7 +111,7 @@ export function AgentPane({
 function compactArgs(args: Record<string, unknown>): string {
   const s = JSON.stringify(args);
   if (s === "{}") return "";
-  return s.length > 60 ? ` ${s.slice(0, 60)}…` : ` ${s}`;
+  return s.length > 48 ? ` ${s.slice(0, 48)}…` : ` ${s}`;
 }
 
 function reviewSummary(summary: string): string {
@@ -104,7 +119,5 @@ function reviewSummary(summary: string): string {
   const issueCount = (summary.match(/"problem"/g) ?? []).length;
   const round = /round (\d+\/\d+)/.exec(summary)?.[1];
   if (!verdict) return summary.slice(0, 120);
-  return verdict === "pass"
-    ? `✅ Review ${round ?? ""}: PASS`
-    : `✏ Review ${round ?? ""}: revise — ${issueCount} issue(s)`;
+  return verdict === "pass" ? `✅ Review ${round ?? ""}: pass` : `✏️ Review ${round ?? ""}: revise — ${issueCount} issue(s)`;
 }

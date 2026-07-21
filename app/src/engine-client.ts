@@ -14,6 +14,7 @@ export interface RoundInfo {
   verdict: "pass" | "revise";
   issues: ReviewIssue[];
   notes?: string;
+  hasProof: boolean;
 }
 
 export interface ImageSlot {
@@ -36,6 +37,22 @@ export interface ProjectState {
   designerModel: string;
 }
 
+export interface EngineSettings {
+  config: {
+    designer: { provider: string; model: string; thinkingLevel?: string; apiKeyEnv?: string };
+    reviewer: { provider: string; model: string; maxRounds: number; apiKeyEnv?: string };
+    images: { provider: string; model: string; variantsPerPrompt: number; apiKeyEnv?: string };
+  };
+  registry: { id: string; models: string[] }[];
+  suggestions: { reviewer: string[]; images: string[] };
+}
+
+export type SettingsPatch = {
+  designer?: Partial<EngineSettings["config"]["designer"]>;
+  reviewer?: Partial<EngineSettings["config"]["reviewer"]>;
+  images?: Partial<EngineSettings["config"]["images"]>;
+};
+
 export type EngineEvent =
   | { type: "hello"; running: boolean; replay: EngineEvent[] }
   | { type: "text_delta"; delta: string }
@@ -43,17 +60,20 @@ export type EngineEvent =
   | { type: "tool_end"; tool: string; summary: string }
   | { type: "status"; running: boolean }
   | { type: "files_changed" }
+  | { type: "settings_changed" }
   | { type: "error"; message: string };
 
 export interface EngineClient {
   getProject(): Promise<ProjectState>;
+  getSettings(): Promise<EngineSettings>;
+  updateSettings(patch: SettingsPatch): Promise<void>;
   run(prompt?: string): Promise<void>;
   chat(text: string): Promise<void>;
   render(): Promise<void>;
   updateCopy(pcId: string, text: string): Promise<void>;
   selectVariant(imageId: string, variant: number): Promise<void>;
-  proofMeta(): Promise<{ pages: number }>;
-  proofPageUrl(index: number, cacheKey: number): string;
+  proofMeta(round?: number): Promise<{ pages: number }>;
+  proofPageUrl(index: number, cacheKey: number, round?: number): string;
   fileUrl(rel: string, cacheKey: number): string;
   subscribe(listener: (event: EngineEvent) => void): () => void;
 }
@@ -108,19 +128,26 @@ export class BrowserEngineClient implements EngineClient {
     return res.json();
   }
 
+  async getSettings(): Promise<EngineSettings> {
+    const res = await fetch("/api/settings");
+    if (!res.ok) throw new Error(`settings: HTTP ${res.status}`);
+    return res.json();
+  }
+
+  updateSettings(patch: SettingsPatch) { return post("/api/settings", patch); }
   run(prompt?: string) { return post("/api/run", { prompt }); }
   chat(text: string) { return post("/api/chat", { text }); }
   render() { return post("/api/render"); }
   updateCopy(pcId: string, text: string) { return post("/api/copy", { pcId, text }); }
   selectVariant(imageId: string, variant: number) { return post("/api/variant", { imageId, variant }); }
 
-  async proofMeta(): Promise<{ pages: number }> {
-    const res = await fetch("/api/proof/meta");
+  async proofMeta(round?: number): Promise<{ pages: number }> {
+    const res = await fetch(`/api/proof/meta${round != null ? `?round=${round}` : ""}`);
     return res.json();
   }
 
-  proofPageUrl(index: number, cacheKey: number): string {
-    return `/api/proof/page/${index}?k=${cacheKey}`;
+  proofPageUrl(index: number, cacheKey: number, round?: number): string {
+    return `/api/proof/page/${index}?k=${cacheKey}${round != null ? `&round=${round}` : ""}`;
   }
 
   fileUrl(rel: string, cacheKey: number): string {

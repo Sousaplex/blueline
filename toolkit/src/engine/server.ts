@@ -4,10 +4,11 @@
 //
 // Usage: npm run serve -- projects/<slug> [--port 7717]
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { extname, join, normalize } from "node:path";
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { extname, join, normalize, resolve } from "node:path";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { WebSocketServer, type WebSocket } from "ws";
-import { REPO_ROOT, loadConfig } from "./config.ts";
+import { REPO_ROOT, loadConfig, type PresscheckConfig } from "./config.ts";
 import { listEditable, listImageSlots, selectVariant, updateCopy } from "./page-edit.ts";
 import { Project } from "./project.ts";
 import { createPresscheckSession, type PresscheckSession } from "./session.ts";
@@ -33,12 +34,13 @@ class Bridge {
   private running = false;
   private buffer: WireEvent[] = [];
   private sockets = new Set<WebSocket>();
-  private proofCache?: { mtime: number; pages: Buffer[] };
+  private proofCache = new Map<string, { mtime: number; pages: Buffer[] }>();
+  private registryRuntime?: ModelRuntime;
+  config: PresscheckConfig;
 
-  constructor(
-    readonly project: Project,
-    readonly config = loadConfig(),
-  ) {}
+  constructor(readonly project: Project) {
+    this.config = loadConfig();
+  }
 
   broadcast(event: WireEvent): void {
     this.buffer.push(event);
@@ -111,20 +113,51 @@ class Bridge {
   async render(): Promise<void> {
     const pc = await this.ensureSession();
     await pc.backend.renderPdf(this.project.pageHtml, this.project.proofPdf, this.config.render);
-    this.proofCache = undefined;
     this.broadcast({ type: "files_changed" });
   }
 
-  async proofPages(): Promise<Buffer[]> {
-    if (!existsSync(this.project.proofPdf)) return [];
-    const mtime = statSync(this.project.proofPdf).mtimeMs;
-    if (this.proofCache?.mtime === mtime) return this.proofCache.pages;
+  /** Rasterized pages for the latest proof, or an archived round's proof. */
+  async proofPages(round?: number): Promise<Buffer[]> {
+    const path = round != null ? join(this.project.reviewDir, `round-${round}.pdf`) : this.project.proofPdf;
+    if (!existsSync(path)) return [];
+    const mtime = statSync(path).mtimeMs;
+    const cached = this.proofCache.get(path);
+    if (cached?.mtime === mtime) return cached.pages;
     const { pdf } = await import("pdf-to-img");
-    const doc = await pdf(this.project.proofPdf, { scale: 2 });
+    const doc = await pdf(path, { scale: 2 });
     const pages: Buffer[] = [];
     for await (const page of doc) pages.push(Buffer.from(page));
-    this.proofCache = { mtime, pages };
+    this.proofCache.set(path, { mtime, pages });
+    if (this.proofCache.size > 8) this.proofCache.delete(this.proofCache.keys().next().value!);
     return pages;
+  }
+
+  /** Provider/model registry for the settings UI (independent of the live session). */
+  async modelRegistry(): Promise<{ id: string; models: string[] }[]> {
+    this.registryRuntime ??= await ModelRuntime.create();
+    return this.registryRuntime
+      .getProviders()
+      .map((p) => ({ id: p.id, models: this.registryRuntime!.getModels(p.id).map((m) => m.id) }))
+      .filter((p) => p.models.length > 0);
+  }
+
+  /** Merge a settings patch into config/providers.json and apply it. */
+  async updateSettings(patch: Partial<PresscheckConfig>): Promise<void> {
+    const configPath = resolve(REPO_ROOT, "config", "providers.json");
+    const current: Record<string, unknown> = existsSync(configPath)
+      ? JSON.parse(readFileSync(configPath, "utf8"))
+      : { ...this.config };
+    for (const key of ["designer", "reviewer", "images", "render", "webFetch"] as const) {
+      if (patch[key]) current[key] = { ...(current[key] as object | undefined), ...patch[key] };
+    }
+    writeFileSync(configPath, JSON.stringify(current, null, 2) + "\n");
+    this.config = loadConfig();
+    // Designer/reviewer changes need a fresh session (model + tools bind at creation).
+    if (this.pc && !this.running) {
+      await this.pc.dispose();
+      this.pc = undefined;
+    }
+    this.broadcast({ type: "settings_changed" });
   }
 
   projectState() {
@@ -135,6 +168,7 @@ class Bridge {
       .sort((a, b) => a - b)
       .map((n) => ({
         round: n,
+        hasProof: existsSync(join(this.project.reviewDir, `round-${n}.pdf`)),
         ...JSON.parse(readFileSync(join(this.project.reviewDir, `round-${n}.json`), "utf8")),
       }));
     const contextDir = join(REPO_ROOT, "context");
@@ -204,16 +238,33 @@ export async function startServer(projectDir: string, port: number): Promise<voi
       if (url.pathname === "/api/project") return json(res, 200, bridge.projectState());
 
       if (url.pathname === "/api/proof/meta") {
-        const pages = await bridge.proofPages();
+        const round = url.searchParams.get("round");
+        const pages = await bridge.proofPages(round ? Number(round) : undefined);
         return json(res, 200, { pages: pages.length });
       }
       const pageMatch = /^\/api\/proof\/page\/(\d+)$/.exec(url.pathname);
       if (pageMatch) {
-        const pages = await bridge.proofPages();
+        const round = url.searchParams.get("round");
+        const pages = await bridge.proofPages(round ? Number(round) : undefined);
         const idx = Number(pageMatch[1]);
         if (idx < 0 || idx >= pages.length) return json(res, 404, { error: "no such page" });
         res.writeHead(200, { "content-type": "image/png", "access-control-allow-origin": "*", "cache-control": "no-store" });
         return res.end(pages[idx]);
+      }
+
+      if (url.pathname === "/api/settings") {
+        if (req.method === "POST") {
+          await bridge.updateSettings(await readBody(req));
+          return json(res, 200, { ok: true });
+        }
+        return json(res, 200, {
+          config: bridge.config,
+          registry: await bridge.modelRegistry(),
+          suggestions: {
+            reviewer: ["gemini-3.5-flash", "gemini-3.1-pro-preview", "gemini-2.5-flash"],
+            images: ["gemini-3.1-flash-image", "gemini-3-pro-image", "gemini-2.5-flash-image"],
+          },
+        });
       }
 
       if (req.method === "POST" && url.pathname === "/api/run") {
