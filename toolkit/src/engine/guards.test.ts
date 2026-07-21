@@ -63,3 +63,42 @@ test("review requires a rendered proof before reviewing", async () => {
   const p = tempProject();
   await assert.rejects(runReview(p, config), /render tool before/);
 });
+
+const { safeRelPath } = await import("./project.ts");
+const { setElementStyle, getElementStyle } = await import("./page-edit.ts");
+
+test("safeRelPath blocks traversal and absolute paths, allows subfolders", () => {
+  assert.equal(safeRelPath("photos/team.jpg"), "photos/team.jpg");
+  assert.equal(safeRelPath("/leading/slash.md"), "leading/slash.md");
+  assert.equal(safeRelPath("win\\style\\path.png"), "win/style/path.png");
+  assert.throws(() => safeRelPath("../../etc/passwd"));
+  assert.throws(() => safeRelPath("a/../b.md"));
+  assert.throws(() => safeRelPath("a/./b.md"));
+  assert.throws(() => safeRelPath(""));
+});
+
+test("project meta defaults are safe on legacy projects and clamp settings", () => {
+  const p = tempProject();
+  const meta = p.meta();
+  assert.equal(meta.displayName, p.slug);
+  assert.deepEqual(meta.settings, { pageSize: "A4", orientation: "portrait", pages: 1 });
+  p.updateMeta({ displayName: "Nice Name", series: "s", settings: { pages: 999 } as any });
+  const updated = p.meta();
+  assert.equal(updated.displayName, "Nice Name");
+  assert.equal(updated.settings.pages, 24); // clamped
+  assert.equal(updated.settings.pageSize, "A4"); // merge kept defaults
+});
+
+test("element nudge clamps offsets and round-trips through page.html", () => {
+  const p = tempProject();
+  writeFileSync(p.pageHtml, `<html><body><section data-pc-id="stats" style="color: red">x</section></body></html>`);
+  setElementStyle(p, "stats", { translateX: 3, translateY: -2 });
+  assert.deepEqual(getElementStyle(p, "stats"), { translateX: 3, translateY: -2, marginTop: null });
+  setElementStyle(p, "stats", { translateX: 9999, translateY: 0, marginTop: 12 });
+  const s = getElementStyle(p, "stats");
+  assert.equal(s.translateX, 150); // clamped to NUDGE_LIMIT
+  assert.equal(s.marginTop, 12);
+  setElementStyle(p, "stats", { translateX: 0, translateY: 0, marginTop: null });
+  assert.deepEqual(getElementStyle(p, "stats"), { translateX: 0, translateY: 0, marginTop: null });
+  assert.throws(() => setElementStyle(p, "nope", { translateX: 1 }), /No element/);
+});

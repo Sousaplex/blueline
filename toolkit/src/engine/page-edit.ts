@@ -67,6 +67,65 @@ export function listImageSlots(project: Project): ImageSlot[] {
   return slots;
 }
 
+function mergeStyle(el: any, apply: (existing: Map<string, string>) => void): void {
+  const existing = new Map<string, string>(
+    (el.getAttribute("style") ?? "")
+      .split(";")
+      .map((s: string) => s.trim())
+      .filter(Boolean)
+      .map((s: string) => [s.slice(0, s.indexOf(":")).trim(), s.slice(s.indexOf(":") + 1).trim()] as [string, string]),
+  );
+  apply(existing);
+  const css = [...existing.entries()].map(([k, v]) => `${k}: ${v}`).join("; ");
+  if (css) el.setAttribute("style", css);
+  else el.removeAttribute("style");
+}
+
+const NUDGE_LIMIT_MM = 150;
+
+/** Nudge a layout block: translate offset (doesn't reflow siblings) and/or top margin. */
+export function setElementStyle(
+  project: Project,
+  pcId: string,
+  style: { translateX?: number; translateY?: number; marginTop?: number | null },
+): void {
+  const { dom } = loadDom(project);
+  const el = dom.document.querySelector(`[data-pc-id="${pcId}"]`);
+  if (!el) throw new Error(`No element with data-pc-id="${pcId}"`);
+  mergeStyle(el, (existing) => {
+    if (style.translateX !== undefined || style.translateY !== undefined) {
+      const clamp = (v: number) => Math.max(-NUDGE_LIMIT_MM, Math.min(NUDGE_LIMIT_MM, Number(v) || 0));
+      const x = clamp(style.translateX ?? 0);
+      const y = clamp(style.translateY ?? 0);
+      if (x === 0 && y === 0) existing.delete("transform");
+      else existing.set("transform", `translate(${x.toFixed(1)}mm, ${y.toFixed(1)}mm)`);
+    }
+    if (style.marginTop !== undefined) {
+      if (style.marginTop === null) existing.delete("margin-top");
+      else {
+        const m = Math.max(-50, Math.min(NUDGE_LIMIT_MM, Number(style.marginTop) || 0));
+        existing.set("margin-top", `${m.toFixed(1)}mm`);
+      }
+    }
+  });
+  save(project, dom.document);
+}
+
+/** Current inline nudge state for an element (so the UI resumes from persisted values). */
+export function getElementStyle(project: Project, pcId: string): { translateX: number; translateY: number; marginTop: number | null } {
+  const { dom } = loadDom(project);
+  const el = dom.document.querySelector(`[data-pc-id="${pcId}"]`);
+  if (!el) throw new Error(`No element with data-pc-id="${pcId}"`);
+  const styleAttr = el.getAttribute("style") ?? "";
+  const t = /translate\((-?[\d.]+)mm,\s*(-?[\d.]+)mm\)/.exec(styleAttr);
+  const m = /margin-top:\s*(-?[\d.]+)mm/.exec(styleAttr);
+  return {
+    translateX: t ? Number(t[1]) : 0,
+    translateY: t ? Number(t[2]) : 0,
+    marginTop: m ? Number(m[1]) : null,
+  };
+}
+
 /** Persist pan/zoom for an image: object-position + scale, keeping object-fit cover. */
 export function setImageStyle(
   project: Project,

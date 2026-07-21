@@ -74,6 +74,7 @@ export async function runReview(
 
   const pages = await rasterizePdf(project.proofPdf);
   const whitespace = pages.map((p, i) => analyzePage(p, i + 1));
+  const settings = project.meta().settings;
   const apiKey = requireApiKey(config.reviewer.apiKeyEnv ?? "GEMINI_API_KEY", "reviewer");
   const ai = new GoogleGenAI({ apiKey });
 
@@ -103,6 +104,9 @@ export async function runReview(
     describeWhitespace(whitespace),
     "Any measured interior empty band taller than ~12% of the page is dead space unless it is",
     "unmistakably deliberate framing; name it in issues with a concrete layout fix.",
+    "",
+    `Required format: ${settings.pageSize} ${settings.orientation}, EXACTLY ${settings.pages} page(s).`,
+    `The rendered proof has ${pages.length} page(s) — a wrong page count is an automatic revise.`,
     `This is review round ${thisRun + 1} of at most ${config.reviewer.maxRounds} for this run (round ${completed + 1} in the project's history).`,
     "",
     `# Brief\n${project.brief()}`,
@@ -134,6 +138,24 @@ export async function runReview(
     throw new Error(`Reviewer returned malformed result: ${response.text?.slice(0, 300)}`);
   }
 
+  // Hard gate: the wrong page count can never pass, no matter what the model says.
+  if (result.verdict === "pass" && pages.length !== settings.pages) {
+    result.verdict = "revise";
+    result.issues = [
+      ...(result.issues ?? []),
+      {
+        page: pages.length,
+        region: "document",
+        problem: `Page count is ${pages.length} but the project requires exactly ${settings.pages} (mechanical check).`,
+        fix:
+          pages.length > settings.pages
+            ? "Content overflows the target length: tighten spacing, cut copy, or scale elements down so nothing spills onto an extra page."
+            : "The piece is shorter than the required length: expand the layout to fill the specified number of pages.",
+      },
+    ];
+    result.notes = `${result.notes ?? ""} [auto] Verdict downgraded to revise: page count mismatch.`.trim();
+  }
+
   // Hard gate: a giant interior dead band can never pass, no matter what the model says.
   const catastrophic = catastrophicBands(whitespace);
   if (result.verdict === "pass" && catastrophic.length) {
@@ -152,7 +174,10 @@ export async function runReview(
 
   const round = completed + 1;
   project.writeReview(round, result);
-  // Archive the exact proof this verdict was issued against — makes rounds navigable in the viewer.
+  // Archive the exact proof AND page.html this verdict was issued against — makes rounds
+  // navigable in the viewer and branchable later (page.html is self-contained by contract;
+  // image variants are append-only, so relative image refs stay valid forever).
   copyFileSync(project.proofPdf, join(project.reviewDir, `round-${round}.pdf`));
+  if (existsSync(project.pageHtml)) copyFileSync(project.pageHtml, project.roundHtml(round));
   return { round, result, pageCount: pages.length };
 }

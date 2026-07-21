@@ -4,14 +4,22 @@
 //
 // Usage: npm run serve -- [projects/<slug>] [--port 7717]
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { extname, join, normalize, resolve } from "node:path";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { dirname, extname, join, normalize, resolve } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { WebSocketServer, type WebSocket } from "ws";
 import { DATA_ROOT, REPO_ROOT, loadConfig, type PresscheckConfig } from "./config.ts";
 import { generateImages } from "./images.ts";
-import { listEditable, listImageSlots, selectVariant, setImageStyle, updateCopy } from "./page-edit.ts";
-import { Project } from "./project.ts";
+import {
+  getElementStyle,
+  listEditable,
+  listImageSlots,
+  selectVariant,
+  setElementStyle,
+  setImageStyle,
+  updateCopy,
+} from "./page-edit.ts";
+import { Project, listSourceFiles, safeRelPath, type ProjectMeta } from "./project.ts";
 import { PlaywrightBackend } from "./render.ts";
 import { markRunStart } from "./review.ts";
 import { resetSearchBudget } from "./search.ts";
@@ -24,6 +32,11 @@ const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".png": "image/png",
   ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+  ".md": "text/plain; charset=utf-8",
+  ".txt": "text/plain; charset=utf-8",
   ".svg": "image/svg+xml",
   ".css": "text/css",
   ".js": "text/javascript",
@@ -251,15 +264,34 @@ class Bridge {
   }
 
   listProjects() {
-    return this.workspace.listProjects().map((p) => ({
-      ...p,
-      current: p.slug === this.project?.slug,
-      runState: this.runState(p.slug),
-      rounds: existsSync(join(p.dir, "review"))
-        ? readdirSync(join(p.dir, "review")).filter((f) => /^round-\d+\.json$/.test(f)).length
-        : 0,
-      hasProof: existsSync(join(p.dir, "out", "proof.pdf")),
-    }));
+    return this.workspace.listProjects().map((p) => {
+      const meta = new Project(p.dir, this.workspace).meta();
+      const rounds = existsSync(join(p.dir, "review"))
+        ? readdirSync(join(p.dir, "review"))
+            .map((f) => /^round-(\d+)\.json$/.exec(f)?.[1])
+            .filter(Boolean)
+            .map(Number)
+            .sort((a, b) => a - b)
+        : [];
+      const last = rounds.at(-1);
+      let lastVerdict: string | null = null;
+      if (last !== undefined) {
+        try {
+          lastVerdict = JSON.parse(readFileSync(join(p.dir, "review", `round-${last}.json`), "utf8")).verdict ?? null;
+        } catch {
+          lastVerdict = null;
+        }
+      }
+      return {
+        ...p,
+        current: p.slug === this.project?.slug,
+        runState: this.runState(p.slug),
+        rounds: rounds.length,
+        lastVerdict,
+        hasProof: existsSync(join(p.dir, "out", "proof.pdf")),
+        meta,
+      };
+    });
   }
 
   async openProject(projectDir: string): Promise<void> {
@@ -269,10 +301,110 @@ class Bridge {
     this.broadcast({ type: "project_changed", slug: next.slug });
   }
 
-  async createProject(name: string, brief?: string): Promise<void> {
+  async createProject(name: string, brief?: string, meta?: Partial<ProjectMeta>): Promise<void> {
     const { dir } = this.workspace.createProject(name, brief?.trim() || BRIEF_TEMPLATE);
+    new Project(dir, this.workspace).updateMeta({ displayName: name.trim(), ...meta });
     this.broadcast({ type: "projects_changed" });
     await this.openProject(dir);
+  }
+
+  /** Create a project slug that doesn't collide, appending -2, -3… if needed. */
+  private createUniqueProject(name: string, brief: string): { dir: string; slug: string } {
+    for (let i = 0; i < 50; i++) {
+      try {
+        return this.workspace.createProject(i === 0 ? name : `${name}-${i + 1}`, brief);
+      } catch (err) {
+        if (!(err instanceof Error) || !err.message.includes("already exists")) throw err;
+      }
+    }
+    throw new Error(`Could not find a free slug for "${name}"`);
+  }
+
+  /** Copy the design state (page + images + source selection) from one project dir to another. */
+  private copyDesignState(base: Project, targetDir: string, pageHtmlSource?: string): void {
+    const html = pageHtmlSource ?? base.pageHtml;
+    if (existsSync(html)) cpSync(html, join(targetDir, "page.html"));
+    if (existsSync(base.imagesDir)) cpSync(base.imagesDir, join(targetDir, "images"), { recursive: true });
+    const sourcesJson = join(base.dir, "sources.json");
+    if (existsSync(sourcesJson)) cpSync(sourcesJson, join(targetDir, "sources.json"));
+  }
+
+  /** Branch a project — optionally from a specific review round's archived state. */
+  async forkProject(baseSlug: string, opts: { round?: number; name?: string } = {}): Promise<string> {
+    const base = new Project(baseSlug, this.workspace);
+    const baseMeta = base.meta();
+    let pageSource: string | undefined;
+    if (opts.round != null) {
+      pageSource = base.roundHtml(opts.round);
+      if (!existsSync(pageSource)) {
+        throw new Error(`Round ${opts.round} has no archived page state (run predates branching) — it can't be branched`);
+      }
+    }
+    const name = opts.name?.trim() || (opts.round != null ? `${baseSlug}-r${opts.round}-alt` : `${baseSlug}-fork`);
+    const { dir, slug } = this.createUniqueProject(name, base.brief());
+    this.copyDesignState(base, dir, pageSource);
+    new Project(dir, this.workspace).updateMeta({
+      displayName: opts.name?.trim() || `${baseMeta.displayName} (from round ${opts.round ?? "latest"})`,
+      series: baseMeta.series,
+      kind: "document",
+      parent: baseSlug,
+      forkedFromRound: opts.round ?? null,
+      settings: baseMeta.settings,
+    });
+    this.broadcast({ type: "projects_changed" });
+    return slug;
+  }
+
+  /** "Make N like this": clone an approved project as the template for a document series. */
+  async createSeries(
+    templateSlug: string,
+    rootName: string,
+    topics: string[],
+    autoRun: boolean,
+  ): Promise<{ slug: string; state: RunState }[]> {
+    const template = new Project(templateSlug, this.workspace);
+    if (!existsSync(template.pageHtml)) {
+      throw new Error(`"${templateSlug}" has no page.html yet — a series template needs a finished design`);
+    }
+    const series = rootName.trim();
+    if (!series) throw new Error("Series needs a root name");
+    const cleanTopics = topics.map((t) => t.trim()).filter(Boolean);
+    if (!cleanTopics.length) throw new Error("Series needs at least one subject");
+    const templateMeta = template.meta();
+    template.updateMeta({ series }); // the template groups with its children
+
+    const created: { slug: string; state: RunState }[] = [];
+    for (const topic of cleanTopics) {
+      const brief = `${template.brief().trimEnd()}
+
+## This document's subject
+${topic}
+
+This document is part of the "${series}" series. page.html already contains the approved
+layout from the series template — keep its design system and structure; adapt the copy and
+imagery to this subject.
+`;
+      const { dir, slug } = this.createUniqueProject(`${series}-${topic}`, brief);
+      this.copyDesignState(template, dir);
+      new Project(dir, this.workspace).updateMeta({
+        displayName: topic,
+        series,
+        kind: "document",
+        parent: templateSlug,
+        settings: templateMeta.settings,
+      });
+      created.push({ slug, state: "idle" });
+    }
+    this.broadcast({ type: "projects_changed" });
+    if (autoRun) {
+      for (const entry of created) {
+        entry.state = await this.run(
+          entry.slug,
+          "page.html contains the approved series template. Adapt it to this document's subject per brief.md: keep the layout and design system, replace the copy, and update images/prompts.json + regenerate images where the subject calls for different visuals. Then render and review until the piece passes.",
+        );
+      }
+    }
+    return created;
   }
 
   async closeProject(): Promise<void> {
@@ -302,14 +434,22 @@ class Bridge {
     const baseDir = join(this.workspace.projectsDir, baseSlug);
     if (!existsSync(join(baseDir, "brief.md"))) throw new Error(`"${baseSlug}" has no brief.md`);
     const baseBrief = readFileSync(join(baseDir, "brief.md"), "utf8");
+    const baseMeta = new Project(baseDir, this.workspace).meta();
     const created: { slug: string; state: RunState }[] = [];
     for (const direction of directions) {
       if (!direction.label?.trim() || !direction.direction?.trim()) continue;
-      const { slug } = this.workspace.createProject(`${baseSlug}-${direction.label}`, variantBrief(baseBrief, direction));
+      const { dir, slug } = this.createUniqueProject(`${baseSlug}-${direction.label}`, variantBrief(baseBrief, direction));
       const sourcesJson = join(baseDir, "sources.json");
       if (existsSync(sourcesJson)) {
-        writeFileSync(join(this.workspace.projectsDir, slug, "sources.json"), readFileSync(sourcesJson));
+        writeFileSync(join(dir, "sources.json"), readFileSync(sourcesJson));
       }
+      new Project(dir, this.workspace).updateMeta({
+        displayName: direction.label,
+        series: baseMeta.series,
+        kind: "variant",
+        parent: baseSlug,
+        settings: baseMeta.settings,
+      });
       created.push({ slug, state: "idle" });
     }
     if (!created.length) throw new Error("No valid directions provided");
@@ -342,20 +482,16 @@ class Bridge {
       runState: this.project ? this.runState(this.project.slug) : "idle",
       runStates: Object.fromEntries(this.runStates),
       designerModel: `${this.config.designer.provider}/${this.config.designer.model}`,
-      styleFiles: existsSync(this.workspace.stylesDir)
-        ? readdirSync(this.workspace.stylesDir).filter((f) => !f.startsWith("."))
-        : [],
+      styleFiles: listSourceFiles(this.workspace.stylesDir),
     };
-    const allContext = existsSync(this.workspace.contextDir)
-      ? readdirSync(this.workspace.contextDir).filter((f) => !f.startsWith("."))
-      : [];
     const selected = this.project?.selectedSources() ?? null;
-    const contextFiles = allContext.map((name) => ({
-      name,
-      selected: selected === null || selected.includes(name),
+    const contextFiles = listSourceFiles(this.workspace.contextDir).map((f) => ({
+      ...f,
+      name: f.path, // legacy field name kept for the UI
+      selected: selected === null || selected.includes(f.path),
     }));
     if (!this.project) {
-      return { ...base, contextFiles, slug: null, brief: "", rounds: [], images: [], editable: [], hasPage: false, hasProof: false };
+      return { ...base, contextFiles, slug: null, meta: null, brief: "", rounds: [], images: [], editable: [], hasPage: false, hasProof: false };
     }
     const rounds = readdirSync(this.project.reviewDir)
       .map((f) => /^round-(\d+)\.json$/.exec(f)?.[1])
@@ -365,12 +501,14 @@ class Bridge {
       .map((n) => ({
         round: n,
         hasProof: existsSync(join(this.project!.reviewDir, `round-${n}.pdf`)),
+        hasHtml: existsSync(this.project!.roundHtml(n)), // branchable?
         ...JSON.parse(readFileSync(join(this.project!.reviewDir, `round-${n}.json`), "utf8")),
       }));
     return {
       ...base,
       contextFiles,
       slug: this.project.slug,
+      meta: this.project.meta(),
       brief: existsSync(join(this.project.dir, "brief.md")) ? this.project.brief() : "",
       rounds,
       images: listImageSlots(this.project),
@@ -486,7 +624,7 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
       if (req.method === "POST" && url.pathname === "/api/project/new") {
         const body = await readBody(req);
         if (!body.name) return json(res, 400, { error: "name required" });
-        await bridge.createProject(body.name, body.brief);
+        await bridge.createProject(body.name, body.brief, body.meta);
         return json(res, 200, { ok: true });
       }
       if (req.method === "POST" && url.pathname === "/api/project/close") {
@@ -518,12 +656,94 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
       if (req.method === "POST" && url.pathname === "/api/sources/upload") {
         const body = await readBody(req);
         const kind = body.kind === "style" ? "style" : "context";
-        const name = String(body.name ?? "").split(/[/\\]/).pop();
-        if (!name || !body.dataBase64) return json(res, 400, { error: "name and dataBase64 required" });
+        // name may carry a relative folder path (drag-dropped folders keep their structure)
+        const rel = safeRelPath(String(body.name ?? ""));
+        if (!body.dataBase64) return json(res, 400, { error: "name and dataBase64 required" });
         const dir = kind === "style" ? bridge.workspace.stylesDir : bridge.workspace.contextDir;
-        writeFileSync(join(dir, name), Buffer.from(String(body.dataBase64), "base64"));
+        const target = join(dir, rel);
+        mkdirSync(dirname(target), { recursive: true });
+        writeFileSync(target, Buffer.from(String(body.dataBase64), "base64"));
         bridge.broadcast({ type: "files_changed", project: bridge.project?.slug });
-        return json(res, 200, { ok: true, path: join(dir, name) });
+        return json(res, 200, { ok: true, path: target });
+      }
+      // Serve a workspace source file (context/ or styles/) — used for image thumbnails.
+      if (req.method === "GET" && url.pathname === "/api/source/file") {
+        const kind = url.searchParams.get("kind") === "style" ? "style" : "context";
+        const rel = safeRelPath(url.searchParams.get("path") ?? "");
+        const file = join(kind === "style" ? bridge.workspace.stylesDir : bridge.workspace.contextDir, rel);
+        if (!existsSync(file) || !statSync(file).isFile()) return json(res, 404, { error: "not found" });
+        res.writeHead(200, {
+          "content-type": MIME[extname(file).toLowerCase()] ?? "application/octet-stream",
+          "access-control-allow-origin": "*",
+          "cache-control": "no-store",
+        });
+        return res.end(readFileSync(file));
+      }
+      if (req.method === "POST" && url.pathname === "/api/sources/delete") {
+        const body = await readBody(req);
+        const kind = body.kind === "style" ? "style" : "context";
+        const rel = safeRelPath(String(body.path ?? ""));
+        const file = join(kind === "style" ? bridge.workspace.stylesDir : bridge.workspace.contextDir, rel);
+        if (!existsSync(file) || !statSync(file).isFile()) return json(res, 404, { error: "not found" });
+        rmSync(file);
+        bridge.broadcast({ type: "files_changed", project: bridge.project?.slug });
+        return json(res, 200, { ok: true });
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/meta") {
+        const body = await readBody(req);
+        const project = bridge.requireProject();
+        const meta = project.updateMeta({
+          ...(body.displayName !== undefined ? { displayName: String(body.displayName) } : {}),
+          ...(body.series !== undefined ? { series: body.series === null ? null : String(body.series) } : {}),
+          ...(body.settings ? { settings: body.settings } : {}),
+        });
+        bridge.broadcast({ type: "files_changed", project: project.slug });
+        bridge.broadcast({ type: "projects_changed" });
+        return json(res, 200, { ok: true, meta });
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/project/fork") {
+        const body = await readBody(req);
+        if (!body.slug) return json(res, 400, { error: "slug required" });
+        const slug = await bridge.forkProject(String(body.slug), {
+          round: body.round != null ? Number(body.round) : undefined,
+          name: body.name ? String(body.name) : undefined,
+        });
+        if (body.open !== false) await bridge.openProject(slug);
+        return json(res, 200, { ok: true, slug });
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/series") {
+        const body = await readBody(req);
+        if (!body.slug || !body.rootName || !Array.isArray(body.topics)) {
+          return json(res, 400, { error: "slug, rootName and topics[] required" });
+        }
+        const created = await bridge.createSeries(
+          String(body.slug),
+          String(body.rootName),
+          body.topics.map(String),
+          body.run !== false,
+        );
+        return json(res, 200, { ok: true, created });
+      }
+
+      if (url.pathname === "/api/element/style") {
+        const project = bridge.requireProject();
+        if (req.method === "POST") {
+          const body = await readBody(req);
+          if (!body.pcId) return json(res, 400, { error: "pcId required" });
+          setElementStyle(project, String(body.pcId), {
+            translateX: body.translateX !== undefined ? Number(body.translateX) : undefined,
+            translateY: body.translateY !== undefined ? Number(body.translateY) : undefined,
+            marginTop: body.marginTop === null ? null : body.marginTop !== undefined ? Number(body.marginTop) : undefined,
+          });
+          bridge.broadcast({ type: "files_changed", project: project.slug });
+          return json(res, 200, { ok: true });
+        }
+        const pcId = url.searchParams.get("pcId");
+        if (!pcId) return json(res, 400, { error: "pcId required" });
+        return json(res, 200, getElementStyle(project, pcId));
       }
 
       if (req.method === "POST" && url.pathname === "/api/copy") {

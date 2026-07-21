@@ -113,6 +113,55 @@ server.tool(
 );
 
 server.tool(
+  "branch_project",
+  "Branch a project to explore an alternative — optionally from a specific review round's archived state (an 'alternate round N+1'). The branch copies the page, images and source selection; lineage is recorded.",
+  {
+    slug: z.string(),
+    round: z.number().int().optional().describe("review round to branch from; omit = current state"),
+    name: z.string().optional().describe("name for the branch project"),
+  },
+  async ({ slug, round, name }) => {
+    const payload = await api("/api/project/fork", { slug, round, name, open: false });
+    return text(`Branched "${slug}"${round != null ? ` from round ${round}` : ""} into "${payload.slug}". Run it with run_project.`);
+  },
+);
+
+server.tool(
+  "create_series",
+  "Fan an approved project out into a document series ('6 like this for topics A-Z'): each subject becomes a sibling project that keeps the template's layout and adapts copy/imagery. Runs queue automatically unless run=false.",
+  {
+    slug: z.string().describe("template project — must have a finished page.html"),
+    rootName: z.string().describe("series name; drives grouping and export filenames"),
+    topics: z.array(z.string()).min(1).describe("one subject per document"),
+    run: z.boolean().optional().describe("queue agent runs immediately (default true)"),
+  },
+  async ({ slug, rootName, topics, run }) => {
+    const { created } = await api("/api/series", { slug, rootName, topics, run: run !== false });
+    return text(created.map((c: { slug: string; state: string }) => `${c.slug}: ${c.state}`).join("\n"));
+  },
+);
+
+server.tool(
+  "set_project_meta",
+  "Update the open project's metadata: display name, series, or page settings (pageSize/orientation/pages — the page count is mechanically enforced by the reviewer).",
+  {
+    displayName: z.string().optional(),
+    series: z.string().nullable().optional(),
+    settings: z
+      .object({
+        pageSize: z.string().optional(),
+        orientation: z.enum(["portrait", "landscape"]).optional(),
+        pages: z.number().int().min(1).max(24).optional(),
+      })
+      .optional(),
+  },
+  async (patch) => {
+    const { meta } = await api("/api/meta", patch);
+    return text(meta);
+  },
+);
+
+server.tool(
   "open_project",
   "Open a project in the presscheck UI (switches what the human sees; not required for run_project).",
   { slug: z.string() },

@@ -1,21 +1,16 @@
-import { Download, FolderOpen, Play, Plus, RefreshCw, Timer, X } from "lucide-react";
+import { Download, Play, RefreshCw, Timer } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentPane, type FeedItem } from "./components/AgentPane";
 import { HomeScreen } from "./components/HomeScreen";
 import { LeftPane } from "./components/LeftPane";
+import { LibrarySheet } from "./components/LibrarySheet";
 import { NewProjectDialog } from "./components/NewProjectDialog";
 import { PreviewPane } from "./components/PreviewPane";
+import { SeriesDialog } from "./components/SeriesDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { VariantsDialog } from "./components/VariantsDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   BrowserEngineClient,
   type EngineEvent,
@@ -182,37 +177,20 @@ export function App() {
     <div className="flex h-screen flex-col bg-background text-foreground">
       <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
         <span className="text-sm font-semibold tracking-tight">presscheck</span>
-        <Select
-          value={project.slug}
-          onValueChange={(value) => {
-            if (value === "__new") return setNewProjectOpen(true);
-            if (value === "__workspace") return void client.chooseWorkspace();
-            if (value === "__close") return void client.closeProject();
-            const target = projects.find((p) => p.slug === value);
-            if (target && !target.current) void client.openProject(target.dir);
-          }}
-        >
-          <SelectTrigger size="sm" className="w-52 border-none shadow-none" title={project.workspaceRoot}>
-            <SelectValue placeholder="no project" />
-          </SelectTrigger>
-          <SelectContent>
-            {projects.map((p) => (
-              <SelectItem key={p.slug} value={p.slug} disabled={!p.hasBrief}>
-                {p.slug}
-                {p.runState !== "idle" && <span className="text-muted-foreground"> · {p.runState}</span>}
-              </SelectItem>
-            ))}
-            <SelectItem value="__new">
-              <Plus className="size-3.5" /> New project…
-            </SelectItem>
-            <SelectItem value="__close">
-              <X className="size-3.5" /> Close project
-            </SelectItem>
-            <SelectItem value="__workspace">
-              <FolderOpen className="size-3.5" /> Change workspace…
-            </SelectItem>
-          </SelectContent>
-        </Select>
+        <LibrarySheet
+          client={client}
+          projects={projects}
+          currentSlug={project.slug}
+          currentName={project.meta?.displayName ?? project.slug}
+          workspaceRoot={project.workspaceRoot}
+          onNewProject={() => setNewProjectOpen(true)}
+          onError={(message) => setFeed((f) => [...f, { kind: "error", message, at: Date.now() }])}
+        />
+        {project.meta?.series && (
+          <Badge variant="outline" className="max-w-40 truncate text-xs" title={`Series: ${project.meta.series}`}>
+            {project.meta.series}
+          </Badge>
+        )}
         {running && <Badge variant="secondary" className="animate-pulse">running</Badge>}
         {currentRunState === "queued" && (
           <Badge variant="outline">
@@ -225,6 +203,12 @@ export function App() {
           <Play data-slot="icon" /> Run
         </Button>
         <VariantsDialog client={client} slug={project.slug} />
+        <SeriesDialog
+          client={client}
+          slug={project.slug}
+          defaultRootName={project.meta?.series ?? project.meta?.displayName ?? project.slug}
+          hasPage={project.hasPage}
+        />
         <Button size="sm" variant="outline" disabled={!project.hasPage} onClick={() => void actions.render()}>
           <RefreshCw data-slot="icon" /> Re-render
         </Button>
@@ -244,7 +228,7 @@ export function App() {
         <NewProjectDialog client={client} open={newProjectOpen} onOpenChange={setNewProjectOpen} />
       </header>
       <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)_340px] grid-rows-1 overflow-hidden">
-        <LeftPane project={project} client={client} viewRound={viewRound} onViewRound={setViewRound} />
+        <LeftPane project={project} client={client} cacheKey={cacheKey} viewRound={viewRound} onViewRound={setViewRound} />
         <PreviewPane project={project} client={client} cacheKey={cacheKey} actions={actions} viewRound={viewRound} onViewRound={setViewRound} />
         <AgentPane feed={feed} running={running} onChat={(t) => void actions.chat(t)} />
       </div>

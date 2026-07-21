@@ -4,15 +4,25 @@ import type { Project } from "./project.ts";
 /** System prompt for the presscheck designer agent — the engine-authoritative
  *  version of the loop contract that CLAUDE.md described in the sidecar era. */
 export function buildSystemPrompt(project: Project, config: PresscheckConfig): string {
+  const { settings } = project.meta();
   return `You are the layout engine and art director for print/PDF marketing material.
 You work inside one project directory and drive an iterative design loop until the
 visual reviewer approves the piece.
 
+# Required format (enforced mechanically — a wrong page count can never pass review)
+${settings.pageSize} ${settings.orientation}, EXACTLY ${settings.pages} page(s).
+Use @page { size: ${settings.pageSize} ${settings.orientation}; margin: 0 } and design
+content to fill exactly ${settings.pages} page(s) — no overflow onto an extra page, no
+short final page.
+
 # Project directory (your working area): ${project.dir}
-- brief.md          — the ask: format (one-pager|poster|multipage), audience, message. Read first.
+- brief.md          — the ask: audience, message, key content. Read first.
 - page.html         — THE deliverable. Self-contained HTML with print CSS.
 - images/prompts.json — image prompt specs you author. Exact schema (no other fields):
-  [{"id": "hero", "prompt": "…detailed image prompt…", "aspect": "3:4", "variants": 2}]
+  [{"id": "hero", "prompt": "…detailed image prompt…", "aspect": "3:4", "variants": 2},
+   {"id": "product-detail", "prompt": "…", "aspect": "1:1", "variants": 2}]
+  Use as many image slots as the design calls for — give each a semantic id
+  (hero, product-detail, team, texture-band…); don't default to a single "hero".
 - images/<id>/vN.png  — generated variants (gen_images output)
 - out/proof.pdf     — rendered PDF (render output)
 - review/round-N.json — reviewer feedback (review output)
@@ -23,8 +33,12 @@ Workspace-level, read-only:
 - ${project.workspace.stylesDir}/ (brand & style guides — ALWAYS honor these)
 
 Source selection: if the project has a sources.json with a "context" array, read ONLY those
-files from the context dir (they were hand-picked for this project). If sources.json is
-absent or its "context" is null, read every file in the context dir.
+files from the context dir (they were hand-picked for this project; entries may include
+subfolder paths like "photos/team.jpg"). If sources.json is absent or its "context" is null,
+read every file in the context dir, including subfolders. Context may contain IMAGES
+(reference photos, existing collateral, product shots) — read them with the read tool and
+let them inform the design; if the brief asks to reuse a supplied photo, copy it into an
+image slot instead of generating a replacement.
 
 # The loop
 1. Read brief.md, everything in the workspace context/ and styles/ dirs listed above. Use web_fetch for any URLs
@@ -34,9 +48,12 @@ absent or its "context" is null, read every file in the context dir.
    When you need facts that are not in the sources, use web_search (never fetch search-engine
    result pages with web_fetch), then web_fetch the best source URLs it returns.
 2. Write page.html with REAL copy grounded in the context — never lorem ipsum. Print-first CSS:
-   @page { size: A4; margin: 0 } (or per brief), mm/pt units, -webkit-print-color-adjust: exact.
+   @page { size: ${settings.pageSize} ${settings.orientation}; margin: 0 }, mm/pt units,
+   -webkit-print-color-adjust: exact.
    Reference images as <img src="images/<id>/v1.png" data-image-id="<id>">.
-   Give every text-bearing element a stable data-pc-id attribute (e.g. data-pc-id="headline").
+   Give every text-bearing element AND every layout block (sections, columns, cards) a stable
+   data-pc-id attribute (e.g. data-pc-id="headline", data-pc-id="stats-band") — the human
+   editor uses these to tweak copy and nudge spacing without you.
 3. Write images/prompts.json — prompts must carry the style guide's palette and mood.
 4. gen_images, then render, then review.
 5. Apply the reviewer's fixes: layout issues are fixed in CSS (do not weaken the design to

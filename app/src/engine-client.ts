@@ -15,6 +15,44 @@ export interface RoundInfo {
   issues: ReviewIssue[];
   notes?: string;
   hasProof: boolean;
+  hasHtml: boolean; // archived page state exists — the round can be branched
+}
+
+export interface PageSettings {
+  pageSize: string;
+  orientation: "portrait" | "landscape";
+  pages: number;
+}
+
+export interface ProjectMeta {
+  displayName: string;
+  series: string | null;
+  kind: "document" | "variant";
+  parent: string | null;
+  forkedFromRound: number | null;
+  settings: PageSettings;
+}
+
+export type SourceKind = "text" | "image" | "pdf" | "other";
+
+export interface ContextFile {
+  path: string;
+  name: string; // same as path (legacy field)
+  kind: SourceKind;
+  size: number;
+  selected: boolean;
+}
+
+export interface StyleFile {
+  path: string;
+  kind: SourceKind;
+  size: number;
+}
+
+export interface ElementNudge {
+  translateX: number;
+  translateY: number;
+  marginTop: number | null;
 }
 
 export interface ImageSlot {
@@ -26,9 +64,10 @@ export interface ImageSlot {
 export interface ProjectState {
   workspaceRoot: string;
   slug: string | null;
+  meta: ProjectMeta | null;
   brief: string;
-  contextFiles: { name: string; selected: boolean }[];
-  styleFiles: string[];
+  contextFiles: ContextFile[];
+  styleFiles: StyleFile[];
   rounds: RoundInfo[];
   images: ImageSlot[];
   editable: { pcId: string; text: string }[];
@@ -77,8 +116,10 @@ export interface ProjectListing {
   hasBrief: boolean;
   current: boolean;
   rounds: number;
+  lastVerdict: "pass" | "revise" | null;
   hasProof: boolean;
   runState: RunState;
+  meta: ProjectMeta;
 }
 
 /** Injected by the Electron preload script; absent in browser mode. */
@@ -103,7 +144,16 @@ export interface EngineClient {
   suggestVariants(slug: string, count: number): Promise<{ label: string; direction: string }[]>;
   createVariants(slug: string, directions: { label: string; direction: string }[]): Promise<void>;
   selectSources(files: string[] | null): Promise<void>;
+  /** name may include a relative folder path ("photos/team.jpg") — folders are created. */
   uploadSource(kind: "context" | "style", name: string, dataBase64: string): Promise<void>;
+  deleteSource(kind: "context" | "style", path: string): Promise<void>;
+  sourceFileUrl(kind: "context" | "style", path: string, cacheKey: number): string;
+  updateMeta(patch: { displayName?: string; series?: string | null; settings?: Partial<PageSettings> }): Promise<void>;
+  /** Branch a project; round-specific when round is given. Opens the new project. */
+  forkProject(slug: string, round?: number, name?: string): Promise<string>;
+  createSeries(slug: string, rootName: string, topics: string[], run: boolean): Promise<{ slug: string; state: RunState }[]>;
+  setElementStyle(pcId: string, style: { translateX?: number; translateY?: number; marginTop?: number | null }): Promise<void>;
+  getElementStyle(pcId: string): Promise<ElementNudge>;
   /** Pick a workspace dir (native dialog in Electron, path prompt in browser) and switch to it. */
   chooseWorkspace(): Promise<boolean>;
   /** Returns the saved path (Electron printToPDF) or null (browser fallback opened the proof). */
@@ -204,6 +254,45 @@ export class BrowserEngineClient implements EngineClient {
   selectSources(files: string[] | null) { return post("/api/sources/select", { files }); }
   uploadSource(kind: "context" | "style", name: string, dataBase64: string) {
     return post("/api/sources/upload", { kind, name, dataBase64 });
+  }
+  deleteSource(kind: "context" | "style", path: string) { return post("/api/sources/delete", { kind, path }); }
+  sourceFileUrl(kind: "context" | "style", path: string, cacheKey: number): string {
+    return `/api/source/file?kind=${kind}&path=${encodeURIComponent(path)}&k=${cacheKey}`;
+  }
+  updateMeta(patch: { displayName?: string; series?: string | null; settings?: Partial<PageSettings> }) {
+    return post("/api/meta", patch);
+  }
+
+  async forkProject(slug: string, round?: number, name?: string): Promise<string> {
+    const res = await fetch("/api/project/fork", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ slug, round, name }),
+    });
+    const payload = await res.json();
+    if (!res.ok) throw new Error(payload.error ?? `fork: HTTP ${res.status}`);
+    return payload.slug;
+  }
+
+  async createSeries(slug: string, rootName: string, topics: string[], run: boolean) {
+    const res = await fetch("/api/series", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ slug, rootName, topics, run }),
+    });
+    const payload = await res.json();
+    if (!res.ok) throw new Error(payload.error ?? `series: HTTP ${res.status}`);
+    return payload.created;
+  }
+
+  setElementStyle(pcId: string, style: { translateX?: number; translateY?: number; marginTop?: number | null }) {
+    return post("/api/element/style", { pcId, ...style });
+  }
+
+  async getElementStyle(pcId: string): Promise<ElementNudge> {
+    const res = await fetch(`/api/element/style?pcId=${encodeURIComponent(pcId)}`);
+    if (!res.ok) throw new Error(`element style: HTTP ${res.status}`);
+    return res.json();
   }
 
   async chooseWorkspace(): Promise<boolean> {

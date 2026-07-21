@@ -98,11 +98,16 @@ async function exportPdf(targetPath?: string): Promise<string | null> {
   const state = await (await fetch(`${BRIDGE_URL}/api/project`)).json();
   if (!state.hasPage) throw new Error("Nothing to export — no page.html yet");
 
+  // Filename: "<series> — <display name>.pdf" when the document belongs to a series.
+  const meta = state.meta as { displayName?: string; series?: string | null } | null;
+  const nice = meta?.series ? `${meta.series} — ${meta.displayName ?? state.slug}` : (meta?.displayName ?? state.slug);
+  const fileSafe = nice.replace(/[/\\:*?"<>|]+/g, "-").replace(/\s+/g, " ").trim() || state.slug;
+
   let outPath = targetPath;
   if (!outPath) {
     const picked = await dialog.showSaveDialog(mainWindow!, {
       title: "Export PDF",
-      defaultPath: join(app.getPath("documents"), `${state.slug}.pdf`),
+      defaultPath: join(app.getPath("documents"), `${fileSafe}.pdf`),
       filters: [{ name: "PDF", extensions: ["pdf"] }],
     });
     if (picked.canceled || !picked.filePath) return null;

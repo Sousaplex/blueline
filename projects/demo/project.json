@@ -1,0 +1,12 @@
+{
+  "displayName": "Wholesale One-Pager",
+  "series": null,
+  "kind": "document",
+  "parent": null,
+  "forkedFromRound": null,
+  "settings": {
+    "pageSize": "A4",
+    "orientation": "portrait",
+    "pages": 1
+  }
+}

@@ -1,4 +1,4 @@
-import { CheckCircle2, FileText, FolderOpen, Loader2, Play, Plus, Timer, Trash2 } from "lucide-react";
+import { FolderOpen, Plus } from "lucide-react";
 import { useState } from "react";
 import {
   AlertDialog,
@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import type { EngineClient, ProjectListing } from "../engine-client";
 import { NewProjectDialog } from "./NewProjectDialog";
+import { ProjectLibrary } from "./ProjectLibrary";
 
 export function HomeScreen({
   client,
@@ -48,7 +49,7 @@ export function HomeScreen({
         </Button>
       </header>
 
-      <main className="flex-1 overflow-y-auto p-8">
+      <main className="mx-auto flex w-full max-w-2xl min-h-0 flex-1 flex-col p-8">
         {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
         {projects.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3">
@@ -58,72 +59,12 @@ export function HomeScreen({
             </Button>
           </div>
         ) : (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-4">
-            {projects.map((p) => (
-              <div
-                key={p.slug}
-                className="group flex cursor-pointer flex-col gap-2 rounded-lg border p-4 transition-colors hover:border-primary/40 hover:bg-accent/40"
-                onClick={() => p.hasBrief && act(() => client.openProject(p.dir))}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <span className="truncate font-medium">{p.slug}</span>
-                  <div className="flex items-center gap-1">
-                    {p.runState === "idle" && p.hasBrief && (
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        className="opacity-0 transition-opacity group-hover:opacity-100"
-                        aria-label={`Run ${p.slug}`}
-                        title="Run the design loop"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          act(() => client.run(p.slug));
-                        }}
-                      >
-                        <Play />
-                      </Button>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      className="opacity-0 transition-opacity group-hover:opacity-100"
-                      aria-label={`Delete ${p.slug}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setPendingDelete(p.slug);
-                      }}
-                    >
-                      <Trash2 className="text-destructive" />
-                    </Button>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                  {p.runState === "running" && (
-                    <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-                      <Loader2 className="size-3 animate-spin" /> running
-                    </span>
-                  )}
-                  {p.runState === "queued" && (
-                    <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
-                      <Timer className="size-3" /> queued
-                    </span>
-                  )}
-                  {!p.hasBrief && <span className="text-amber-600 dark:text-amber-400">no brief.md</span>}
-                  {p.hasBrief && p.runState === "idle" && (
-                    <span className="flex items-center gap-1">
-                      <FileText className="size-3" /> brief
-                    </span>
-                  )}
-                  {p.rounds > 0 && <span>{p.rounds} round{p.rounds === 1 ? "" : "s"}</span>}
-                  {p.hasProof && (
-                    <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-                      <CheckCircle2 className="size-3" /> proof
-                    </span>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
+          <ProjectLibrary
+            projects={projects}
+            onOpen={(p) => act(() => client.openProject(p.dir))}
+            onRun={(slug) => act(() => client.run(slug))}
+            onDelete={setPendingDelete}
+          />
         )}
       </main>
 
