@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Code2, History, Loader2, Move, RefreshCw, Save, Type } from "lucide-react";
+import { ChevronLeft, ChevronRight, Code2, Grid3x3, History, Loader2, Move, RefreshCw, Save, Type } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -56,6 +56,9 @@ export function PreviewPane({
     return m === "live" || m === "code" ? m : "proof";
   });
   const [editTool, setEditTool] = useState<EditTool>(() => (initialParams.current.get("tool") === "nudge" ? "nudge" : "text"));
+  const [showGrid, setShowGrid] = useState(() => initialParams.current.get("grid") === "1");
+  const showGridRef = useRef(showGrid);
+  showGridRef.current = showGrid;
   const [pageCount, setPageCount] = useState(0);
   const [page, setPage] = useState(0);
   const [dirty, setDirty] = useState(false);
@@ -112,6 +115,25 @@ export function PreviewPane({
   const clearSelectionsRef = useRef(clearSelections);
   clearSelectionsRef.current = clearSelections;
 
+  // 5mm layout grid overlay in the live iframe (snap uses it too).
+  const syncGrid = () => {
+    const doc = iframeRef.current?.contentDocument;
+    if (!doc?.body) return;
+    const existing = doc.getElementById("pc-grid");
+    if (showGridRef.current && !existing) {
+      const g = doc.createElement("div");
+      g.id = "pc-grid";
+      g.style.cssText =
+        "position:fixed;inset:0;pointer-events:none;z-index:2147483645;" +
+        "background-image:repeating-linear-gradient(to right, rgba(59,130,246,.18) 0 0.2mm, transparent 0.2mm 5mm)," +
+        "repeating-linear-gradient(to bottom, rgba(59,130,246,.18) 0 0.2mm, transparent 0.2mm 5mm);";
+      doc.body.appendChild(g);
+    } else if (!showGridRef.current && existing) {
+      existing.remove();
+    }
+  };
+  useEffect(syncGrid, [showGrid]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const roundInfo = viewRound != null ? project.rounds.find((r) => r.round === viewRound) : undefined;
   const roundHasProof = roundInfo?.hasProof ?? false;
   const proofRound = viewRound != null && roundHasProof ? viewRound : undefined;
@@ -154,6 +176,7 @@ export function PreviewPane({
   const armLiveEditing = () => {
     const doc = iframeRef.current?.contentDocument;
     if (!doc) return;
+    syncGrid(); // iframe reloads drop injected overlays — restore the grid if it's on
     const style = doc.createElement("style");
     style.textContent = `
       [data-pc-id]:hover { outline: 2px dashed rgba(120,120,255,.7); outline-offset: 2px; cursor: text; }
@@ -190,6 +213,36 @@ export function PreviewPane({
     const clearDropMarkers = () =>
       doc.querySelectorAll(".pc-drop-before, .pc-drop-after").forEach((el) => el.classList.remove("pc-drop-before", "pc-drop-after"));
 
+    // Smart-align guide lines (magenta) shown while a drag snaps to sibling edges/centers.
+    const guides = {
+      show(vXs: number[], hYs: number[]) {
+        let g = doc.getElementById("pc-guides");
+        if (!g) {
+          g = doc.createElement("div");
+          g.id = "pc-guides";
+          g.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:2147483647;";
+          doc.body.appendChild(g);
+        }
+        g.innerHTML = "";
+        for (const x of vXs) {
+          const l = doc.createElement("div");
+          l.style.cssText = `position:absolute;left:${x}px;top:0;bottom:0;width:1px;background:#ec4899;`;
+          g.appendChild(l);
+        }
+        for (const y of hYs) {
+          const l = doc.createElement("div");
+          l.style.cssText = `position:absolute;top:${y}px;left:0;right:0;height:1px;background:#ec4899;`;
+          g.appendChild(l);
+        }
+      },
+      clear() {
+        doc.getElementById("pc-guides")?.remove();
+      },
+    };
+    const SNAP_PX = 6; // smart-align capture distance
+    const GRID_MM = 5;
+    const GRID_SNAP_MM = 1.2; // grid capture distance (only when the grid is shown)
+
     doc.querySelectorAll<HTMLElement>("[data-pc-id]").forEach((el) => {
       el.addEventListener("click", (ev) => {
         ev.stopPropagation(); // innermost block wins — never bubble edits to containers
@@ -223,14 +276,35 @@ export function PreviewPane({
         void actions.updateCopy(pcId, text).then(() => setDirty(true));
       });
 
-      // Nudge-mode drag: plain drag = translate; ⌥-drag = reorder in document flow.
-      let drag: { x: number; y: number; startX: number; startY: number; reorder: boolean; target: HTMLElement | null; after: boolean } | null = null;
+      // Nudge-mode drag: plain drag = translate (with smart-align + grid snap);
+      // ⌥-drag = reorder in document flow.
+      let drag: {
+        x: number; y: number; startX: number; startY: number;
+        reorder: boolean; target: HTMLElement | null; after: boolean;
+        baseRect?: DOMRect; alignV?: number[]; alignH?: number[];
+      } | null = null;
       el.addEventListener("mousedown", (ev) => {
         const n = nudgeRef.current;
         if (editToolRef.current !== "nudge" || n?.pcId !== el.getAttribute("data-pc-id")) return;
         ev.preventDefault();
         drag = { x: ev.clientX, y: ev.clientY, startX: n.x, startY: n.y, reorder: ev.altKey, target: null, after: false };
-        if (drag.reorder) el.classList.add("pc-dragging");
+        if (drag.reorder) {
+          el.classList.add("pc-dragging");
+        } else {
+          // Collect the edges/centers of every other block once — smart-align targets.
+          drag.baseRect = el.getBoundingClientRect();
+          const v: number[] = [];
+          const h: number[] = [];
+          doc.querySelectorAll<HTMLElement>("[data-pc-id], img[data-image-id]").forEach((other) => {
+            if (other === el || el.contains(other) || other.contains(el)) return;
+            const r = other.getBoundingClientRect();
+            if (!r.width || !r.height) return;
+            v.push(r.left, r.right, r.left + r.width / 2);
+            h.push(r.top, r.bottom, r.top + r.height / 2);
+          });
+          drag.alignV = v;
+          drag.alignH = h;
+        }
       });
       doc.addEventListener("mousemove", (ev) => {
         if (!drag) return;
@@ -249,11 +323,39 @@ export function PreviewPane({
           }
           return;
         }
-        applyNudgeRef.current({
-          ...n,
-          x: drag.startX + (ev.clientX - drag.x) * PX_TO_MM,
-          y: drag.startY + (ev.clientY - drag.y) * PX_TO_MM,
-        });
+        let dxPx = ev.clientX - drag.x;
+        let dyPx = ev.clientY - drag.y;
+        const vLines: number[] = [];
+        const hLines: number[] = [];
+        if (drag.baseRect && drag.alignV && drag.alignH) {
+          const r = drag.baseRect;
+          let bestX: { adj: number; line: number } | null = null;
+          for (const edge of [r.left + dxPx, r.right + dxPx, r.left + r.width / 2 + dxPx]) {
+            for (const t of drag.alignV) {
+              const adj = t - edge;
+              if (Math.abs(adj) <= SNAP_PX && (!bestX || Math.abs(adj) < Math.abs(bestX.adj))) bestX = { adj, line: t };
+            }
+          }
+          let bestY: { adj: number; line: number } | null = null;
+          for (const edge of [r.top + dyPx, r.bottom + dyPx, r.top + r.height / 2 + dyPx]) {
+            for (const t of drag.alignH) {
+              const adj = t - edge;
+              if (Math.abs(adj) <= SNAP_PX && (!bestY || Math.abs(adj) < Math.abs(bestY.adj))) bestY = { adj, line: t };
+            }
+          }
+          if (bestX) { dxPx += bestX.adj; vLines.push(bestX.line); }
+          if (bestY) { dyPx += bestY.adj; hLines.push(bestY.line); }
+          if (vLines.length || hLines.length) guides.show(vLines, hLines);
+          else guides.clear();
+        }
+        let xmm = drag.startX + dxPx * PX_TO_MM;
+        let ymm = drag.startY + dyPx * PX_TO_MM;
+        // Grid snap (only when the grid is visible, and only on axes smart-align didn't claim).
+        if (showGridRef.current) {
+          if (!vLines.length) { const s = Math.round(xmm / GRID_MM) * GRID_MM; if (Math.abs(s - xmm) <= GRID_SNAP_MM) xmm = s; }
+          if (!hLines.length) { const s = Math.round(ymm / GRID_MM) * GRID_MM; if (Math.abs(s - ymm) <= GRID_SNAP_MM) ymm = s; }
+        }
+        applyNudgeRef.current({ ...n, x: xmm, y: ymm });
       });
       doc.addEventListener("mouseup", () => {
         if (!drag) return;
@@ -261,6 +363,7 @@ export function PreviewPane({
         drag = null;
         el.classList.remove("pc-dragging");
         clearDropMarkers();
+        guides.clear();
         if (d.reorder && d.target) {
           const id = el.getAttribute("data-pc-id")!;
           const beforeId = d.target.getAttribute("data-pc-id")!;
@@ -398,6 +501,18 @@ export function PreviewPane({
               </TabsTrigger>
             </TabsList>
           </Tabs>
+        )}
+
+        {mode === "live" && (
+          <Button
+            size="sm"
+            variant={showGrid ? "secondary" : "ghost"}
+            className="h-8 text-xs"
+            title="5mm grid — drags snap to it (smart-align to neighbors always on)"
+            onClick={() => setShowGrid(!showGrid)}
+          >
+            <Grid3x3 data-slot="icon" /> Grid
+          </Button>
         )}
 
         {mode === "code" && (

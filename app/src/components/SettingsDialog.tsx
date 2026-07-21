@@ -1,4 +1,4 @@
-import { Settings } from "lucide-react";
+import { Check, KeyRound, Settings } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,7 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import type { EngineClient, EngineSettings } from "../engine-client";
+import type { EngineClient, EngineSettings, SetupState } from "../engine-client";
 
 export function SettingsDialog({ client }: { client: EngineClient }) {
   const [open, setOpen] = useState(false);
@@ -32,11 +32,13 @@ export function SettingsDialog({ client }: { client: EngineClient }) {
   const [provider, setProvider] = useState("");
   const [model, setModel] = useState("");
   const [thinking, setThinking] = useState("medium");
-  const [apiKeyEnv, setApiKeyEnv] = useState("");
   const [reviewerModel, setReviewerModel] = useState("");
   const [maxRounds, setMaxRounds] = useState(6);
   const [imagesModel, setImagesModel] = useState("");
   const [variantsPerPrompt, setVariantsPerPrompt] = useState(2);
+  const [setup, setSetup] = useState<SetupState | null>(null);
+  const [geminiKey, setGeminiKey] = useState("");
+  const [moonshotKey, setMoonshotKey] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -48,13 +50,15 @@ export function SettingsDialog({ client }: { client: EngineClient }) {
         setProvider(s.config.designer.provider);
         setModel(s.config.designer.model);
         setThinking(s.config.designer.thinkingLevel ?? "medium");
-        setApiKeyEnv(s.config.designer.apiKeyEnv ?? "");
         setReviewerModel(s.config.reviewer.model);
         setMaxRounds(s.config.reviewer.maxRounds);
         setImagesModel(s.config.images.model);
         setVariantsPerPrompt(s.config.images.variantsPerPrompt);
       })
       .catch((e) => setError(String(e)));
+    setGeminiKey("");
+    setMoonshotKey("");
+    void client.getSetup().then(setSetup).catch(() => setSetup(null));
   }, [open, client]);
 
   const providerModels = settings?.registry.find((p) => p.id === provider)?.models ?? [];
@@ -64,8 +68,12 @@ export function SettingsDialog({ client }: { client: EngineClient }) {
     setSaving(true);
     setError(null);
     try {
+      const keys: { GEMINI_API_KEY?: string; MOONSHOT_API_KEY?: string } = {};
+      if (geminiKey.trim()) keys.GEMINI_API_KEY = geminiKey.trim();
+      if (moonshotKey.trim()) keys.MOONSHOT_API_KEY = moonshotKey.trim();
+      if (Object.keys(keys).length) await client.saveKeys(keys);
       await client.updateSettings({
-        designer: { provider, model, thinkingLevel: thinking, apiKeyEnv: apiKeyEnv || undefined },
+        designer: { provider, model, thinkingLevel: thinking }, // apiKeyEnv is derived from the provider engine-side
         reviewer: { model: reviewerModel, maxRounds },
         images: { model: imagesModel, variantsPerPrompt },
       });
@@ -138,9 +146,45 @@ export function SettingsDialog({ client }: { client: EngineClient }) {
                     </SelectContent>
                   </Select>
                 </div>
+              </div>
+            </section>
+
+            <Separator />
+
+            <section className="space-y-3">
+              <h4 className="flex items-center gap-1.5 text-sm font-medium">
+                <KeyRound className="size-3.5" /> API keys
+              </h4>
+              <p className="text-xs text-muted-foreground">
+                Stored locally in the app's .env and applied immediately — no relaunch. Leave blank to keep the
+                existing key.
+              </p>
+              <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
-                  <Label>API key env var</Label>
-                  <Input value={apiKeyEnv} onChange={(e) => setApiKeyEnv(e.target.value)} placeholder="MOONSHOT_API_KEY" />
+                  <Label className="flex items-center gap-1">
+                    Google Gemini
+                    {setup?.keys.GEMINI_API_KEY && <Check className="size-3 text-emerald-600 dark:text-emerald-400" />}
+                  </Label>
+                  <Input
+                    type="password"
+                    autoComplete="off"
+                    value={geminiKey}
+                    onChange={(e) => setGeminiKey(e.target.value)}
+                    placeholder={setup?.keys.GEMINI_API_KEY ? "configured" : "AIza…"}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="flex items-center gap-1">
+                    Moonshot (Kimi)
+                    {setup?.keys.MOONSHOT_API_KEY && <Check className="size-3 text-emerald-600 dark:text-emerald-400" />}
+                  </Label>
+                  <Input
+                    type="password"
+                    autoComplete="off"
+                    value={moonshotKey}
+                    onChange={(e) => setMoonshotKey(e.target.value)}
+                    placeholder={setup?.keys.MOONSHOT_API_KEY ? "configured" : "sk-…"}
+                  />
                 </div>
               </div>
             </section>

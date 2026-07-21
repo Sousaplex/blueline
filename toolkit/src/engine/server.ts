@@ -287,6 +287,32 @@ class Bridge {
   }
 
   async updateSettings(patch: Partial<PresscheckConfig>): Promise<void> {
+    // Guard the classic trap: pasting an actual API key where an env-var NAME belongs.
+    // If it doesn't look like an env name, store it as a secret and point config at
+    // the provider's standard variable instead.
+    const PROVIDER_KEY_ENV: Record<string, string> = {
+      google: "GEMINI_API_KEY",
+      moonshotai: "MOONSHOT_API_KEY",
+      "kimi-coding": "MOONSHOT_API_KEY",
+      anthropic: "ANTHROPIC_API_KEY",
+      openai: "OPENAI_API_KEY",
+      openrouter: "OPENROUTER_API_KEY",
+      groq: "GROQ_API_KEY",
+      cerebras: "CEREBRAS_API_KEY",
+      xai: "XAI_API_KEY",
+      zai: "ZAI_API_KEY",
+    };
+    if (patch.designer) {
+      const d = patch.designer as { provider?: string; apiKeyEnv?: string };
+      const defaultEnv = PROVIDER_KEY_ENV[d.provider ?? this.config.designer.provider];
+      if (typeof d.apiKeyEnv === "string" && d.apiKeyEnv.trim() && !/^[A-Z][A-Z0-9_]*$/.test(d.apiKeyEnv.trim())) {
+        if (!defaultEnv) throw new Error("apiKeyEnv must be an environment variable NAME like MOONSHOT_API_KEY, not the key itself");
+        saveApiKeys({ [defaultEnv]: d.apiKeyEnv.trim() });
+        d.apiKeyEnv = defaultEnv;
+      } else if (d.provider && !d.apiKeyEnv && defaultEnv) {
+        d.apiKeyEnv = defaultEnv; // provider switches keep keys working without a manual field
+      }
+    }
     const configPath = resolve(DATA_ROOT, "config", "providers.json");
     const current: Record<string, unknown> = existsSync(configPath)
       ? JSON.parse(readFileSync(configPath, "utf8"))
