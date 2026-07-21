@@ -181,7 +181,7 @@ export function App() {
       </header>
       {/* grid-rows-1 => minmax(0,1fr): bounds the row to the viewport so panes scroll internally */}
       <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)_340px] grid-rows-1 overflow-hidden">
-        <LeftPane project={project} viewRound={viewRound} onViewRound={setViewRound} />
+        <LeftPane project={project} client={client} viewRound={viewRound} onViewRound={setViewRound} />
         <PreviewPane project={project} client={client} cacheKey={cacheKey} actions={actions} viewRound={viewRound} onViewRound={setViewRound} />
         <AgentPane feed={feed} running={running} onChat={(t) => void actions.chat(t)} />
       </div>

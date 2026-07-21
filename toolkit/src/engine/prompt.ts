@@ -22,6 +22,10 @@ Workspace-level, read-only:
 - ${project.workspace.contextDir}/ (source material)
 - ${project.workspace.stylesDir}/ (brand & style guides — ALWAYS honor these)
 
+Source selection: if the project has a sources.json with a "context" array, read ONLY those
+files from the context dir (they were hand-picked for this project). If sources.json is
+absent or its "context" is null, read every file in the context dir.
+
 # The loop
 1. Read brief.md, everything in the workspace context/ and styles/ dirs listed above. Use web_fetch for any URLs
    referenced in the brief or context (mode=screenshot when a site's visual style matters).

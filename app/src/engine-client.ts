@@ -27,7 +27,7 @@ export interface ProjectState {
   workspaceRoot: string;
   slug: string | null;
   brief: string;
-  contextFiles: string[];
+  contextFiles: { name: string; selected: boolean }[];
   styleFiles: string[];
   rounds: RoundInfo[];
   images: ImageSlot[];
@@ -94,6 +94,9 @@ export interface EngineClient {
   createProject(name: string, brief?: string): Promise<void>;
   closeProject(): Promise<void>;
   deleteProject(slug: string): Promise<void>;
+  updateBrief(content: string): Promise<void>;
+  selectSources(files: string[] | null): Promise<void>;
+  uploadSource(kind: "context" | "style", name: string, dataBase64: string): Promise<void>;
   /** Pick a workspace dir (native dialog in Electron, path prompt in browser) and switch to it. */
   chooseWorkspace(): Promise<boolean>;
   /** Returns the saved path (Electron printToPDF) or null (browser fallback opened the proof). */
@@ -177,6 +180,11 @@ export class BrowserEngineClient implements EngineClient {
   createProject(name: string, brief?: string) { return post("/api/project/new", { name, brief }); }
   closeProject() { return post("/api/project/close"); }
   deleteProject(slug: string) { return post("/api/project/delete", { slug }); }
+  updateBrief(content: string) { return post("/api/brief", { content }); }
+  selectSources(files: string[] | null) { return post("/api/sources/select", { files }); }
+  uploadSource(kind: "context" | "style", name: string, dataBase64: string) {
+    return post("/api/sources/upload", { kind, name, dataBase64 });
+  }
 
   async chooseWorkspace(): Promise<boolean> {
     const root = window.presscheck

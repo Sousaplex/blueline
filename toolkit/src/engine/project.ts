@@ -37,6 +37,32 @@ export class Project {
     return readFileSync(p, "utf8");
   }
 
+  writeBrief(content: string): void {
+    writeFileSync(join(this.dir, "brief.md"), content.trimEnd() + "\n");
+  }
+
+  private get sourcesJson() { return join(this.dir, "sources.json"); }
+
+  /** Selected workspace context files for this project; null = all (default). */
+  selectedSources(): string[] | null {
+    if (!existsSync(this.sourcesJson)) return null;
+    try {
+      const parsed = JSON.parse(readFileSync(this.sourcesJson, "utf8"));
+      return Array.isArray(parsed.context) ? parsed.context : null;
+    } catch {
+      return null;
+    }
+  }
+
+  setSelectedSources(files: string[] | null): void {
+    if (files === null) {
+      if (existsSync(this.sourcesJson)) writeFileSync(this.sourcesJson, JSON.stringify({ context: null }, null, 2));
+      return;
+    }
+    const safe = files.map((f) => f.replace(/[/\\]/g, "")).filter(Boolean);
+    writeFileSync(this.sourcesJson, JSON.stringify({ context: safe }, null, 2));
+  }
+
   /** Concatenated style guides from the workspace's styles/ directory. */
   styleGuide(): string {
     const stylesDir = this.workspace.stylesDir;

@@ -245,15 +245,20 @@ class Bridge {
       workspaceRoot: this.workspace.root,
       running: this.running,
       designerModel: `${this.config.designer.provider}/${this.config.designer.model}`,
-      contextFiles: existsSync(this.workspace.contextDir)
-        ? readdirSync(this.workspace.contextDir).filter((f) => !f.startsWith("."))
-        : [],
       styleFiles: existsSync(this.workspace.stylesDir)
         ? readdirSync(this.workspace.stylesDir).filter((f) => !f.startsWith("."))
         : [],
     };
+    const allContext = existsSync(this.workspace.contextDir)
+      ? readdirSync(this.workspace.contextDir).filter((f) => !f.startsWith("."))
+      : [];
+    const selected = this.project?.selectedSources() ?? null;
+    const contextFiles = allContext.map((name) => ({
+      name,
+      selected: selected === null || selected.includes(name),
+    }));
     if (!this.project) {
-      return { ...base, slug: null, brief: "", rounds: [], images: [], editable: [], hasPage: false, hasProof: false };
+      return { ...base, contextFiles, slug: null, brief: "", rounds: [], images: [], editable: [], hasPage: false, hasProof: false };
     }
     const rounds = readdirSync(this.project.reviewDir)
       .map((f) => /^round-(\d+)\.json$/.exec(f)?.[1])
@@ -267,6 +272,7 @@ class Bridge {
       }));
     return {
       ...base,
+      contextFiles,
       slug: this.project.slug,
       brief: existsSync(join(this.project.dir, "brief.md")) ? this.project.brief() : "",
       rounds,
@@ -365,6 +371,31 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
         if (!body.name) return json(res, 400, { error: "name required" });
         await bridge.createProject(body.name, body.brief);
         return json(res, 200, { ok: true });
+      }
+      if (req.method === "POST" && url.pathname === "/api/brief") {
+        const body = await readBody(req);
+        if (typeof body.content !== "string" || !body.content.trim()) {
+          return json(res, 400, { error: "content required" });
+        }
+        bridge.requireProject().writeBrief(body.content);
+        bridge.broadcast({ type: "files_changed" });
+        return json(res, 200, { ok: true });
+      }
+      if (req.method === "POST" && url.pathname === "/api/sources/select") {
+        const body = await readBody(req);
+        bridge.requireProject().setSelectedSources(Array.isArray(body.files) ? body.files : null);
+        bridge.broadcast({ type: "files_changed" });
+        return json(res, 200, { ok: true });
+      }
+      if (req.method === "POST" && url.pathname === "/api/sources/upload") {
+        const body = await readBody(req);
+        const kind = body.kind === "style" ? "style" : "context";
+        const name = String(body.name ?? "").split(/[/\\]/).pop();
+        if (!name || !body.dataBase64) return json(res, 400, { error: "name and dataBase64 required" });
+        const dir = kind === "style" ? bridge.workspace.stylesDir : bridge.workspace.contextDir;
+        writeFileSync(join(dir, name), Buffer.from(String(body.dataBase64), "base64"));
+        bridge.broadcast({ type: "files_changed" });
+        return json(res, 200, { ok: true, path: join(dir, name) });
       }
       if (req.method === "POST" && url.pathname === "/api/project/close") {
         await bridge.closeProject();
