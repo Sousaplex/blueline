@@ -36,9 +36,14 @@ export function listEditable(project: Project): EditableText[] {
   }));
 }
 
-/** True if replacing this element's content with flat text would destroy page structure. */
+/** Tags that are pure inline formatting — safe to lose when text is replaced. */
+const INLINE_TAGS = new Set(["B", "I", "EM", "STRONG", "SPAN", "A", "BR", "SMALL", "SUP", "SUB", "CODE", "U", "MARK", "WBR", "TIME", "ABBR"]);
+
+/** True if replacing this element's content with flat text would destroy page structure:
+ *  any non-inline child element (h1-h6, p, div, li, …) or any tagged element inside. */
 function isStructural(el: any): boolean {
-  return Boolean(el.querySelector("[data-pc-id], [data-image-id], img, div, section, header, footer, main, article, aside, ul, ol, table, figure"));
+  if (el.querySelector("[data-pc-id], [data-image-id], img")) return true;
+  return [...el.children].some((child: any) => !INLINE_TAGS.has(String(child.tagName).toUpperCase()));
 }
 
 export function updateCopy(project: Project, pcId: string, text: string): void {

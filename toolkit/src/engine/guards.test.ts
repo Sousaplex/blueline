@@ -105,6 +105,23 @@ test("updateCopy refuses to flatten structural containers", () => {
   assert.ok(html.includes("New headline") && html.includes('data-pc-id="sub"'));
 });
 
+test("updateCopy treats any non-inline child as structure (the h3+p card case)", () => {
+  const p = tempProject();
+  writeFileSync(
+    p.pageHtml,
+    `<html><body>
+      <div data-pc-id="card"><h3>Title</h3><p>Body copy.</p></div>
+      <h1 data-pc-id="hero">Big <span class="accent">bold</span> claim</h1>
+    </body></html>`,
+  );
+  // A card whose children are h3+p (no divs!) must still be protected…
+  assert.throws(() => updateCopy(p, "card", "flat"), /layout container/);
+  // …while inline formatting (span) does not block editing a real text element.
+  updateCopy(p, "hero", "Bigger claim");
+  const html = readFileSync(p.pageHtml, "utf8");
+  assert.ok(html.includes("<h3>Title</h3>") && html.includes("Bigger claim"));
+});
+
 test("element nudge clamps offsets and round-trips through page.html", () => {
   const p = tempProject();
   writeFileSync(p.pageHtml, `<html><body><section data-pc-id="stats" style="color: red">x</section></body></html>`);

@@ -146,10 +146,14 @@ export function PreviewPane({
       setNudge(next);
     };
 
-    // A container holding other blocks must never become contenteditable: blurring it
-    // would replace ALL of its children with flat text (this destroyed a page once).
+    // An element holding other blocks must never become contenteditable: blurring it
+    // would replace ALL of its children with flat text (this destroyed a page once —
+    // and a card with h3+p children slipped through a tag-list version of this check,
+    // so the rule is: ANY non-inline child element makes it structural).
+    const INLINE_TAGS = new Set(["B", "I", "EM", "STRONG", "SPAN", "A", "BR", "SMALL", "SUP", "SUB", "CODE", "U", "MARK", "WBR", "TIME", "ABBR"]);
     const isStructural = (el: HTMLElement) =>
-      Boolean(el.querySelector("[data-pc-id], [data-image-id], img, div, section, header, footer, main, article, aside, ul, ol, table, figure"));
+      Boolean(el.querySelector("[data-pc-id], [data-image-id], img")) ||
+      [...el.children].some((child) => !INLINE_TAGS.has(child.tagName.toUpperCase()));
 
     doc.querySelectorAll<HTMLElement>("[data-pc-id]").forEach((el) => {
       el.addEventListener("click", (ev) => {
@@ -161,6 +165,7 @@ export function PreviewPane({
         }
         ev.preventDefault();
         if (isStructural(el)) return; // containers are nudge-only, not text-editable
+        el.dataset.pcOriginal = el.textContent ?? "";
         el.setAttribute("contenteditable", "plaintext-only");
         el.focus();
       });
@@ -168,7 +173,11 @@ export function PreviewPane({
         if (!el.hasAttribute("contenteditable")) return;
         el.removeAttribute("contenteditable");
         const pcId = el.getAttribute("data-pc-id")!;
-        void actions.updateCopy(pcId, el.textContent ?? "").then(() => setDirty(true));
+        const text = el.textContent ?? "";
+        const original = el.dataset.pcOriginal;
+        delete el.dataset.pcOriginal;
+        if (text === original) return; // click-in, click-out: touch nothing
+        void actions.updateCopy(pcId, text).then(() => setDirty(true));
       });
 
       // Drag-to-move when this element is the nudge selection.
