@@ -11,9 +11,11 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import logo from "../assets/logo.png";
 import type { EngineClient, ProjectListing } from "../engine-client";
 import { NewProjectDialog } from "./NewProjectDialog";
 import { ProjectLibrary } from "./ProjectLibrary";
+import { ThemeToggle } from "./ThemeToggle";
 
 export function HomeScreen({
   client,
@@ -36,11 +38,13 @@ export function HomeScreen({
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
       <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
+        <img src={logo} alt="" className="size-5 rounded-md" />
         <span className="text-sm font-semibold tracking-tight">presscheck</span>
         <span className="truncate font-mono text-xs text-muted-foreground" title={workspaceRoot}>
           {workspaceRoot}
         </span>
         <div className="flex-1" />
+        <ThemeToggle />
         <Button size="sm" variant="outline" onClick={() => act(() => client.chooseWorkspace())}>
           <FolderOpen data-slot="icon" /> Change workspace
         </Button>

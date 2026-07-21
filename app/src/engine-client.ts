@@ -97,6 +97,14 @@ export type SettingsPatch = {
 
 export type RunState = "idle" | "queued" | "running";
 
+export interface SetupState {
+  fresh: boolean;
+  workspaceRoot: string;
+  defaultWorkspaceRoot: string;
+  keys: { GEMINI_API_KEY: boolean; MOONSHOT_API_KEY: boolean };
+  designer: string;
+}
+
 export type EngineEvent =
   | { type: "hello"; project: string | null; runStates: Record<string, RunState>; replay: EngineEvent[] }
   | { type: "text_delta"; project?: string; delta: string }
@@ -108,6 +116,7 @@ export type EngineEvent =
   | { type: "project_changed"; slug: string | null }
   | { type: "workspace_changed"; root: string; slug: string | null }
   | { type: "projects_changed" }
+  | { type: "setup_changed" }
   | { type: "error"; project?: string; message: string };
 
 export interface ProjectListing {
@@ -156,6 +165,14 @@ export interface EngineClient {
   getElementStyle(pcId: string): Promise<ElementNudge>;
   /** Pick a workspace dir (native dialog in Electron, path prompt in browser) and switch to it. */
   chooseWorkspace(): Promise<boolean>;
+  /** First-run state: whether onboarding should run, which API keys exist (booleans only). */
+  getSetup(): Promise<SetupState>;
+  /** Mark onboarding finished (persists the current workspace). */
+  completeSetup(): Promise<void>;
+  /** Store API keys in the engine's .env — applied live, no relaunch. */
+  saveKeys(keys: { GEMINI_API_KEY?: string; MOONSHOT_API_KEY?: string }): Promise<void>;
+  /** Use the app-managed default workspace location. */
+  useDefaultWorkspace(): Promise<void>;
   /** Returns the saved path (Electron printToPDF) or null (browser fallback opened the proof). */
   exportPdf(): Promise<string | null>;
   getSettings(): Promise<EngineSettings>;
@@ -294,6 +311,15 @@ export class BrowserEngineClient implements EngineClient {
     if (!res.ok) throw new Error(`element style: HTTP ${res.status}`);
     return res.json();
   }
+
+  async getSetup(): Promise<SetupState> {
+    const res = await fetch("/api/setup");
+    if (!res.ok) throw new Error(`setup: HTTP ${res.status}`);
+    return res.json();
+  }
+  completeSetup() { return post("/api/setup"); }
+  saveKeys(keys: { GEMINI_API_KEY?: string; MOONSHOT_API_KEY?: string }) { return post("/api/keys", keys); }
+  useDefaultWorkspace() { return post("/api/workspace", { useDefault: true }); }
 
   async chooseWorkspace(): Promise<boolean> {
     const root = window.presscheck

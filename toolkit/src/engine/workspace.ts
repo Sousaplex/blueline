@@ -69,17 +69,18 @@ export class Workspace {
     writeFileSync(STATE_PATH, JSON.stringify({ root: this.root, lastProject } satisfies WorkspaceState, null, 2));
   }
 
-  /** Restore the last-used workspace, defaulting to the repo itself. */
-  static load(): { workspace: Workspace; lastProject?: string } {
+  /** Restore the last-used workspace, defaulting to the data root.
+   *  `fresh` = no workspace was ever persisted — the UI runs onboarding. */
+  static load(): { workspace: Workspace; lastProject?: string; fresh: boolean } {
     if (existsSync(STATE_PATH)) {
       try {
         const state = JSON.parse(readFileSync(STATE_PATH, "utf8")) as WorkspaceState;
-        return { workspace: new Workspace(state.root).ensure(), lastProject: state.lastProject };
+        return { workspace: new Workspace(state.root).ensure(), lastProject: state.lastProject, fresh: false };
       } catch {
         // fall through to default on a stale/broken state file
       }
     }
-    return { workspace: new Workspace(DATA_ROOT).ensure() };
+    return { workspace: new Workspace(DATA_ROOT).ensure(), fresh: true };
   }
 }
 

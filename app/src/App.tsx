@@ -1,10 +1,13 @@
 import { Download, Play, RefreshCw, Timer } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import logo from "./assets/logo.png";
 import { AgentPane, type FeedItem } from "./components/AgentPane";
 import { HomeScreen } from "./components/HomeScreen";
 import { LeftPane } from "./components/LeftPane";
 import { LibrarySheet } from "./components/LibrarySheet";
 import { NewProjectDialog } from "./components/NewProjectDialog";
+import { Onboarding } from "./components/Onboarding";
+import { ThemeToggle } from "./components/ThemeToggle";
 import { PreviewPane } from "./components/PreviewPane";
 import { SeriesDialog } from "./components/SeriesDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
@@ -17,6 +20,7 @@ import {
   type ProjectListing,
   type ProjectState,
   type RunState,
+  type SetupState,
 } from "./engine-client";
 
 /** Fold one wire event into the feed (used for both live events and replay). */
@@ -57,6 +61,7 @@ export function App() {
   const [viewRound, setViewRound] = useState<number | null>(null);
   const [projects, setProjects] = useState<ProjectListing[]>([]);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
+  const [setup, setSetup] = useState<SetupState | null>(null);
   const refreshTimer = useRef<number | undefined>(undefined);
   const currentSlug = useRef<string | null>(null);
 
@@ -84,6 +89,7 @@ export function App() {
   useEffect(() => {
     void refresh();
     void client.listProjects().then(setProjects);
+    void client.getSetup().then(setSetup).catch(() => setSetup(null));
     return client.subscribe((event: EngineEvent) => {
       switch (event.type) {
         case "hello":
@@ -169,6 +175,19 @@ export function App() {
   }
   if (!project) return <div className="flex h-screen items-center justify-center text-sm text-muted-foreground">loading…</div>;
 
+  if (setup?.fresh) {
+    return (
+      <Onboarding
+        client={client}
+        setup={setup}
+        onDone={() => {
+          void client.getSetup().then(setSetup).catch(() => setSetup(null));
+          void refresh();
+        }}
+      />
+    );
+  }
+
   if (!project.slug) {
     return <HomeScreen client={client} workspaceRoot={project.workspaceRoot} projects={projects} />;
   }
@@ -176,6 +195,7 @@ export function App() {
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
       <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
+        <img src={logo} alt="" className="size-5 rounded-md" />
         <span className="text-sm font-semibold tracking-tight">presscheck</span>
         <LibrarySheet
           client={client}
@@ -224,6 +244,7 @@ export function App() {
         >
           <Download data-slot="icon" /> Export
         </Button>
+        <ThemeToggle />
         <SettingsDialog client={client} />
         <NewProjectDialog client={client} open={newProjectOpen} onOpenChange={setNewProjectOpen} />
       </header>

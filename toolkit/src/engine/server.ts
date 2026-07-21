@@ -8,7 +8,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statS
 import { dirname, extname, join, normalize, resolve } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { WebSocketServer, type WebSocket } from "ws";
-import { DATA_ROOT, REPO_ROOT, loadConfig, type PresscheckConfig } from "./config.ts";
+import { DATA_ROOT, REPO_ROOT, loadConfig, saveApiKeys, type PresscheckConfig } from "./config.ts";
 import { generateImages } from "./images.ts";
 import {
   getElementStyle,
@@ -67,11 +67,35 @@ class Bridge {
   config: PresscheckConfig;
   workspace: Workspace;
   project?: Project;
+  /** True until a workspace is persisted for the first time — drives onboarding. */
+  fresh: boolean;
 
-  constructor(workspace: Workspace, project?: Project) {
+  constructor(workspace: Workspace, project?: Project, fresh = false) {
     this.workspace = workspace;
     this.project = project;
+    this.fresh = fresh;
     this.config = loadConfig();
+  }
+
+  /** Onboarding status: never reveals key values, only which ones exist. */
+  setupState() {
+    return {
+      fresh: this.fresh,
+      workspaceRoot: this.workspace.root,
+      defaultWorkspaceRoot: DATA_ROOT,
+      keys: {
+        GEMINI_API_KEY: Boolean(process.env.GEMINI_API_KEY),
+        MOONSHOT_API_KEY: Boolean(process.env.MOONSHOT_API_KEY),
+      },
+      designer: `${this.config.designer.provider}/${this.config.designer.model}`,
+    };
+  }
+
+  /** Finish onboarding: persist the chosen (or current) workspace. */
+  completeSetup(): void {
+    this.workspace.persist(this.project?.slug);
+    this.fresh = false;
+    this.broadcast({ type: "setup_changed" });
   }
 
   requireProject(): Project {
@@ -472,6 +496,7 @@ imagery to this subject.
     this.workspace = next;
     this.project = undefined;
     next.persist(undefined);
+    this.fresh = false; // choosing a workspace completes first-run setup
     this.broadcast({ type: "workspace_changed", root: next.root, slug: null });
   }
 
@@ -549,7 +574,7 @@ async function readBody(req: IncomingMessage): Promise<any> {
 }
 
 export async function startServer(projectDirArg: string | undefined, port: number): Promise<void> {
-  const { workspace, lastProject } = Workspace.load();
+  const { workspace, lastProject, fresh } = Workspace.load();
   let project: Project | undefined;
   const candidate = projectDirArg ?? lastProject;
   if (candidate) {
@@ -559,7 +584,7 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
       project = undefined;
     }
   }
-  const bridge = new Bridge(workspace, project);
+  const bridge = new Bridge(workspace, project, fresh && !projectDirArg);
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://localhost:${port}`);
@@ -796,11 +821,32 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
       if (url.pathname === "/api/workspace") {
         if (req.method === "POST") {
           const body = await readBody(req);
-          if (!body.root) return json(res, 400, { error: "root required" });
-          await bridge.setWorkspace(body.root);
-          return json(res, 200, { ok: true });
+          const root = body.useDefault ? DATA_ROOT : body.root;
+          if (!root) return json(res, 400, { error: "root required" });
+          await bridge.setWorkspace(root);
+          return json(res, 200, { ok: true, root: bridge.workspace.root });
         }
         return json(res, 200, { root: bridge.workspace.root, projects: bridge.listProjects() });
+      }
+
+      if (url.pathname === "/api/setup") {
+        if (req.method === "POST") {
+          bridge.completeSetup();
+          return json(res, 200, { ok: true });
+        }
+        return json(res, 200, bridge.setupState());
+      }
+      if (req.method === "POST" && url.pathname === "/api/keys") {
+        const body = await readBody(req);
+        const keys: Record<string, string> = {};
+        for (const name of ["GEMINI_API_KEY", "MOONSHOT_API_KEY"] as const) {
+          if (typeof body[name] === "string" && body[name].trim()) keys[name] = body[name];
+        }
+        if (!Object.keys(keys).length) return json(res, 400, { error: "no keys provided" });
+        const saved = saveApiKeys(keys);
+        // Idle sessions recreate so the new key is picked up by their model runtimes.
+        await bridge.updateSettings({});
+        return json(res, 200, { ok: true, saved });
       }
 
       if (url.pathname === "/api/proof/meta") {

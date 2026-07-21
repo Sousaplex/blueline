@@ -1,18 +1,17 @@
 {
   "designer": {
-    "provider": "moonshotai",
-    "model": "kimi-k3",
-    "thinkingLevel": "medium",
-    "apiKeyEnv": "MOONSHOT_API_KEY"
+    "provider": "google",
+    "model": "gemini-3.5-flash",
+    "apiKeyEnv": "GEMINI_API_KEY"
   },
   "images": {
-    "provider": "gemini",
-    "model": "nano-banana-2",
+    "provider": "google",
+    "model": "gemini-3.1-flash-image",
     "variantsPerPrompt": 3,
     "apiKeyEnv": "GEMINI_API_KEY"
   },
   "reviewer": {
-    "provider": "gemini",
+    "provider": "google",
     "model": "gemini-3.5-flash",
     "maxRounds": 6,
     "apiKeyEnv": "GEMINI_API_KEY"

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -56,6 +56,27 @@ export function loadConfig(): PresscheckConfig {
     );
   }
   return { ...DEFAULTS, ...raw };
+}
+
+/** Persist API keys to DATA_ROOT/.env AND inject into the running process —
+ *  onboarding-set keys work immediately, no relaunch. Values are never logged. */
+export function saveApiKeys(keys: Record<string, string>): string[] {
+  const envPath = resolve(DATA_ROOT, ".env");
+  const lines = existsSync(envPath) ? readFileSync(envPath, "utf8").split("\n") : [];
+  const saved: string[] = [];
+  for (const [name, value] of Object.entries(keys)) {
+    if (!/^[A-Z][A-Z0-9_]*_API_KEY$/.test(name)) throw new Error(`Refusing to store non-API-key variable: ${name}`);
+    const v = value.trim();
+    if (!v || /\s/.test(v)) throw new Error(`${name}: value looks malformed`);
+    const line = `${name}=${v}`;
+    const idx = lines.findIndex((l) => l.trim().startsWith(`${name}=`));
+    if (idx >= 0) lines[idx] = line;
+    else lines.push(line);
+    process.env[name] = v; // live effect for all sessions created from now on
+    saved.push(name);
+  }
+  writeFileSync(envPath, lines.filter((l, i) => l.trim() || i < lines.length - 1).join("\n").trimEnd() + "\n", { mode: 0o600 });
+  return saved;
 }
 
 export function requireApiKey(envVar: string | undefined, what: string): string | undefined {

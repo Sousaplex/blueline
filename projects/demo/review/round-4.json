@@ -1,5 +1,0 @@
-{
-  "verdict": "pass",
-  "issues": [],
-  "notes": "All previous issues have been resolved. The right-hand hero image now has appropriate vertical margins, bleeding only on the right edge in accordance with the style guide. The layout is successfully contained on a single page, fitting the one-pager format perfectly. Color usage, typography, and content are excellent."
-}
