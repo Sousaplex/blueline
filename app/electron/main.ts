@@ -72,7 +72,7 @@ async function ensureChromium(): Promise<void> {
 const SPLASH_URL =
   "data:text/html," +
   encodeURIComponent(
-    `<body style="font-family:system-ui;background:#18181b;color:#fafafa;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div>Starting blueline…</div></body>`,
+    `<body style="font-family:system-ui;background:#202023;color:#fafafa;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div>Starting blueline…</div></body>`,
   );
 
 let bridgeChild: ChildProcess | undefined;
