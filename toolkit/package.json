@@ -10,7 +10,8 @@
     "render": "tsx src/commands/render.ts",
     "review": "tsx src/commands/review.ts",
     "viewer": "tsx src/commands/viewer.ts",
-    "test": "node --import tsx --test src/engine/*.test.ts"
+    "test": "node --import tsx --test src/engine/*.test.ts",
+    "serve": "tsx src/engine/server.ts"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.80.10",
@@ -20,11 +21,13 @@
     "pdf-to-img": "^6.2.0",
     "playwright": "^1.50.0",
     "turndown": "^7.2.4",
-    "typebox": "^1.1.38"
+    "typebox": "^1.1.38",
+    "ws": "^8.21.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/turndown": "^5.0.6",
+    "@types/ws": "^8.18.1",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   }

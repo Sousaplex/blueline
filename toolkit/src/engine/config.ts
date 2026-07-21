@@ -24,6 +24,18 @@ const DEFAULTS: Pick<PresscheckConfig, "webFetch"> = {
 // repo root = ../../.. from this file (toolkit/src/engine/config.ts)
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
+// Load REPO_ROOT/.env into process.env (existing env wins). Keeps API keys working
+// in contexts without a shell environment (Electron app, launchd, etc).
+const envPath = resolve(REPO_ROOT, ".env");
+if (existsSync(envPath)) {
+  for (const line of readFileSync(envPath, "utf8").split("\n")) {
+    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line);
+    if (!m || line.trim().startsWith("#")) continue;
+    const value = m[2].replace(/^["']|["']$/g, "").replace(/\s+#.*$/, "");
+    process.env[m[1]] ??= value;
+  }
+}
+
 export function loadConfig(): PresscheckConfig {
   const configPath = resolve(REPO_ROOT, "config", "providers.json");
   const examplePath = resolve(REPO_ROOT, "config", "providers.example.json");
