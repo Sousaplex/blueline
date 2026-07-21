@@ -2,7 +2,7 @@
 // process, and provides true-WYSIWYG PDF export via printToPDF — the same
 // Chromium that renders the preview window.
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
 
@@ -34,33 +34,44 @@ function spawnNode(args: string[]): ChildProcess {
 
 const TSX_CLI = join(TOOLKIT_DIR, "node_modules", "tsx", "dist", "cli.mjs");
 
-/** Packaged first-run: make sure Playwright's Chromium exists (no-op when present). */
+/** Packaged first-run: make sure Playwright's Chromium exists (no-op when present).
+ *  IMPORTANT: never open/close a temporary window for this — dropping to zero windows
+ *  mid-startup fires window-all-closed and quits the app. Reuse the main window. */
 async function ensureChromium(): Promise<void> {
   if (!PACKAGED) return;
-  const progress = new BrowserWindow({ width: 380, height: 120, frame: false, resizable: false });
-  await progress.loadURL(
-    "data:text/html," +
-      encodeURIComponent(
-        `<body style="font-family:system-ui;background:#18181b;color:#fafafa;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div>Preparing render engine…</div></body>`,
-      ),
-  );
-  try {
-    await new Promise<void>((resolvePromise, reject) => {
-      const child = spawn(
-        process.execPath,
-        [join(TOOLKIT_DIR, "node_modules", "playwright", "cli.js"), "install", "chromium"],
-        { cwd: TOOLKIT_DIR, stdio: "inherit", env: childEnv() },
-      );
-      child.on("exit", (code) => (code === 0 ? resolvePromise() : reject(new Error(`playwright install exited ${code}`))));
-      child.on("error", reject);
-    });
-  } finally {
-    progress.destroy();
-  }
+  smokeLog("[startup] ensuring chromium");
+  await new Promise<void>((resolvePromise, reject) => {
+    const child = spawn(
+      process.execPath,
+      [join(TOOLKIT_DIR, "node_modules", "playwright", "cli.js"), "install", "chromium"],
+      { cwd: TOOLKIT_DIR, stdio: "inherit", env: childEnv() },
+    );
+    child.on("exit", (code) => (code === 0 ? resolvePromise() : reject(new Error(`playwright install exited ${code}`))));
+    child.on("error", reject);
+  });
+  smokeLog("[startup] chromium ready");
 }
+
+const SPLASH_URL =
+  "data:text/html," +
+  encodeURIComponent(
+    `<body style="font-family:system-ui;background:#18181b;color:#fafafa;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div>Starting presscheck…</div></body>`,
+  );
 
 let bridgeChild: ChildProcess | undefined;
 let mainWindow: BrowserWindow | undefined;
+
+/** Main-process stdout is not reliably visible in packaged builds — log smoke steps to a file. */
+function smokeLog(msg: string): void {
+  console.log(msg);
+  if (!SMOKE) return;
+  try {
+    mkdirSync(SMOKE_DIR, { recursive: true });
+    appendFileSync(join(SMOKE_DIR, "smoke.log"), `${new Date().toISOString()} ${msg}\n`);
+  } catch {
+    /* logging must never break the app */
+  }
+}
 
 async function bridgeAlive(): Promise<boolean> {
   try {
@@ -115,24 +126,24 @@ async function exportPdf(targetPath?: string): Promise<string | null> {
 }
 
 async function runSmokeTest(): Promise<void> {
+  smokeLog("[smoke] step 1: settle");
   mkdirSync(SMOKE_DIR, { recursive: true });
   await new Promise((r) => setTimeout(r, 2500)); // let the UI settle
+  smokeLog("[smoke] step 2: capturePage");
   const image = await mainWindow!.webContents.capturePage();
   writeFileSync(join(SMOKE_DIR, "smoke-window.png"), image.toPNG());
+  smokeLog("[smoke] step 3: exportPdf");
   const exported = await exportPdf(join(SMOKE_DIR, "smoke-export.pdf"));
-  console.log(`[smoke] window=${join(SMOKE_DIR, "smoke-window.png")} export=${exported}`);
+  smokeLog(`[smoke] done window=${join(SMOKE_DIR, "smoke-window.png")} export=${exported}`);
 }
 
 app.whenReady().then(async () => {
   try {
-    await ensureChromium();
-    await ensureBridge();
+    // Window FIRST so the app never has zero windows during setup (see ensureChromium note).
     mainWindow = new BrowserWindow({
       width: 1440,
       height: 900,
       title: "presscheck",
-      // Keep the window visible even in smoke mode: capturePage can hang on a
-      // never-painted hidden window in packaged builds.
       show: true,
       webPreferences: {
         preload: join(__dirname, "preload.cjs"),
@@ -145,19 +156,26 @@ app.whenReady().then(async () => {
       void shell.openExternal(url);
       return { action: "deny" };
     });
+    await mainWindow.loadURL(SPLASH_URL);
+
+    await ensureChromium();
+    await ensureBridge();
+    smokeLog("[startup] bridge ready");
 
     const rendererUrl = process.env.VITE_DEV_SERVER_URL ?? `${BRIDGE_URL}/`;
     if (!PACKAGED && !process.env.VITE_DEV_SERVER_URL && !existsSync(join(REPO_ROOT, "app", "dist", "index.html"))) {
       throw new Error("app/dist not built — run `npm run build` in app/ (or set VITE_DEV_SERVER_URL)");
     }
+    if (SMOKE) smokeLog("[smoke] loading renderer: " + rendererUrl);
     await mainWindow.loadURL(rendererUrl);
+    if (SMOKE) smokeLog("[smoke] renderer loaded");
 
     if (SMOKE) {
       await runSmokeTest();
       app.exit(0);
     }
   } catch (err) {
-    console.error("[presscheck] startup failed:", err);
+    smokeLog("[presscheck] startup failed: " + String(err));
     if (SMOKE) app.exit(1);
     else dialog.showErrorBox("presscheck failed to start", err instanceof Error ? err.message : String(err));
   }
