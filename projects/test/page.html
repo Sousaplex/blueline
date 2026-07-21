@@ -39,11 +39,11 @@
 
     /* Header */
     header {
-      height: 30mm;
+      height: 18mm;
       display: flex;
       flex-direction: column;
       justify-content: flex-end;
-      padding-bottom: 4mm;
+      padding-bottom: 2mm;
     }
 
     .brand-container {
@@ -87,7 +87,7 @@
 
     /* Subtitle Banner */
     .subtitle-banner {
-      margin-top: 5mm;
+      margin-top: 4mm;
       margin-bottom: 6mm;
     }
 
@@ -102,7 +102,7 @@
     /* Main Content Grid */
     .content-grid {
       display: flex;
-      height: 200mm;
+      height: 165mm;
       position: relative;
     }
 
@@ -162,7 +162,7 @@
     /* Right-side Bleed Image */
     .bleed-image-container {
       width: 92mm; /* Reaches the absolute right edge */
-      height: 62mm;
+      height: 52mm;
       overflow: hidden;
       margin-bottom: 6mm;
     }
@@ -211,7 +211,7 @@
       bottom: 16mm;
       left: 16mm;
       width: calc(210mm - 32mm);
-      height: 20mm;
+      height: 16mm;
       display: flex;
       flex-direction: column;
       justify-content: flex-end;
@@ -253,14 +253,14 @@
     <header>
       <div class="brand-container">
         <h1 class="logo" data-pc-id="logo">CLINCOVE</h1>
-        <div class="tagline" data-pc-id="tagline">Secure-by-Design Clinical Automation</div>
+        <div class="tagline" data-pc-id="tagline">Unified, AI-Powered Clinical Trial Platform</div>
       </div>
       <div class="header-rule"></div>
     </header>
 
     <!-- Subtitle Banner -->
     <div class="subtitle-banner">
-      <h2 data-pc-id="hero-title">Bridging Advanced AI Agent Automation with Enterprise HIPAA Compliance</h2>
+      <h2 data-pc-id="hero-title">Consolidating EDC, eSource, and eTMF into a Single GxP-Validated Clinical Ecosystem</h2>
     </div>
 
     <!-- Main Content Grid -->
@@ -269,23 +269,23 @@
       <!-- Left Column (Primary Copy) -->
       <div class="left-col">
         <div class="section-block">
-          <h3 class="section-title" data-pc-id="sec-1-title">Seamless Clincove DB Integration</h3>
+          <h3 class="section-title" data-pc-id="sec-1-title">Protocol AI &amp; Unified Workflows</h3>
           <p class="section-body" data-pc-id="sec-1-body">
-            Clincove orchestrates the secure execution of state-of-the-art AI agents directly against live clinical trial databases. By integrating the resilient StrangeLoop execution engine with a deterministic HTTP tool boundary, Clincove automates repetitive operational tasks—such as patient scheduling, study configuration, and data-plane synchronization—without exposing sensitive infrastructure to external networks.
+            Clincove consolidates clinical operations by integrating Electronic Data Capture (EDC), eSource (SMR), and document management (eTMF &amp; eISF) into a single, seamless platform. Its intelligent Protocol AI module reads study protocols to automatically generate compliance-ready Case Report Forms (CRFs), visit checklists, and budgets—slashing setup times from weeks to hours and avoiding disconnected legacy vendors.
           </p>
         </div>
 
         <div class="section-block">
-          <h3 class="section-title" data-pc-id="sec-2-title">Uncompromising PHI Scope Isolation</h3>
+          <h3 class="section-title" data-pc-id="sec-2-title">Uncompromising HIPAA Scope Isolation</h3>
           <p class="section-body" data-pc-id="sec-2-body">
-            At the core of Clincove's architecture is a multi-layered, secure memory perimeter. Using deterministic data-plane scope predicates, the platform enforces strict tenant-level isolation on all semantic, episodic, and session memories. Records under specific research boundaries (e.g., Study <code>SL-TEST-A</code>, Patient <code>P1</code>) are completely isolated from sibling records or foreign studies (e.g., <code>SL-TEST-B</code>), strictly executing the HIPAA-mandated deny-by-default principle.
+            Designed for secure data-plane execution, Clincove enforces multi-tenant security and strict patient-level isolation on all clinical databases. Backed by the robust StrangeLoop engine, the platform implements a deny-by-default architecture where records for specific studies (e.g., Study <code>SL-TEST-A</code>, Patient <code>P1</code>) are strictly isolated from sibling records or foreign studies, ensuring absolute patient privacy.
           </p>
         </div>
 
         <div class="section-block">
-          <h3 class="section-title" data-pc-id="sec-3-title">Durable &amp; Self-Correcting Execution</h3>
+          <h3 class="section-title" data-pc-id="sec-3-title">Point-of-Care eSource Synchronization</h3>
           <p class="section-body" data-pc-id="sec-3-body">
-            Built on a fault-tolerant Elixir/OTP state machine, Clincove degrades honestly rather than hallucinating when tools fail. External API timeouts and errors are handled transparently. If a Large Language Model produces a malformed payload that violates the target <code>inputSchema</code>, the engine's built-in self-correction loop catches the schema mismatch, rejects the malformed input, and triggers immediate model self-correction within milliseconds to maintain clinical data integrity.
+            By capturing Source Medical Records (SMR) digitally at the point of care during patient visits, Clincove streams structured, timestamped data directly into the EDC. This completely eliminates manual transcription steps, prevents up to 3,200 data discrepancies per trial, and accelerates database locks using automated AI-driven queries and integrated medical coding (MedDRA and WHODrug).
           </p>
         </div>
       </div>
@@ -303,23 +303,23 @@
         <!-- Highlights Section -->
         <div class="highlights-container">
           <div class="highlight-block">
-            <h4 class="highlight-title" data-pc-id="hl-1-title">Durable OTP Resilience</h4>
+            <h4 class="highlight-title" data-pc-id="hl-1-title">75% Faster Study Startup</h4>
             <p class="highlight-body" data-pc-id="hl-1-body">
-              An active RunReaper watchdog prevents zombie tasks. In the event of an unexpected server restart, all orphaned runs are cleanly swept to a terminal failed state to ensure zero orphaned background threads.
+              Clincove cuts average study deployment from 12 weeks to 2-4 weeks, launching first patient visits rapidly with zero upfront infrastructure costs.
             </p>
           </div>
 
           <div class="highlight-block">
-            <h4 class="highlight-title" data-pc-id="hl-2-title">SSRF &amp; Network Vaults</h4>
+            <h4 class="highlight-title" data-pc-id="hl-2-title">Therapeutic Solutions</h4>
             <p class="highlight-body" data-pc-id="hl-2-body">
-              Engine-level SSRF guards block malicious loopback requests by default. Robust authorization tokens and empty scope rejections prevent unauthorized data egress and protect patient privacy.
+              Specialized Oncology modules deliver 40% faster safety signal detection, while Vaccine modules enable 70% faster site activation.
             </p>
           </div>
 
           <div class="highlight-block">
-            <h4 class="highlight-title" data-pc-id="hl-3-title">Real-Time Traceability</h4>
+            <h4 class="highlight-title" data-pc-id="hl-3-title">Instant eISF &amp; eTMF Sync</h4>
             <p class="highlight-body" data-pc-id="hl-3-body">
-              Every agent step is audited. Monotonic event traces and live Server-Sent Events (SSE) offer clinical operations teams a complete, real-time window into decision pathways and execution runs.
+              Site uploads to the Investigator Site File sync instantly with the Trial Master File, automatically indexed using OCR and TMF standards.
             </p>
           </div>
         </div>
@@ -331,9 +331,9 @@
     <footer>
       <div class="footer-rule"></div>
       <div class="footer-content">
-        <div class="footer-cta" data-pc-id="footer-cta">Secure your clinical workflows. Contact integration@clincove.com</div>
+        <div class="footer-cta" data-pc-id="footer-cta">Ready to accelerate your trials? Contact clinicalops@clincove.com</div>
         <div class="footer-note" data-pc-id="footer-note">
-          Clincove is fully HIPAA compliant and audited under SOC2 Type II. Powered by the StrangeLoop Agent Engine.
+          Clincove is founded by Mehdi Al-Khalissi &amp; Michael Sousa. Fully FDA 21 CFR Part 11, HIPAA, and GDPR compliant. Powered by StrangeLoop.
         </div>
       </div>
     </footer>

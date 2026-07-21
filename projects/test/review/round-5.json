@@ -1,0 +1,12 @@
+{
+  "verdict": "revise",
+  "issues": [
+    {
+      "page": 1,
+      "region": "bottom footer",
+      "problem": "Severe text overlap and layout clipping at the bottom of the page. The copper divider line and footer text ('Ready to accelerate...', 'Clincove is founded by...', etc.) are overlapping directly onto the final lines of both the left and right columns ('coding (MedDRA and WHODrug).' and 'indexed using OCR and TMF standards.').",
+      "fix": "Adjust the CSS layout, margins, or padding so that the columns do not overflow into the footer. Consider reducing body text length, reducing line height slightly, or increasing the overall page height/reducing the bottom margin."
+    }
+  ],
+  "notes": "The document has a serious layout collision at the bottom where the footer text and horizontal rule overlap with the main content columns. This must be corrected for a professional print-ready finish."
+}

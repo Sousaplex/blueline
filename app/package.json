@@ -63,9 +63,12 @@
         "filter": [
           "src/**",
           "package.json",
-          "tsconfig.json",
-          "node_modules/**"
+          "tsconfig.json"
         ]
+      },
+      {
+        "from": "../toolkit/node_modules",
+        "to": "toolkit/node_modules"
       },
       {
         "from": "dist",

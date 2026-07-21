@@ -1,1 +1,1 @@
-One pager for clincove
+One pager for clincove. Research should be from www.clincove.com
