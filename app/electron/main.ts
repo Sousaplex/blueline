@@ -2,9 +2,26 @@
 // process, and provides true-WYSIWYG PDF export via printToPDF — the same
 // Chromium that renders the preview window.
 import { spawn, type ChildProcess } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
+
+/** One-time migration: carry settings/keys over from the pre-rename app-data dirs. */
+function migrateLegacyAppData(): void {
+  if (!app.isPackaged) return;
+  const userData = app.getPath("userData");
+  if (existsSync(join(userData, "config"))) return; // already set up under the new name
+  const appData = app.getPath("appData");
+  for (const legacy of ["presscheck-app", "presscheck"]) {
+    const oldDir = join(appData, legacy);
+    if (!existsSync(join(oldDir, "config"))) continue;
+    mkdirSync(userData, { recursive: true });
+    cpSync(join(oldDir, "config"), join(userData, "config"), { recursive: true });
+    if (existsSync(join(oldDir, ".env"))) cpSync(join(oldDir, ".env"), join(userData, ".env"));
+    break;
+  }
+}
+migrateLegacyAppData();
 
 // Dev: dist-electron/main.cjs -> app/ -> repo root. Packaged: everything the
 // bridge needs ships under Contents/Resources, and mutable state moves to the
@@ -55,7 +72,7 @@ async function ensureChromium(): Promise<void> {
 const SPLASH_URL =
   "data:text/html," +
   encodeURIComponent(
-    `<body style="font-family:system-ui;background:#18181b;color:#fafafa;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div>Starting presscheck…</div></body>`,
+    `<body style="font-family:system-ui;background:#18181b;color:#fafafa;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div>Starting blueline…</div></body>`,
   );
 
 let bridgeChild: ChildProcess | undefined;
@@ -148,7 +165,7 @@ app.whenReady().then(async () => {
     mainWindow = new BrowserWindow({
       width: 1440,
       height: 900,
-      title: "presscheck",
+      title: "blueline",
       show: true,
       webPreferences: {
         preload: join(__dirname, "preload.cjs"),
@@ -180,9 +197,9 @@ app.whenReady().then(async () => {
       app.exit(0);
     }
   } catch (err) {
-    smokeLog("[presscheck] startup failed: " + String(err));
+    smokeLog("[blueline] startup failed: " + String(err));
     if (SMOKE) app.exit(1);
-    else dialog.showErrorBox("presscheck failed to start", err instanceof Error ? err.message : String(err));
+    else dialog.showErrorBox("blueline failed to start", err instanceof Error ? err.message : String(err));
   }
 });
 
@@ -191,7 +208,7 @@ ipcMain.handle("export-pdf", async () => exportPdf());
 ipcMain.handle("choose-directory", async () => {
   const picked = await dialog.showOpenDialog(mainWindow!, {
     title: "Choose workspace folder",
-    message: "Pick the folder where presscheck keeps projects, context, and styles",
+    message: "Pick the folder where blueline keeps projects, context, and styles",
     properties: ["openDirectory", "createDirectory"],
   });
   return picked.canceled ? null : (picked.filePaths[0] ?? null);

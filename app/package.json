@@ -1,5 +1,5 @@
 {
-  "name": "presscheck-app",
+  "name": "blueline-app",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -45,8 +45,8 @@
   },
   "main": "dist-electron/main.cjs",
   "build": {
-    "appId": "com.presscheck.app",
-    "productName": "presscheck",
+    "appId": "com.blueline.app",
+    "productName": "blueline",
     "asar": false,
     "directories": {
       "output": "release"

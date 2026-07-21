@@ -2,10 +2,10 @@
 export type Theme = "dark" | "light";
 
 export function currentTheme(): Theme {
-  return localStorage.getItem("presscheck-theme") === "light" ? "light" : "dark";
+  return localStorage.getItem("blueline-theme") === "light" ? "light" : "dark";
 }
 
 export function applyTheme(theme: Theme): void {
-  localStorage.setItem("presscheck-theme", theme);
+  localStorage.setItem("blueline-theme", theme);
   document.documentElement.classList.toggle("dark", theme === "dark");
 }

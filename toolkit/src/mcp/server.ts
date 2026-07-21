@@ -35,7 +35,7 @@ function text(value: unknown) {
   return { content: [{ type: "text" as const, text: typeof value === "string" ? value : JSON.stringify(value, null, 2) }] };
 }
 
-const server = new McpServer({ name: "presscheck", version: "0.1.0" });
+const server = new McpServer({ name: "blueline", version: "0.1.0" });
 
 server.tool(
   "workspace_status",
@@ -173,4 +173,4 @@ server.tool(
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error(`presscheck MCP server ready (bridge: ${BRIDGE})`);
+console.error(`blueline MCP server ready (bridge: ${BRIDGE})`);

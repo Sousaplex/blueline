@@ -162,7 +162,7 @@ export function App() {
   if (bridgeError) {
     return (
       <div className="flex h-screen flex-col items-center justify-center gap-3 text-center">
-        <h1 className="text-xl font-semibold">presscheck</h1>
+        <h1 className="text-xl font-semibold">blueline</h1>
         <p className="max-w-md text-sm text-muted-foreground">{bridgeError}</p>
         <p className="text-sm text-muted-foreground">
           Start the bridge: <code className="rounded bg-muted px-1.5 py-0.5">cd toolkit && npm run serve</code>
@@ -196,7 +196,7 @@ export function App() {
     <div className="flex h-screen flex-col bg-background text-foreground">
       <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
         <img src={logo} alt="" className="size-5 rounded-md" />
-        <span className="text-sm font-semibold tracking-tight">presscheck</span>
+        <span className="text-sm font-semibold tracking-tight">blueline</span>
         <LibrarySheet
           client={client}
           projects={projects}

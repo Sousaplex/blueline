@@ -39,7 +39,7 @@ export function HomeScreen({
     <div className="flex h-screen flex-col bg-background text-foreground">
       <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
         <img src={logo} alt="" className="size-5 rounded-md" />
-        <span className="text-sm font-semibold tracking-tight">presscheck</span>
+        <span className="text-sm font-semibold tracking-tight">blueline</span>
         <span className="truncate font-mono text-xs text-muted-foreground" title={workspaceRoot}>
           {workspaceRoot}
         </span>

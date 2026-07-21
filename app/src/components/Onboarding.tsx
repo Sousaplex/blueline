@@ -71,7 +71,7 @@ export function Onboarding({
       <div className="w-full max-w-lg space-y-8">
         <div className="space-y-1 text-center">
           <img src={logo} alt="" className="mx-auto mb-4 size-16 rounded-2xl shadow-lg" />
-          <h1 className="text-2xl font-semibold tracking-tight">presscheck</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">blueline</h1>
           <p className="text-sm text-muted-foreground">Print-ready marketing collateral, designed and press-checked by an agent.</p>
         </div>
 

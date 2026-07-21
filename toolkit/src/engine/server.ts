@@ -922,7 +922,7 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
 
   await new Promise<void>((resolve) => server.listen(port, resolve));
   console.log(
-    `presscheck bridge — workspace=${bridge.workspace.root} project=${bridge.project?.slug ?? "(none)"} http://localhost:${port}`,
+    `blueline bridge — workspace=${bridge.workspace.root} project=${bridge.project?.slug ?? "(none)"} http://localhost:${port}`,
   );
 
   const shutdown = async () => {
