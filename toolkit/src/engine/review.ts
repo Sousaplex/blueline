@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { GoogleGenAI, Type as GType } from "@google/genai";
 import type { ReviewResult } from "../providers/types.ts";
@@ -12,6 +12,21 @@ export class RoundLimitError extends Error {
     super(
       `Review round limit reached (${maxRounds}). Stop iterating: summarize the remaining issues from the latest review for the human instead.`,
     );
+  }
+}
+
+/** The round cap is per RUN, not per project lifetime — this marks where a run started. */
+export function markRunStart(project: Project): void {
+  writeFileSync(join(project.dir, ".run-start.json"), JSON.stringify({ startRound: project.completedRounds() }));
+}
+
+function runStartRound(project: Project): number {
+  const p = join(project.dir, ".run-start.json");
+  if (!existsSync(p)) return 0;
+  try {
+    return Number(JSON.parse(readFileSync(p, "utf8")).startRound) || 0;
+  } catch {
+    return 0;
   }
 }
 
@@ -51,7 +66,8 @@ export async function runReview(
   config: PresscheckConfig,
 ): Promise<{ round: number; result: ReviewResult; pageCount: number }> {
   const completed = project.completedRounds();
-  if (completed >= config.reviewer.maxRounds) throw new RoundLimitError(config.reviewer.maxRounds);
+  const thisRun = completed - runStartRound(project);
+  if (thisRun >= config.reviewer.maxRounds) throw new RoundLimitError(config.reviewer.maxRounds);
   if (!existsSync(project.proofPdf)) {
     throw new Error(`No proof.pdf found — call the render tool before requesting a review.`);
   }
@@ -87,7 +103,7 @@ export async function runReview(
     describeWhitespace(whitespace),
     "Any measured interior empty band taller than ~12% of the page is dead space unless it is",
     "unmistakably deliberate framing; name it in issues with a concrete layout fix.",
-    `This is review round ${completed + 1} of at most ${config.reviewer.maxRounds}.`,
+    `This is review round ${thisRun + 1} of at most ${config.reviewer.maxRounds} for this run (round ${completed + 1} in the project's history).`,
     "",
     `# Brief\n${project.brief()}`,
     "",

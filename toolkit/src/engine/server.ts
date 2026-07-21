@@ -13,6 +13,7 @@ import { generateImages } from "./images.ts";
 import { listEditable, listImageSlots, selectVariant, setImageStyle, updateCopy } from "./page-edit.ts";
 import { Project } from "./project.ts";
 import { PlaywrightBackend } from "./render.ts";
+import { markRunStart } from "./review.ts";
 import { resetSearchBudget } from "./search.ts";
 import { createPresscheckSession, type PresscheckSession } from "./session.ts";
 import { suggestDirections, variantBrief, type Direction } from "./variants.ts";
@@ -152,6 +153,7 @@ class Bridge {
       const project = this.project?.slug === slug ? this.project : new Project(slug, this.workspace);
       resetFetchBudget(project);
       resetSearchBudget(project);
+      markRunStart(project); // review round cap is per run
       this.runStates.set(slug, "running");
       this.broadcast({ type: "run_state", project: slug, state: "running" });
       const prompt =

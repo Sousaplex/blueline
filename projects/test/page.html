@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Clincove One-Pager</title>
+  <title>Clincove | The Unified Operational Layer for Modern Clinical Trials</title>
   <style>
-    /* Print Setup */
+    /* Print & Base Setup */
     @page {
       size: A4;
       margin: 0;
@@ -19,11 +19,11 @@
     body {
       width: 210mm;
       height: 297mm;
-      background-color: #F5EEE4; /* Warm cream */
-      color: #2B1D16; /* Espresso brown */
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      font-size: 10pt;
-      line-height: 1.45;
+      background-color: #FFFFFF;
+      color: #0A2540; /* Clincove Theme Color */
+      font-family: "Plus Jakarta Sans", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 9.5pt;
+      line-height: 1.4;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
@@ -33,308 +33,446 @@
       position: relative;
       width: 210mm;
       height: 297mm;
-      padding: 16mm;
+      padding: 18mm;
+      display: flex;
+      flex-direction: column;
       overflow: hidden;
     }
 
-    /* Header */
+    /* Header Styling */
     header {
-      height: 18mm;
-      display: flex;
-      flex-direction: column;
-      justify-content: flex-end;
-      padding-bottom: 2mm;
-    }
-
-    .brand-container {
       display: flex;
       justify-content: space-between;
-      align-items: flex-end;
+      align-items: center;
+      margin-bottom: 6mm;
+      padding-bottom: 4mm;
+      border-bottom: 2px solid #F0F4F8;
     }
 
-    .logo {
-      font-family: Georgia, serif;
-      font-size: 28pt;
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 3mm;
+    }
+
+    .brand-logo {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 10mm;
+      height: 10mm;
+      background: linear-gradient(135deg, #7200ff 0%, #0db4e8 100%);
+      border-radius: 2.5mm;
+      color: #FFFFFF;
       font-weight: 800;
+      font-size: 14pt;
+    }
+
+    .brand-name {
+      font-size: 18pt;
+      font-weight: 800;
+      color: #0A2540;
       letter-spacing: -0.5px;
-      line-height: 1.1;
-      color: #2B1D16;
     }
 
-    /* Typography */
-    h1, h2, h3, h4, .logo, .subtitle-banner h2, .section-title, .highlight-title {
-      font-family: Georgia, "Times New Roman", Times, serif !important;
+    .brand-name span {
+      background: linear-gradient(135deg, #7200ff 0%, #0db4e8 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
     }
 
-    .logo span {
-      color: #C1673C; /* Copper accent */
+    .header-tagline {
+      font-size: 9.5pt;
+      font-weight: 600;
+      color: #425466;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
     }
 
-    .tagline {
-      font-family: Georgia, serif;
-      font-style: italic;
-      font-size: 10.5pt;
-      color: #1F4A46; /* Deep teal sparingly */
-      margin-bottom: 2mm;
+    /* Hero Block */
+    .hero-block {
+      margin-bottom: 8mm;
     }
 
-    .header-rule {
-      width: 100%;
-      height: 1pt;
-      background-color: #C1673C;
-      margin-top: 2mm;
+    .hero-headline {
+      font-size: 20pt;
+      font-weight: 800;
+      line-height: 1.25;
+      color: #0A2540;
+      letter-spacing: -0.5px;
+      margin-bottom: 3mm;
     }
 
-    /* Subtitle Banner */
-    .subtitle-banner {
-      margin-top: 4mm;
+    .hero-subheadline {
+      font-size: 11pt;
+      font-weight: 500;
+      line-height: 1.45;
+      color: #425466;
+      max-width: 160mm;
+    }
+
+    /* Main Grid: Unequal Columns */
+    .main-grid {
+      display: flex;
+      gap: 8mm;
+      flex-grow: 1;
       margin-bottom: 6mm;
     }
 
-    .subtitle-banner h2 {
-      font-family: Georgia, serif;
-      font-size: 14pt;
-      font-weight: 400;
-      line-height: 1.3;
-      color: #2B1D16;
-    }
-
-    /* Main Content Grid */
-    .content-grid {
-      display: flex;
-      height: 165mm;
-      position: relative;
-    }
-
-    /* Left Column (Primary Copy) */
-    .left-col {
-      width: 106mm;
-      height: 100%;
+    /* Left Column: Primary Narrative & Features (approx 58%) */
+    .left-column {
+      width: 102mm;
       display: flex;
       flex-direction: column;
-      justify-content: space-between;
-      padding-right: 6mm;
-    }
-
-    .section-block {
-      margin-bottom: 6mm;
-    }
-
-    .section-block:last-child {
-      margin-bottom: 0;
+      gap: 6mm;
     }
 
     .section-title {
-      font-family: Georgia, serif;
-      font-size: 12.5pt;
-      font-weight: 700;
-      color: #2B1D16;
+      font-size: 11pt;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.75px;
+      color: #7200ff;
       margin-bottom: 2mm;
-      line-height: 1.2;
     }
 
-    .section-body {
+    .narrative-block p {
       font-size: 9.5pt;
-      color: #2B1D16;
-      text-align: justify;
+      color: #425466;
+      margin-bottom: 2.5mm;
+      text-align: left;
     }
 
-    /* Vertical Separator */
-    .vertical-rule {
-      position: absolute;
-      left: 112mm;
-      top: 0;
-      width: 1pt;
-      height: 100%;
-      background-color: rgba(193, 103, 60, 0.3); /* Transparent copper */
-    }
-
-    /* Right Column (Sidebar & Bleed Image) */
-    .right-col {
-      position: absolute;
-      left: 118mm;
-      width: 92mm; /* Goes to the edge of the page: 118mm + 92mm = 210mm */
-      height: 100%;
+    .features-list {
       display: flex;
       flex-direction: column;
+      gap: 4.5mm;
     }
 
-    /* Right-side Bleed Image */
-    .bleed-image-container {
-      width: 92mm; /* Reaches the absolute right edge */
-      height: 52mm;
+    .feature-item {
+      display: flex;
+      gap: 3mm;
+    }
+
+    .feature-icon {
+      flex-shrink: 0;
+      width: 5mm;
+      height: 5mm;
+      margin-top: 0.5mm;
+      border-radius: 50%;
+      background-color: rgba(114, 0, 255, 0.1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #7200ff;
+      font-weight: bold;
+      font-size: 8pt;
+    }
+
+    .feature-content h4 {
+      font-size: 10pt;
+      font-weight: 700;
+      color: #0A2540;
+      margin-bottom: 1mm;
+    }
+
+    .feature-content p {
+      font-size: 9pt;
+      color: #425466;
+      line-height: 1.35;
+    }
+
+    /* Right Column: Key Visual & Impact Cards (approx 42%) */
+    .right-column {
+      width: 64mm;
+      display: flex;
+      flex-direction: column;
+      gap: 6mm;
+    }
+
+    /* Visual Hero Crop Frame */
+    .image-crop-frame {
+      width: 64mm;
+      height: 48mm;
+      border-radius: 3mm;
       overflow: hidden;
-      margin-bottom: 6mm;
+      box-shadow: 0 4px 20px rgba(10, 37, 64, 0.08);
+      border: 1px solid #F0F4F8;
     }
 
-    .sidebar-image {
+    .image-crop-frame img {
       width: 100%;
       height: 100%;
       object-fit: cover;
       display: block;
     }
 
-    /* Highlights Section (with padding to respect margins) */
-    .highlights-container {
-      padding-right: 16mm; /* Keeps text within 16mm margin of page edge */
+    /* Stats High-Impact Card */
+    .stats-card {
+      background: #0A2540;
+      border-radius: 3mm;
+      padding: 5mm;
+      color: #FFFFFF;
       display: flex;
       flex-direction: column;
-      justify-content: space-between;
-      flex-grow: 1;
+      gap: 4.5mm;
     }
 
-    .highlight-block {
-      margin-bottom: 4mm;
-    }
-
-    .highlight-block:last-child {
-      margin-bottom: 0;
-    }
-
-    .highlight-title {
-      font-family: Georgia, serif;
-      font-size: 11pt;
+    .stats-card-title {
+      font-size: 8pt;
       font-weight: 700;
-      color: #1F4A46; /* Deep teal */
-      margin-bottom: 1mm;
-      line-height: 1.2;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #0db4e8;
     }
 
-    .highlight-body {
+    .stat-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 3.5mm;
+    }
+
+    .stat-number {
+      font-size: 20pt;
+      font-weight: 800;
+      color: #FFFFFF;
+      line-height: 1;
+      flex-shrink: 0;
+      width: 18mm;
+      text-align: right;
+    }
+
+    .stat-number span {
+      color: #0db4e8;
+    }
+
+    .stat-info {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .stat-label {
       font-size: 9pt;
-      color: #2B1D16;
+      font-weight: 700;
+      color: #FFFFFF;
+    }
+
+    .stat-desc {
+      font-size: 8pt;
+      color: #a0a0b0;
+      line-height: 1.25;
+      margin-top: 0.5mm;
+    }
+
+    /* Compliance Badges Block */
+    .compliance-block {
+      background-color: #F8FAFC;
+      border-radius: 3mm;
+      padding: 4mm;
+      border: 1px solid #E2E8F0;
+    }
+
+    .compliance-title {
+      font-size: 8pt;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.75px;
+      color: #425466;
+      margin-bottom: 2mm;
+    }
+
+    .compliance-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 2mm;
+    }
+
+    .badge {
+      font-size: 7.5pt;
+      font-weight: 700;
+      background-color: #FFFFFF;
+      color: #0A2540;
+      padding: 1mm 2.5mm;
+      border-radius: 1.5mm;
+      border: 1px solid #E2E8F0;
     }
 
     /* Footer */
     footer {
-      position: absolute;
-      bottom: 16mm;
-      left: 16mm;
-      width: calc(210mm - 32mm);
-      height: 16mm;
-      display: flex;
-      flex-direction: column;
-      justify-content: flex-end;
-    }
-
-    .footer-rule {
-      width: 100%;
-      height: 1pt;
-      background-color: #C1673C;
-      margin-bottom: 3mm;
-    }
-
-    .footer-content {
+      border-top: 2px solid #F0F4F8;
+      padding-top: 4mm;
       display: flex;
       justify-content: space-between;
       align-items: flex-end;
     }
 
-    .footer-cta {
-      font-family: Georgia, serif;
-      font-size: 11pt;
-      font-weight: 700;
-      color: #C1673C; /* Copper */
+    .footer-left {
+      display: flex;
+      flex-direction: column;
+      gap: 1mm;
     }
 
-    .footer-note {
-      font-size: 8pt;
-      color: #2B1D16;
-      opacity: 0.7;
+    .footer-title {
+      font-size: 10pt;
+      font-weight: 800;
+      color: #0A2540;
+    }
+
+    .footer-contact {
+      font-size: 8.5pt;
+      font-weight: 600;
+      color: #7200ff;
+    }
+
+    .footer-right {
       text-align: right;
-      max-width: 90mm;
+      font-size: 8pt;
+      color: #667085;
+      line-height: 1.35;
+    }
+
+    .footer-right strong {
+      color: #0A2540;
     }
   </style>
 </head>
 <body>
 
   <div class="page">
+    
     <!-- Header -->
     <header>
-      <div class="brand-container">
-        <h1 class="logo" data-pc-id="logo">CLINCOVE</h1>
-        <div class="tagline" data-pc-id="tagline">Unified, AI-Powered Clinical Trial Platform</div>
+      <div class="brand">
+        <div class="brand-logo" data-pc-id="brand-logo">C</div>
+        <div class="brand-name" data-pc-id="logo">Clin<span>cove</span></div>
       </div>
-      <div class="header-rule"></div>
+      <div class="header-tagline" data-pc-id="tagline">Unified Clinical Operations</div>
     </header>
 
-    <!-- Subtitle Banner -->
-    <div class="subtitle-banner">
-      <h2 data-pc-id="hero-title">Consolidating EDC, eSource, and eTMF into a Single GxP-Validated Clinical Ecosystem</h2>
+    <!-- Hero Section -->
+    <div class="hero-block">
+      <h1 class="hero-headline" data-pc-id="headline">
+        The Unified Operational Layer for Phase I–III Clinical Trials
+      </h1>
+      <p class="hero-subheadline" data-pc-id="subheadline">
+        Consolidate EDC, point-of-care eSource (SMR), eISF, eTMF, and CTMS into a single GxP-validated platform. Eliminate manual transcription and stop paying the legacy software tax.
+      </p>
     </div>
 
-    <!-- Main Content Grid -->
-    <div class="content-grid">
+    <!-- Main Grid -->
+    <div class="main-grid">
       
-      <!-- Left Column (Primary Copy) -->
-      <div class="left-col">
-        <div class="section-block">
-          <h3 class="section-title" data-pc-id="sec-1-title">Protocol AI &amp; Unified Workflows</h3>
-          <p class="section-body" data-pc-id="sec-1-body">
-            Clincove consolidates clinical operations by integrating Electronic Data Capture (EDC), eSource (SMR), and document management (eTMF &amp; eISF) into a single, seamless platform. Its intelligent Protocol AI module reads study protocols to automatically generate compliance-ready Case Report Forms (CRFs), visit checklists, and budgets—slashing setup times from weeks to hours and avoiding disconnected legacy vendors.
+      <!-- Left Column: Primary Narrative & Capabilities -->
+      <div class="left-column">
+        
+        <div class="narrative-block">
+          <h2 class="section-title" data-pc-id="challenge-title">The Operational Challenge</h2>
+          <p data-pc-id="challenge-body-1">
+            Bringing life-saving therapies to market is bogged down by fragmented vendor stacks. Traditional clinical trials require separate systems for data capture, site documents, and trial management—leading to expensive integrations, massive administration burdens, and site staff turnover rates as high as 61%.
+          </p>
+          <p data-pc-id="challenge-body-2">
+            Clincove provides a seamless, GxP-compliant platform that unites sites, sponsors, and CROs under a single digital roof. Deploy studies in weeks, capture verified data directly at the source, and ensure constant audit readiness.
           </p>
         </div>
 
-        <div class="section-block">
-          <h3 class="section-title" data-pc-id="sec-2-title">Uncompromising HIPAA Scope Isolation</h3>
-          <p class="section-body" data-pc-id="sec-2-body">
-            Designed for secure data-plane execution, Clincove enforces multi-tenant security and strict patient-level isolation on all clinical databases. Backed by the robust StrangeLoop engine, the platform implements a deny-by-default architecture where records for specific studies (e.g., Study <code>SL-TEST-A</code>, Patient <code>P1</code>) are strictly isolated from sibling records or foreign studies, ensuring absolute patient privacy.
-          </p>
+        <div class="features-list">
+          <h2 class="section-title" data-pc-id="capabilities-title">Core Platform Capabilities</h2>
+          
+          <div class="feature-item">
+            <div class="feature-icon">✔</div>
+            <div class="feature-content">
+              <h4 data-pc-id="feature-1-title">Protocol AI &amp; Automation</h4>
+              <p data-pc-id="feature-1-body">
+                Upload trial protocol PDFs to instantly auto-generate CDISC-compliant Case Report Forms (CRFs), custom edit checks, and full clinical visit schedules in hours instead of weeks.
+              </p>
+            </div>
+          </div>
+
+          <div class="feature-item">
+            <div class="feature-icon">✔</div>
+            <div class="feature-content">
+              <h4 data-pc-id="feature-2-title">Point-of-Care eSource (SMR) &amp; EDC</h4>
+              <p data-pc-id="feature-2-body">
+                Capture clinical trial data directly during patient visits. Our smart digital medical records sync instantly with the EDC, preventing manual transcription and side-by-side data queries.
+              </p>
+            </div>
+          </div>
+
+          <div class="feature-item">
+            <div class="feature-icon">✔</div>
+            <div class="feature-content">
+              <h4 data-pc-id="feature-3-title">Unified eISF &amp; eTMF Synchronicity</h4>
+              <p data-pc-id="feature-3-body">
+                Investigator Site Files and Trial Master Files communicate in real-time. Document uploads automatically index with OCR and TMF reference standards for absolute compliance.
+              </p>
+            </div>
+          </div>
         </div>
 
-        <div class="section-block">
-          <h3 class="section-title" data-pc-id="sec-3-title">Point-of-Care eSource Synchronization</h3>
-          <p class="section-body" data-pc-id="sec-3-body">
-            By capturing Source Medical Records (SMR) digitally at the point of care during patient visits, Clincove streams structured, timestamped data directly into the EDC. This completely eliminates manual transcription steps, prevents up to 3,200 data discrepancies per trial, and accelerates database locks using automated AI-driven queries and integrated medical coding (MedDRA and WHODrug).
-          </p>
-        </div>
       </div>
 
-      <!-- Vertical Separator Rule -->
-      <div class="vertical-rule"></div>
-
-      <!-- Right Column (Sidebar & Bleed Image) -->
-      <div class="right-col">
-        <!-- Right-side Bleed Image -->
-        <div class="bleed-image-container">
-          <img style="object-fit: cover" src="images/hero/v2.png" data-image-id="hero" class="sidebar-image" alt="Clinical Research Collaboration">
+      <!-- Right Column: Image, Quantifiable Impact & Compliance -->
+      <div class="right-column">
+        
+        <!-- Cropped Hero Visual -->
+        <div class="image-crop-frame">
+          <img src="images/hero/v7.png" data-image-id="hero" alt="Clincove Unified Clinical Dashboard">
         </div>
 
-        <!-- Highlights Section -->
-        <div class="highlights-container">
-          <div class="highlight-block">
-            <h4 class="highlight-title" data-pc-id="hl-1-title">75% Faster Study Startup</h4>
-            <p class="highlight-body" data-pc-id="hl-1-body">
-              Clincove cuts average study deployment from 12 weeks to 2-4 weeks, launching first patient visits rapidly with zero upfront infrastructure costs.
-            </p>
+        <!-- High-Impact Stats Box -->
+        <div class="stats-card">
+          <div class="stats-card-title" data-pc-id="stats-card-title">Quantifiable Trial Impact</div>
+          
+          <div class="stat-row">
+            <div class="stat-number" data-pc-id="stat-1-val">-75<span>%</span></div>
+            <div class="stat-info">
+              <div class="stat-label" data-pc-id="stat-1-lbl">Study Build Time</div>
+              <div class="stat-desc" data-pc-id="stat-1-desc">Deploy EDC in 2–4 weeks compared to traditional 12-week cycles.</div>
+            </div>
           </div>
 
-          <div class="highlight-block">
-            <h4 class="highlight-title" data-pc-id="hl-2-title">Therapeutic Solutions</h4>
-            <p class="highlight-body" data-pc-id="hl-2-body">
-              Specialized Oncology modules deliver 40% faster safety signal detection, while Vaccine modules enable 70% faster site activation.
-            </p>
+          <div class="stat-row">
+            <div class="stat-number" data-pc-id="stat-2-val">-80<span>%</span></div>
+            <div class="stat-info">
+              <div class="stat-label" data-pc-id="stat-2-lbl">Data Queries</div>
+              <div class="stat-desc" data-pc-id="stat-2-desc">Eliminate transcription errors with point-of-care source data validation.</div>
+            </div>
           </div>
 
-          <div class="highlight-block">
-            <h4 class="highlight-title" data-pc-id="hl-3-title">Instant eISF &amp; eTMF Sync</h4>
-            <p class="highlight-body" data-pc-id="hl-3-body">
-              Site uploads to the Investigator Site File sync instantly with the Trial Master File, automatically indexed using OCR and TMF standards.
-            </p>
+          <div class="stat-row">
+            <div class="stat-number" data-pc-id="stat-3-val">-60<span>%</span></div>
+            <div class="stat-info">
+              <div class="stat-label" data-pc-id="stat-3-lbl">Integration Costs</div>
+              <div class="stat-desc" data-pc-id="stat-3-desc">Consolidate up to 4 legacy vendor software contracts into 1 unified platform.</div>
+            </div>
           </div>
         </div>
+
+        <!-- Compliance Block -->
+        <div class="compliance-block">
+          <div class="compliance-title" data-pc-id="compliance-title">Compliance by Design</div>
+          <div class="compliance-badges">
+            <div class="badge" data-pc-id="badge-1">FDA 21 CFR Part 11</div>
+            <div class="badge" data-pc-id="badge-2">HIPAA</div>
+            <div class="badge" data-pc-id="badge-3">GDPR</div>
+            <div class="badge" data-pc-id="badge-4">GxP</div>
+            <div class="badge" data-pc-id="badge-5">ICH E6(R2) GCP</div>
+          </div>
+        </div>
+
       </div>
 
     </div>
 
     <!-- Footer -->
     <footer>
-      <div class="footer-rule"></div>
-      <div class="footer-content">
-        <div class="footer-cta" data-pc-id="footer-cta">Ready to accelerate your trials? Contact clinicalops@clincove.com</div>
-        <div class="footer-note" data-pc-id="footer-note">
-          Clincove is founded by Mehdi Al-Khalissi &amp; Michael Sousa. Fully FDA 21 CFR Part 11, HIPAA, and GDPR compliant. Powered by StrangeLoop.
-        </div>
+      <div class="footer-left">
+        <div class="footer-title" data-pc-id="footer-title">Ready to streamline your trials?</div>
+        <div class="footer-contact" data-pc-id="footer-contact">clincove.com &bull; contact@clincove.com</div>
+      </div>
+      <div class="footer-right" data-pc-id="footer-right">
+        Founded by <strong>Mehdi Al-Khalissi (CEO)</strong> &amp; <strong>Michael Sousa (CTO)</strong><br>
+        Toronto, ON &bull; Wilmington, DE
       </div>
     </footer>
 

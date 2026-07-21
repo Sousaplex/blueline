@@ -1,4 +1,6 @@
 // CLI entry: npm run agent -- projects/<slug> [--model provider/model] [--prompt "..."]
+import { markRunStart } from "./review.ts";
+import { resetSearchBudget } from "./search.ts";
 import { resetFetchBudget } from "./web-fetch.ts";
 import { createPresscheckSession } from "./session.ts";
 
@@ -23,6 +25,8 @@ const { session, project, config, dispose } = await createPresscheckSession({
 });
 
 resetFetchBudget(project);
+resetSearchBudget(project);
+markRunStart(project);
 console.log(`presscheck engine — project=${project.slug} model=${session.model?.id} reviewer=${config.reviewer.model}`);
 
 let currentTool: string | undefined;
