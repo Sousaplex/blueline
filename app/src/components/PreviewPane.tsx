@@ -146,15 +146,21 @@ export function PreviewPane({
       setNudge(next);
     };
 
+    // A container holding other blocks must never become contenteditable: blurring it
+    // would replace ALL of its children with flat text (this destroyed a page once).
+    const isStructural = (el: HTMLElement) =>
+      Boolean(el.querySelector("[data-pc-id], [data-image-id], img, div, section, header, footer, main, article, aside, ul, ol, table, figure"));
+
     doc.querySelectorAll<HTMLElement>("[data-pc-id]").forEach((el) => {
       el.addEventListener("click", (ev) => {
+        ev.stopPropagation(); // innermost block wins — never bubble edits to containers
         if (editToolRef.current === "nudge") {
           ev.preventDefault();
-          ev.stopPropagation(); // innermost block wins
           selectForNudge(el);
           return;
         }
         ev.preventDefault();
+        if (isStructural(el)) return; // containers are nudge-only, not text-editable
         el.setAttribute("contenteditable", "plaintext-only");
         el.focus();
       });

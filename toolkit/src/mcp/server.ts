@@ -18,7 +18,8 @@ async function api(path: string, body?: unknown): Promise<any> {
   try {
     res = await fetch(`${BRIDGE}${path}`, {
       method: body === undefined ? "GET" : "POST",
-      headers: { "content-type": "application/json" },
+      // The client tag shows up in the app's System tab so humans can watch MCP drive it.
+      headers: { "content-type": "application/json", "x-blueline-client": "mcp" },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {

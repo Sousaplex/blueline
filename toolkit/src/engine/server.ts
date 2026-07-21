@@ -9,6 +9,7 @@ import { dirname, extname, join, normalize, resolve } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { WebSocketServer, type WebSocket } from "ws";
 import { DATA_ROOT, REPO_ROOT, loadConfig, saveApiKeys, type PresscheckConfig } from "./config.ts";
+import { gitClone, gitConnect, gitStatus, gitSync } from "./git-sync.ts";
 import { generateImages } from "./images.ts";
 import {
   getElementStyle,
@@ -60,6 +61,7 @@ class Bridge {
   private runStates = new Map<string, RunState>(); // slug -> queued|running
   private runQueue: string[] = [];
   private buffers = new Map<string, WireEvent[]>(); // slug -> recent events
+  private systemFeed: WireEvent[] = []; // API/MCP actions, for the System tab
   private sockets = new Set<WebSocket>();
   private proofCache = new Map<string, { mtime: number; pages: Buffer[] }>();
   private registryRuntime?: ModelRuntime;
@@ -137,6 +139,18 @@ class Bridge {
 
   feedFor(slug: string): WireEvent[] {
     return this.buffers.get(slug) ?? [];
+  }
+
+  /** Record an externally-triggered action (UI, MCP, raw API) for the System tab. */
+  logSystem(source: string, action: string, detail: string): void {
+    const event: WireEvent = { type: "system", source, action, detail, at: Date.now() };
+    this.systemFeed.push(event);
+    if (this.systemFeed.length > 300) this.systemFeed.splice(0, this.systemFeed.length - 300);
+    this.broadcast(event);
+  }
+
+  systemEvents(): WireEvent[] {
+    return this.systemFeed.slice(-200);
   }
 
   /** One Pi session per project, created on demand, events tagged with the slug. */
@@ -588,6 +602,9 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+    // Who is driving? The app sends nothing; the MCP server tags itself. Shown in the System tab.
+    const source = String(req.headers["x-blueline-client"] ?? "app");
+    const sys = (action: string, detail: string) => bridge.logSystem(source, action, detail);
     try {
       if (req.method === "OPTIONS") {
         res.writeHead(204, {
@@ -644,12 +661,14 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
         const body = await readBody(req);
         if (!body.projectDir) return json(res, 400, { error: "projectDir required" });
         await bridge.openProject(body.projectDir);
+        sys("open_project", String(body.projectDir));
         return json(res, 200, { ok: true });
       }
       if (req.method === "POST" && url.pathname === "/api/project/new") {
         const body = await readBody(req);
         if (!body.name) return json(res, 400, { error: "name required" });
         await bridge.createProject(body.name, body.brief, body.meta);
+        sys("create_project", String(body.name));
         return json(res, 200, { ok: true });
       }
       if (req.method === "POST" && url.pathname === "/api/project/close") {
@@ -660,6 +679,7 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
         const body = await readBody(req);
         if (!body.slug) return json(res, 400, { error: "slug required" });
         await bridge.deleteProject(body.slug);
+        sys("delete_project", String(body.slug));
         return json(res, 200, { ok: true });
       }
 
@@ -669,6 +689,7 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
           return json(res, 400, { error: "content required" });
         }
         bridge.requireProject().writeBrief(body.content);
+        sys("update_brief", `${bridge.project!.slug} (${String(body.content).length} chars)`);
         bridge.broadcast({ type: "files_changed", project: bridge.project!.slug });
         return json(res, 200, { ok: true });
       }
@@ -688,6 +709,7 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
         const target = join(dir, rel);
         mkdirSync(dirname(target), { recursive: true });
         writeFileSync(target, Buffer.from(String(body.dataBase64), "base64"));
+        sys("upload_source", `${kind}/${rel}`);
         bridge.broadcast({ type: "files_changed", project: bridge.project?.slug });
         return json(res, 200, { ok: true, path: target });
       }
@@ -723,6 +745,7 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
           ...(body.series !== undefined ? { series: body.series === null ? null : String(body.series) } : {}),
           ...(body.settings ? { settings: body.settings } : {}),
         });
+        sys("set_project_meta", project.slug);
         bridge.broadcast({ type: "files_changed", project: project.slug });
         bridge.broadcast({ type: "projects_changed" });
         return json(res, 200, { ok: true, meta });
@@ -735,6 +758,7 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
           round: body.round != null ? Number(body.round) : undefined,
           name: body.name ? String(body.name) : undefined,
         });
+        sys("branch_project", `${body.slug}${body.round != null ? ` @ round ${body.round}` : ""} -> ${slug}`);
         if (body.open !== false) await bridge.openProject(slug);
         return json(res, 200, { ok: true, slug });
       }
@@ -750,6 +774,7 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
           body.topics.map(String),
           body.run !== false,
         );
+        sys("create_series", `${body.rootName}: ${created.map((c: { slug: string }) => c.slug).join(", ")}`);
         return json(res, 200, { ok: true, created });
       }
 
@@ -893,21 +918,54 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
           return json(res, 400, { error: "directions[] required" });
         }
         const created = await bridge.createVariants(slug, body.directions);
+        sys("create_variants", `${slug} -> ${created.map((c: any) => c.slug).join(", ")}`);
         return json(res, 200, { created });
       }
       if (req.method === "POST" && url.pathname === "/api/run") {
         const body = await readBody(req);
         const state = await bridge.run(body.slug, body.prompt);
+        sys("run_project", `${body.slug ?? bridge.project?.slug}: ${state}`);
         return json(res, 200, { ok: true, state });
       }
       if (req.method === "POST" && url.pathname === "/api/chat") {
         const body = await readBody(req);
         if (!body.text) return json(res, 400, { error: "text required" });
         await bridge.chat(body.text);
+        sys("chat", String(body.text).slice(0, 120));
         return json(res, 200, { ok: true });
       }
       if (req.method === "POST" && url.pathname === "/api/render") {
         await bridge.render();
+        return json(res, 200, { ok: true });
+      }
+
+
+      if (url.pathname === "/api/system") {
+        return json(res, 200, { events: bridge.systemEvents() });
+      }
+      if (url.pathname === "/api/git/status") {
+        return json(res, 200, await gitStatus(bridge.workspace.root));
+      }
+      if (req.method === "POST" && url.pathname === "/api/git/connect") {
+        const body = await readBody(req);
+        if (!body.url) return json(res, 400, { error: "url required" });
+        const status = await gitConnect(bridge.workspace.root, String(body.url));
+        sys("git_connect", String(body.url));
+        return json(res, 200, { ok: true, status });
+      }
+      if (req.method === "POST" && url.pathname === "/api/git/sync") {
+        const body = await readBody(req);
+        const result = await gitSync(bridge.workspace.root, body.message ? String(body.message) : undefined);
+        sys("git_sync", result.summary);
+        bridge.broadcast({ type: "files_changed", project: bridge.project?.slug });
+        return json(res, 200, { ok: true, ...result });
+      }
+      if (req.method === "POST" && url.pathname === "/api/git/clone") {
+        const body = await readBody(req);
+        if (!body.url || !body.dest) return json(res, 400, { error: "url and dest required" });
+        await gitClone(String(body.url), String(body.dest));
+        await bridge.setWorkspace(String(body.dest));
+        sys("git_clone", `${body.url} -> ${body.dest}`);
         return json(res, 200, { ok: true });
       }
 

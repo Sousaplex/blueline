@@ -21,6 +21,7 @@ import {
   type ProjectState,
   type RunState,
   type SetupState,
+  type SystemEvent,
 } from "./engine-client";
 
 /** Fold one wire event into the feed (used for both live events and replay). */
@@ -62,6 +63,7 @@ export function App() {
   const [projects, setProjects] = useState<ProjectListing[]>([]);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [setup, setSetup] = useState<SetupState | null>(null);
+  const [systemFeed, setSystemFeed] = useState<SystemEvent[]>([]);
   const refreshTimer = useRef<number | undefined>(undefined);
   const currentSlug = useRef<string | null>(null);
 
@@ -90,8 +92,12 @@ export function App() {
     void refresh();
     void client.listProjects().then(setProjects);
     void client.getSetup().then(setSetup).catch(() => setSetup(null));
+    void client.getSystemEvents().then(setSystemFeed).catch(() => {});
     return client.subscribe((event: EngineEvent) => {
       switch (event.type) {
+        case "system":
+          setSystemFeed((f) => [...f.slice(-299), event]);
+          break;
         case "hello":
           currentSlug.current = event.project;
           setRunStates(event.runStates);
@@ -194,9 +200,14 @@ export function App() {
 
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
-      <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
+      <header className="relative flex h-12 shrink-0 items-center gap-3 border-b px-4">
         <img src={logo} alt="" className="size-6" />
         <span className="text-sm font-semibold tracking-tight">blueline</span>
+        {running && (
+          <div className="absolute inset-x-0 bottom-0 h-0.5 overflow-hidden">
+            <div className="pc-indeterminate h-full w-1/3 rounded-full bg-blue-500" />
+          </div>
+        )}
         <LibrarySheet
           client={client}
           projects={projects}
@@ -251,7 +262,7 @@ export function App() {
       <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)_340px] grid-rows-1 overflow-hidden">
         <LeftPane project={project} client={client} cacheKey={cacheKey} viewRound={viewRound} onViewRound={setViewRound} />
         <PreviewPane project={project} client={client} cacheKey={cacheKey} actions={actions} viewRound={viewRound} onViewRound={setViewRound} />
-        <AgentPane feed={feed} running={running} onChat={(t) => void actions.chat(t)} />
+        <AgentPane feed={feed} systemFeed={systemFeed} running={running} onChat={(t) => void actions.chat(t)} />
       </div>
     </div>
   );

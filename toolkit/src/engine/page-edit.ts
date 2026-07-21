@@ -36,10 +36,20 @@ export function listEditable(project: Project): EditableText[] {
   }));
 }
 
+/** True if replacing this element's content with flat text would destroy page structure. */
+function isStructural(el: any): boolean {
+  return Boolean(el.querySelector("[data-pc-id], [data-image-id], img, div, section, header, footer, main, article, aside, ul, ol, table, figure"));
+}
+
 export function updateCopy(project: Project, pcId: string, text: string): void {
   const { dom } = loadDom(project);
   const el = dom.document.querySelector(`[data-pc-id="${pcId}"]`);
   if (!el) throw new Error(`No element with data-pc-id="${pcId}"`);
+  // Guard: setting textContent on a container would obliterate every child element
+  // (this once flattened an entire page when a click bubbled to the root container).
+  if (isStructural(el)) {
+    throw new Error(`"${pcId}" is a layout container — edit the text blocks inside it instead`);
+  }
   el.textContent = text;
   save(project, dom.document);
 }

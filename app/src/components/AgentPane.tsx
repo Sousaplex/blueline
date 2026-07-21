@@ -7,13 +7,16 @@ import {
   Loader2,
   Pencil,
   Printer,
+  Satellite,
   ScanEye,
   SendHorizontal,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import type { SystemEvent } from "../engine-client";
 
 export type FeedItem =
   | { kind: "text"; text: string; at: number }
@@ -111,21 +114,31 @@ function ToolRow({ item }: { item: Extract<FeedItem, { kind: "tool" }> }) {
 
 export function AgentPane({
   feed,
+  systemFeed,
   running,
   onChat,
 }: {
   feed: FeedItem[];
+  systemFeed: SystemEvent[];
   running: boolean;
   onChat: (text: string) => void;
 }) {
   const [draft, setDraft] = useState("");
+  const [tab, setTab] = useState<"agent" | "system">("agent");
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
+  const seenSystem = useRef(0);
 
   useEffect(() => {
     const el = scroller.current;
     if (el && pinned.current) el.scrollTop = el.scrollHeight;
-  }, [feed]);
+  }, [feed, systemFeed, tab]);
+
+  if (tab === "system") seenSystem.current = systemFeed.length;
+  const unseenSystem = systemFeed.length - seenSystem.current;
+
+  // What is the agent doing right now? (last tool still executing)
+  const activeTool = running ? [...feed].reverse().find((i) => i.kind === "tool" && !i.done) : undefined;
 
   const send = () => {
     const text = draft.trim();
@@ -136,13 +149,66 @@ export function AgentPane({
 
   return (
     <aside className="flex h-full min-h-0 flex-col overflow-hidden border-l">
-      <div className="flex h-11 shrink-0 items-center gap-2 border-b px-4">
-        <h3 className="text-sm font-medium">Agent</h3>
-        <span
-          className={cn("size-2 rounded-full", running ? "animate-pulse bg-emerald-500" : "bg-muted-foreground/40")}
-          title={running ? "running" : "idle"}
-        />
+      <div className="flex h-11 shrink-0 items-center gap-1 border-b px-3">
+        <button
+          className={cn("rounded-md px-2.5 py-1 text-sm font-medium", tab === "agent" ? "bg-accent" : "text-muted-foreground hover:text-foreground")}
+          onClick={() => setTab("agent")}
+        >
+          Agent
+        </button>
+        <button
+          className={cn("flex items-center gap-1.5 rounded-md px-2.5 py-1 text-sm font-medium", tab === "system" ? "bg-accent" : "text-muted-foreground hover:text-foreground")}
+          onClick={() => setTab("system")}
+        >
+          System
+          {unseenSystem > 0 && (
+            <Badge variant="secondary" className="h-4 px-1 text-[10px] tabular-nums">
+              {unseenSystem}
+            </Badge>
+          )}
+        </button>
+        <div className="flex-1" />
+        {running ? (
+          <span className="flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+            <Loader2 className="size-3 animate-spin" />
+            {activeTool && activeTool.kind === "tool" ? activeTool.tool : "designing"}…
+          </span>
+        ) : (
+          <span className="size-2 rounded-full bg-muted-foreground/40" title="idle" />
+        )}
       </div>
+
+      {tab === "system" ? (
+        <div ref={scroller} className="flex-1 space-y-1 overflow-y-auto p-3 text-sm">
+          {systemFeed.map((e, i) => (
+            <div key={i} className="flex items-start gap-2 rounded-md border bg-muted/30 px-2 py-1.5 font-mono text-xs">
+              <span className="shrink-0 tabular-nums text-muted-foreground">
+                {new Date(e.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+              </span>
+              <Badge
+                variant={e.source === "mcp" ? "default" : "outline"}
+                className={cn("h-4 shrink-0 px-1 text-[10px] uppercase", e.source === "mcp" && "bg-blue-600 text-white hover:bg-blue-600")}
+              >
+                {e.source === "mcp" ? (
+                  <>
+                    <Satellite className="mr-0.5 size-2.5" /> mcp
+                  </>
+                ) : (
+                  e.source
+                )}
+              </Badge>
+              <span className="shrink-0 font-medium">{e.action}</span>
+              <span className="min-w-0 flex-1 break-words text-muted-foreground">{e.detail}</span>
+            </div>
+          ))}
+          {!systemFeed.length && (
+            <p className="text-sm text-muted-foreground">
+              Nothing yet. Actions from the app, the MCP server (Claude Code, Kimi CLI…), or the raw API show up
+              here as they happen.
+            </p>
+          )}
+        </div>
+      ) : (
       <div
         ref={scroller}
         className="flex-1 space-y-1.5 overflow-y-auto p-3 text-sm"
@@ -175,6 +241,7 @@ export function AgentPane({
           </p>
         )}
       </div>
+      )}
       <div className="flex shrink-0 gap-2 border-t p-3">
         <Input
           value={draft}

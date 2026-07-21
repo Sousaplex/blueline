@@ -97,6 +97,23 @@ export type SettingsPatch = {
 
 export type RunState = "idle" | "queued" | "running";
 
+export interface SystemEvent {
+  type: "system";
+  source: string; // "app" | "mcp" | custom client tag
+  action: string;
+  detail: string;
+  at: number;
+}
+
+export interface GitStatus {
+  isRepo: boolean;
+  remote: string | null;
+  branch: string | null;
+  dirty: number;
+  ahead: number;
+  behind: number;
+}
+
 export interface SetupState {
   fresh: boolean;
   workspaceRoot: string;
@@ -117,6 +134,7 @@ export type EngineEvent =
   | { type: "workspace_changed"; root: string; slug: string | null }
   | { type: "projects_changed" }
   | { type: "setup_changed" }
+  | SystemEvent
   | { type: "error"; project?: string; message: string };
 
 export interface ProjectListing {
@@ -163,6 +181,12 @@ export interface EngineClient {
   createSeries(slug: string, rootName: string, topics: string[], run: boolean): Promise<{ slug: string; state: RunState }[]>;
   setElementStyle(pcId: string, style: { translateX?: number; translateY?: number; marginTop?: number | null }): Promise<void>;
   getElementStyle(pcId: string): Promise<ElementNudge>;
+  /** System-tab replay: recent API/MCP-triggered actions. */
+  getSystemEvents(): Promise<SystemEvent[]>;
+  gitStatus(): Promise<GitStatus>;
+  gitConnect(url: string): Promise<GitStatus>;
+  gitSync(message?: string): Promise<{ pulled: boolean; committed: boolean; pushed: boolean; summary: string }>;
+  gitClone(url: string, dest: string): Promise<void>;
   /** Pick a workspace dir (native dialog in Electron, path prompt in browser) and switch to it. */
   chooseWorkspace(): Promise<boolean>;
   /** First-run state: whether onboarding should run, which API keys exist (booleans only). */
@@ -352,6 +376,41 @@ export class BrowserEngineClient implements EngineClient {
   setImageStyle(imageId: string, style: { objectPosition?: string; zoom?: number }) {
     return post("/api/images/style", { imageId, ...style });
   }
+
+  async getSystemEvents(): Promise<SystemEvent[]> {
+    const res = await fetch("/api/system");
+    return (await res.json()).events ?? [];
+  }
+
+  async gitStatus(): Promise<GitStatus> {
+    const res = await fetch("/api/git/status");
+    if (!res.ok) throw new Error(`git status: HTTP ${res.status}`);
+    return res.json();
+  }
+
+  async gitConnect(url: string): Promise<GitStatus> {
+    const res = await fetch("/api/git/connect", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    const payload = await res.json();
+    if (!res.ok) throw new Error(payload.error ?? `git connect: HTTP ${res.status}`);
+    return payload.status;
+  }
+
+  async gitSync(message?: string) {
+    const res = await fetch("/api/git/sync", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message }),
+    });
+    const payload = await res.json();
+    if (!res.ok) throw new Error(payload.error ?? `git sync: HTTP ${res.status}`);
+    return payload;
+  }
+
+  gitClone(url: string, dest: string) { return post("/api/git/clone", { url, dest }); }
 
   async proofMeta(round?: number): Promise<{ pages: number }> {
     const res = await fetch(`/api/proof/meta${round != null ? `?round=${round}` : ""}`);

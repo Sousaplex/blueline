@@ -118,6 +118,15 @@
     --sidebar-ring: oklch(0.556 0 0);
 }
 
+/* Indeterminate "designing…" bar under the topbar while a run is active. */
+@keyframes pc-indeterminate {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(420%); }
+}
+.pc-indeterminate {
+  animation: pc-indeterminate 1.4s ease-in-out infinite;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

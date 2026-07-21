@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import logo from "../assets/logo.png";
 import type { EngineClient, ProjectListing } from "../engine-client";
 import { NewProjectDialog } from "./NewProjectDialog";
+import { GitSyncDialog } from "./GitSyncDialog";
 import { ProjectLibrary } from "./ProjectLibrary";
 import { ThemeToggle } from "./ThemeToggle";
 
@@ -45,6 +46,7 @@ export function HomeScreen({
         </span>
         <div className="flex-1" />
         <ThemeToggle />
+        <GitSyncDialog client={client} />
         <Button size="sm" variant="outline" onClick={() => act(() => client.chooseWorkspace())}>
           <FolderOpen data-slot="icon" /> Change workspace
         </Button>

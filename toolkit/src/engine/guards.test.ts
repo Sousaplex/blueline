@@ -1,6 +1,6 @@
 // Guard tests: web_fetch safety + review round cap. Run: npm test
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -87,6 +87,22 @@ test("project meta defaults are safe on legacy projects and clamp settings", () 
   assert.equal(updated.displayName, "Nice Name");
   assert.equal(updated.settings.pages, 24); // clamped
   assert.equal(updated.settings.pageSize, "A4"); // merge kept defaults
+});
+
+const { updateCopy } = await import("./page-edit.ts");
+
+test("updateCopy refuses to flatten structural containers", () => {
+  const p = tempProject();
+  writeFileSync(
+    p.pageHtml,
+    `<html><body><div data-pc-id="page"><h1 data-pc-id="headline">Hi</h1><p data-pc-id="sub">There</p></div></body></html>`,
+  );
+  // Leaf edits work…
+  updateCopy(p, "headline", "New headline");
+  // …but a container edit must throw instead of destroying its children.
+  assert.throws(() => updateCopy(p, "page", "flattened text"), /layout container/);
+  const html = readFileSync(p.pageHtml, "utf8");
+  assert.ok(html.includes("New headline") && html.includes('data-pc-id="sub"'));
 });
 
 test("element nudge clamps offsets and round-trips through page.html", () => {

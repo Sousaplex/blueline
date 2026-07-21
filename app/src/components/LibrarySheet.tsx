@@ -22,6 +22,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import type { EngineClient, ProjectListing } from "../engine-client";
+import { GitSyncDialog } from "./GitSyncDialog";
 import { ProjectLibrary } from "./ProjectLibrary";
 
 export function LibrarySheet({
@@ -88,6 +89,7 @@ export function LibrarySheet({
             <Button size="sm" variant="outline" onClick={() => act(() => client.chooseWorkspace(), true)}>
               <FolderOpen data-slot="icon" /> Workspace…
             </Button>
+            <GitSyncDialog client={client} />
             <div className="flex-1" />
             {currentSlug && (
               <Button size="sm" variant="ghost" title="Close the current project and go to the library home" onClick={() => act(() => client.closeProject(), true)}>
