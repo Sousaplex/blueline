@@ -70,7 +70,7 @@ export function Onboarding({
     <div className="flex h-screen flex-col items-center justify-center bg-background p-8 text-foreground">
       <div className="w-full max-w-lg space-y-8">
         <div className="space-y-1 text-center">
-          <img src={logo} alt="" className="mx-auto mb-4 size-16 rounded-2xl shadow-lg" />
+          <img src={logo} alt="" className="mx-auto mb-3 size-20" />
           <h1 className="text-2xl font-semibold tracking-tight">blueline</h1>
           <p className="text-sm text-muted-foreground">Print-ready marketing collateral, designed and press-checked by an agent.</p>
         </div>
