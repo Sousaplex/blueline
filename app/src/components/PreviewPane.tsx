@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, History, RefreshCw } from "lucide-react";
+import { ChevronLeft, ChevronRight, History, ImagePlus, Loader2, RefreshCw, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -31,7 +31,13 @@ export function PreviewPane({
   const [pageCount, setPageCount] = useState(0);
   const [page, setPage] = useState(0);
   const [dirty, setDirty] = useState(false);
+  const [activeImage, setActiveImage] = useState<string | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const [genBusy, setGenBusy] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const uploadInput = useRef<HTMLInputElement>(null);
+  const activeImageRef = useRef<string | null>(null);
+  activeImageRef.current = activeImage;
 
   const roundInfo = viewRound != null ? project.rounds.find((r) => r.round === viewRound) : undefined;
   const roundHasProof = roundInfo?.hasProof ?? false;
@@ -58,6 +64,8 @@ export function PreviewPane({
     style.textContent = `
       [data-pc-id]:hover { outline: 2px dashed rgba(120,120,255,.7); outline-offset: 2px; cursor: text; }
       [data-pc-id]:focus { outline: 2px solid rgba(120,120,255,.95); outline-offset: 2px; }
+      img[data-image-id]:hover { outline: 2px dashed rgba(52,199,89,.8); outline-offset: 2px; cursor: pointer; }
+      img[data-image-id].pc-active { outline: 2px solid rgba(52,199,89,1); outline-offset: 2px; cursor: grab; }
     `;
     doc.head.appendChild(style);
     doc.querySelectorAll<HTMLElement>("[data-pc-id]").forEach((el) => {
@@ -72,6 +80,84 @@ export function PreviewPane({
         void actions.updateCopy(pcId, el.textContent ?? "").then(() => setDirty(true));
       });
     });
+
+    // Image slots: click selects (opens the image toolbar); drag pans object-position.
+    doc.querySelectorAll<HTMLImageElement>("img[data-image-id]").forEach((img) => {
+      const id = img.getAttribute("data-image-id")!;
+      let drag: { x: number; y: number; posX: number; posY: number; moved: boolean } | null = null;
+
+      const parsePos = (): [number, number] => {
+        const m = /([\d.]+)%\s+([\d.]+)%/.exec(img.style.objectPosition || "50% 50%");
+        return m ? [Number(m[1]), Number(m[2])] : [50, 50];
+      };
+
+      img.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        if (drag?.moved) return; // click after a drag = end of pan, not a select toggle
+        doc.querySelectorAll("img.pc-active").forEach((other) => other.classList.remove("pc-active"));
+        if (activeImageRef.current === id) {
+          setActiveImage(null);
+        } else {
+          img.classList.add("pc-active");
+          const m = /scale\(([\d.]+)\)/.exec(img.style.transform ?? "");
+          setZoom(m ? Number(m[1]) : 1);
+          setActiveImage(id);
+        }
+      });
+
+      img.addEventListener("mousedown", (ev) => {
+        if (activeImageRef.current !== id) return;
+        ev.preventDefault();
+        const [posX, posY] = parsePos();
+        drag = { x: ev.clientX, y: ev.clientY, posX, posY, moved: false };
+      });
+      doc.addEventListener("mousemove", (ev) => {
+        if (!drag || activeImageRef.current !== id) return;
+        const rect = img.getBoundingClientRect();
+        const dx = ((ev.clientX - drag.x) / rect.width) * 100;
+        const dy = ((ev.clientY - drag.y) / rect.height) * 100;
+        if (Math.abs(dx) + Math.abs(dy) > 1) drag.moved = true;
+        const nx = Math.min(100, Math.max(0, drag.posX - dx));
+        const ny = Math.min(100, Math.max(0, drag.posY - dy));
+        img.style.objectFit = "cover";
+        img.style.objectPosition = `${nx.toFixed(1)}% ${ny.toFixed(1)}%`;
+      });
+      doc.addEventListener("mouseup", () => {
+        if (!drag || activeImageRef.current !== id) return;
+        if (drag.moved) {
+          void client
+            .setImageStyle(id, { objectPosition: img.style.objectPosition })
+            .then(() => setDirty(true));
+        }
+        drag = null;
+      });
+    });
+  };
+
+  const activeSlot = project.images.find((s) => s.id === activeImage);
+
+  const applyZoom = (z: number) => {
+    setZoom(z);
+    const img = iframeRef.current?.contentDocument?.querySelector<HTMLImageElement>(
+      `img[data-image-id="${activeImage}"]`,
+    );
+    if (img) img.style.transform = z === 1 ? "" : `scale(${z.toFixed(2)})`;
+  };
+
+  const persistZoom = () => {
+    if (activeImage) void client.setImageStyle(activeImage, { zoom }).then(() => setDirty(true));
+  };
+
+  const onUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !activeImage) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = String(reader.result).split(",")[1] ?? "";
+      void client.uploadImageVariant(activeImage, base64).then(() => setDirty(true));
+    };
+    reader.readAsDataURL(file);
   };
 
   if (!project.hasPage) {
@@ -153,7 +239,69 @@ export function PreviewPane({
         )}
       </div>
 
-      {project.images.length > 0 && viewRound == null && (
+      {mode === "live" && activeSlot && viewRound == null && (
+        <div className="flex shrink-0 items-center gap-3 border-t bg-muted/40 px-4 py-2 text-xs">
+          <span className="font-mono font-medium">{activeSlot.id}</span>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="icon-sm"
+              className="size-6"
+              disabled={!activeSlot.current || activeSlot.current <= Math.min(...activeSlot.variants)}
+              onClick={() => void actions.selectVariant(activeSlot.id, activeSlot.current! - 1).then(() => setDirty(true))}
+            >
+              <ChevronLeft />
+            </Button>
+            <span className="tabular-nums">v{activeSlot.current ?? "?"} / {activeSlot.variants.length}</span>
+            <Button
+              variant="outline"
+              size="icon-sm"
+              className="size-6"
+              disabled={!activeSlot.current || activeSlot.current >= Math.max(...activeSlot.variants)}
+              onClick={() => void actions.selectVariant(activeSlot.id, activeSlot.current! + 1).then(() => setDirty(true))}
+            >
+              <ChevronRight />
+            </Button>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-6 text-xs"
+            disabled={genBusy}
+            onClick={() => {
+              setGenBusy(true);
+              void client.generateMoreImages(activeSlot.id).finally(() => setGenBusy(false));
+            }}
+          >
+            {genBusy ? <Loader2 className="animate-spin" data-slot="icon" /> : <Sparkles data-slot="icon" />} Generate more
+          </Button>
+          <Button variant="outline" size="sm" className="h-6 text-xs" onClick={() => uploadInput.current?.click()}>
+            <ImagePlus data-slot="icon" /> Upload…
+          </Button>
+          <input ref={uploadInput} type="file" accept="image/*" hidden onChange={onUpload} />
+          <div className="flex items-center gap-2">
+            <span className="text-muted-foreground">zoom</span>
+            <input
+              type="range"
+              min={1}
+              max={2.5}
+              step={0.05}
+              value={zoom}
+              onChange={(e) => applyZoom(Number(e.target.value))}
+              onMouseUp={persistZoom}
+              className="w-28 accent-primary"
+            />
+            <span className="w-8 tabular-nums">{zoom.toFixed(2)}×</span>
+          </div>
+          <span className="text-muted-foreground">drag the photo to reposition the crop</span>
+          <div className="flex-1" />
+          <Button variant="ghost" size="icon-sm" className="size-6" onClick={() => setActiveImage(null)}>
+            <X />
+          </Button>
+        </div>
+      )}
+
+      {(mode === "proof" || !activeSlot) && project.images.length > 0 && viewRound == null && (
         <div className="flex shrink-0 items-center gap-6 overflow-x-auto border-t px-4 py-2">
           {project.images.map((slot) => (
             <div key={slot.id} className="flex items-center gap-1.5 text-xs">
@@ -181,6 +329,7 @@ export function PreviewPane({
               </Button>
             </div>
           ))}
+          {mode === "live" && <span className="text-xs text-muted-foreground">click a photo in the page to edit its crop</span>}
         </div>
       )}
     </main>

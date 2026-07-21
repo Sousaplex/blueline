@@ -72,13 +72,13 @@ export function buildPresscheckTools(project: Project, backend: RenderBackend, c
     name: "web_fetch",
     label: "Fetch web page",
     description:
-      "Fetch a public web page. mode=markdown returns readable page text; mode=screenshot saves a full-page PNG under fetched/ and returns its path — use read to view it when the page's visual design matters.",
-    promptSnippet: "web_fetch: url -> markdown text or screenshot png",
+      "Fetch a public web page. mode=markdown returns readable page text; mode=brand extracts the visual identity (color palette, fonts, logo, theme color + homepage screenshot) — ALWAYS use brand mode on a company's site before designing for them; mode=screenshot saves a full-page PNG.",
+    promptSnippet: "web_fetch: url -> markdown | brand identity (palette/fonts/logo) | screenshot",
     parameters: Type.Object({
       url: Type.String({ description: "http(s) URL to fetch" }),
       mode: Type.Optional(
-        Type.Union([Type.Literal("markdown"), Type.Literal("screenshot")], {
-          description: "markdown (default) for content, screenshot for visual style",
+        Type.Union([Type.Literal("markdown"), Type.Literal("brand"), Type.Literal("screenshot")], {
+          description: "markdown (default) for content, brand for visual identity, screenshot for a PNG",
         }),
       ),
     }),

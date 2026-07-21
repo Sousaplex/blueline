@@ -116,6 +116,9 @@ export interface EngineClient {
   render(): Promise<void>;
   updateCopy(pcId: string, text: string): Promise<void>;
   selectVariant(imageId: string, variant: number): Promise<void>;
+  generateMoreImages(imageId: string): Promise<void>;
+  uploadImageVariant(imageId: string, dataBase64: string): Promise<void>;
+  setImageStyle(imageId: string, style: { objectPosition?: string; zoom?: number }): Promise<void>;
   proofMeta(round?: number): Promise<{ pages: number }>;
   proofPageUrl(index: number, cacheKey: number, round?: number): string;
   fileUrl(rel: string, cacheKey: number): string;
@@ -229,6 +232,11 @@ export class BrowserEngineClient implements EngineClient {
   render() { return post("/api/render"); }
   updateCopy(pcId: string, text: string) { return post("/api/copy", { pcId, text }); }
   selectVariant(imageId: string, variant: number) { return post("/api/variant", { imageId, variant }); }
+  generateMoreImages(imageId: string) { return post("/api/images/generate", { imageId }); }
+  uploadImageVariant(imageId: string, dataBase64: string) { return post("/api/images/upload", { imageId, dataBase64 }); }
+  setImageStyle(imageId: string, style: { objectPosition?: string; zoom?: number }) {
+    return post("/api/images/style", { imageId, ...style });
+  }
 
   async proofMeta(round?: number): Promise<{ pages: number }> {
     const res = await fetch(`/api/proof/meta${round != null ? `?round=${round}` : ""}`);

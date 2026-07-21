@@ -5,6 +5,7 @@ import type { ReviewResult } from "../providers/types.ts";
 import type { PresscheckConfig } from "./config.ts";
 import { requireApiKey } from "./config.ts";
 import type { Project } from "./project.ts";
+import { analyzePage, catastrophicBands, describeWhitespace } from "./whitespace.ts";
 
 export class RoundLimitError extends Error {
   constructor(maxRounds: number) {
@@ -56,6 +57,7 @@ export async function runReview(
   }
 
   const pages = await rasterizePdf(project.proofPdf);
+  const whitespace = pages.map((p, i) => analyzePage(p, i + 1));
   const apiKey = requireApiKey(config.reviewer.apiKeyEnv ?? "GEMINI_API_KEY", "reviewer");
   const ai = new GoogleGenAI({ apiKey });
 
@@ -80,6 +82,11 @@ export async function runReview(
     "",
     "Be strict but terminating: if the piece is close enough that a demanding human art director",
     "would sign off, verdict is `pass`.",
+    "",
+    "MEASURED whitespace facts (computed from the rendered pixels — trust these over your own estimate):",
+    describeWhitespace(whitespace),
+    "Any measured interior empty band taller than ~12% of the page is dead space unless it is",
+    "unmistakably deliberate framing; name it in issues with a concrete layout fix.",
     `This is review round ${completed + 1} of at most ${config.reviewer.maxRounds}.`,
     "",
     `# Brief\n${project.brief()}`,
@@ -110,6 +117,23 @@ export async function runReview(
   if (result.verdict !== "pass" && result.verdict !== "revise") {
     throw new Error(`Reviewer returned malformed result: ${response.text?.slice(0, 300)}`);
   }
+
+  // Hard gate: a giant interior dead band can never pass, no matter what the model says.
+  const catastrophic = catastrophicBands(whitespace);
+  if (result.verdict === "pass" && catastrophic.length) {
+    result.verdict = "revise";
+    result.issues = [
+      ...(result.issues ?? []),
+      ...catastrophic.map(({ page, band }) => ({
+        page,
+        region: `full-width band ${band.fromPct}%–${band.toPct}% of page height`,
+        problem: `Measured dead space: this band is ${band.toPct - band.fromPct}% of the page and completely empty (mechanical check — not a matter of taste).`,
+        fix: "Restructure the layout so content composes the full canvas: rebalance columns, enlarge the hero/type, or tighten the page grid. Do not just stretch margins.",
+      })),
+    ];
+    result.notes = `${result.notes ?? ""} [auto] Verdict downgraded to revise: measured interior dead space exceeded the hard threshold.`.trim();
+  }
+
   const round = completed + 1;
   project.writeReview(round, result);
   // Archive the exact proof this verdict was issued against — makes rounds navigable in the viewer.

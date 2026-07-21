@@ -131,11 +131,14 @@ app.whenReady().then(async () => {
       width: 1440,
       height: 900,
       title: "presscheck",
-      show: !SMOKE,
+      // Keep the window visible even in smoke mode: capturePage can hang on a
+      // never-painted hidden window in packaged builds.
+      show: true,
       webPreferences: {
         preload: join(__dirname, "preload.cjs"),
         contextIsolation: true,
         nodeIntegration: false,
+        backgroundThrottling: false,
       },
     });
     mainWindow.webContents.setWindowOpenHandler(({ url }) => {

@@ -67,6 +67,36 @@ export function listImageSlots(project: Project): ImageSlot[] {
   return slots;
 }
 
+/** Persist pan/zoom for an image: object-position + scale, keeping object-fit cover. */
+export function setImageStyle(
+  project: Project,
+  imageId: string,
+  style: { objectPosition?: string; zoom?: number },
+): void {
+  const { dom } = loadDom(project);
+  const img = dom.document.querySelector(`img[data-image-id="${imageId}"]`);
+  if (!img) throw new Error(`page.html has no <img data-image-id="${imageId}">`);
+  const existing = new Map<string, string>(
+    (img.getAttribute("style") ?? "")
+      .split(";")
+      .map((s: string) => s.trim())
+      .filter(Boolean)
+      .map((s: string) => [s.slice(0, s.indexOf(":")).trim(), s.slice(s.indexOf(":") + 1).trim()] as [string, string]),
+  );
+  existing.set("object-fit", "cover");
+  if (style.objectPosition) {
+    if (!/^[\d.]+%\s+[\d.]+%$/.test(style.objectPosition)) throw new Error("objectPosition must be 'X% Y%'");
+    existing.set("object-position", style.objectPosition);
+  }
+  if (style.zoom !== undefined) {
+    const z = Math.min(Math.max(Number(style.zoom), 1), 3);
+    if (z === 1) existing.delete("transform");
+    else existing.set("transform", `scale(${z.toFixed(2)})`);
+  }
+  img.setAttribute("style", [...existing.entries()].map(([k, v]) => `${k}: ${v}`).join("; "));
+  save(project, dom.document);
+}
+
 export function selectVariant(project: Project, imageId: string, variant: number): void {
   const file = join(project.imagesDir, imageId, `v${variant}.png`);
   if (!existsSync(file)) throw new Error(`No such variant: ${imageId}/v${variant}.png`);

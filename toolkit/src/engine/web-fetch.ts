@@ -7,7 +7,7 @@ import type { PresscheckConfig } from "./config.ts";
 import type { Project } from "./project.ts";
 import type { RenderBackend } from "./render.ts";
 
-export type FetchMode = "markdown" | "screenshot";
+export type FetchMode = "markdown" | "screenshot" | "brand";
 
 export interface FetchResult {
   mode: FetchMode;
@@ -85,6 +85,74 @@ function htmlToMarkdown(html: string, baseUrl: string, cap: number): string {
 import { createRequire } from "node:module";
 const require_ = createRequire(import.meta.url);
 
+function rgbToHex(rgb: string): string | null {
+  const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/.exec(rgb);
+  if (!m) return null;
+  if (m[4] !== undefined && Number(m[4]) === 0) return null;
+  return "#" + [m[1], m[2], m[3]].map((v) => Number(v).toString(16).padStart(2, "0")).join("");
+}
+
+/** Extract the visual identity of a page: palette, fonts, logo, plus a screenshot. */
+async function extractBrand(
+  project: Project,
+  backend: RenderBackend,
+  url: URL,
+  screenshotPath: string,
+): Promise<string> {
+  const raw = await backend.withPage(async (page) => {
+    await page.goto(url.href, { waitUntil: "networkidle", timeout: 20_000 });
+    const data = await page.evaluate(() => {
+      const colorCount = new Map<string, number>();
+      const fontCount = new Map<string, number>();
+      const sample = [...document.querySelectorAll("body *")].slice(0, 1000);
+      for (const el of sample) {
+        const cs = getComputedStyle(el);
+        for (const c of [cs.color, cs.backgroundColor, cs.borderTopColor]) {
+          if (c && c !== "rgba(0, 0, 0, 0)" && c !== "transparent") {
+            colorCount.set(c, (colorCount.get(c) ?? 0) + 1);
+          }
+        }
+        if (cs.fontFamily) fontCount.set(cs.fontFamily, (fontCount.get(cs.fontFamily) ?? 0) + 1);
+      }
+      const logoEl = document.querySelector<HTMLImageElement>(
+        'img[src*="logo" i], img[alt*="logo" i], img[class*="logo" i], header img, nav img',
+      );
+      return {
+        title: document.title,
+        colors: [...colorCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 16),
+        fonts: [...fontCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([f]) => f),
+        logo: logoEl?.src ?? null,
+        ogImage: document.querySelector<HTMLMetaElement>('meta[property="og:image"]')?.content ?? null,
+        themeColor: document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.content ?? null,
+      };
+    });
+    await page.screenshot({ path: screenshotPath, fullPage: false });
+    return data;
+  });
+
+  const palette = raw.colors
+    .map(([c, n]) => ({ hex: rgbToHex(c), n }))
+    .filter((e): e is { hex: string; n: number } => !!e.hex)
+    .filter((e, i, arr) => arr.findIndex((x) => x.hex === e.hex) === i)
+    .slice(0, 10);
+
+  return [
+    `# Visual identity: ${raw.title} (${url.hostname})`,
+    "",
+    `Dominant palette (by computed-style frequency):`,
+    ...palette.map((p) => `- ${p.hex}  (weight ${p.n})`),
+    "",
+    `Font stacks: ${raw.fonts.join(" | ") || "(none detected)"}`,
+    raw.themeColor ? `Theme color: ${raw.themeColor}` : "",
+    raw.logo ? `Logo image: ${raw.logo} (web_fetch mode=screenshot it, or reference its style)` : "Logo: not detected",
+    raw.ogImage ? `Social/og image: ${raw.ogImage}` : "",
+    "",
+    `Homepage screenshot saved to: ${screenshotPath} — use the read tool to view it for layout/mood.`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 export async function fetchWeb(
   project: Project,
   backend: RenderBackend,
@@ -94,12 +162,12 @@ export async function fetchWeb(
 ): Promise<FetchResult> {
   const url = await assertSafeUrl(rawUrl);
   const hash = createHash("sha256").update(`${mode}:${url.href}`).digest("hex").slice(0, 16);
-  const cachePath = join(project.fetchedDir, mode === "markdown" ? `${hash}.md` : `${hash}.png`);
+  const cachePath = join(project.fetchedDir, mode === "screenshot" ? `${hash}.png` : `${hash}.md`);
 
   if (existsSync(cachePath)) {
     return {
       mode,
-      value: mode === "markdown" ? readFileSync(cachePath, "utf8") : cachePath,
+      value: mode === "screenshot" ? cachePath : readFileSync(cachePath, "utf8"),
       cached: true,
     };
   }
@@ -109,6 +177,12 @@ export async function fetchWeb(
   if (mode === "screenshot") {
     await backend.screenshot(url.href, cachePath);
     return { mode, value: cachePath, cached: false };
+  }
+
+  if (mode === "brand") {
+    const report = await extractBrand(project, backend, url, join(project.fetchedDir, `${hash}-home.png`));
+    writeFileSync(cachePath, report);
+    return { mode, value: report, cached: false };
   }
 
   const html = await backend.withPage(async (page) => {

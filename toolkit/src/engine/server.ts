@@ -9,7 +9,8 @@ import { extname, join, normalize, resolve } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { WebSocketServer, type WebSocket } from "ws";
 import { DATA_ROOT, REPO_ROOT, loadConfig, type PresscheckConfig } from "./config.ts";
-import { listEditable, listImageSlots, selectVariant, updateCopy } from "./page-edit.ts";
+import { generateImages } from "./images.ts";
+import { listEditable, listImageSlots, selectVariant, setImageStyle, updateCopy } from "./page-edit.ts";
 import { Project } from "./project.ts";
 import { PlaywrightBackend } from "./render.ts";
 import { resetSearchBudget } from "./search.ts";
@@ -521,6 +522,53 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
         writeFileSync(join(dir, name), Buffer.from(String(body.dataBase64), "base64"));
         bridge.broadcast({ type: "files_changed", project: bridge.project?.slug });
         return json(res, 200, { ok: true, path: join(dir, name) });
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/copy") {
+        const body = await readBody(req);
+        const project = bridge.requireProject();
+        updateCopy(project, body.pcId, body.text);
+        bridge.broadcast({ type: "files_changed", project: project.slug });
+        return json(res, 200, { ok: true });
+      }
+      if (req.method === "POST" && url.pathname === "/api/variant") {
+        const body = await readBody(req);
+        const project = bridge.requireProject();
+        selectVariant(project, body.imageId, Number(body.variant));
+        bridge.broadcast({ type: "files_changed", project: project.slug });
+        return json(res, 200, { ok: true });
+      }
+      if (req.method === "POST" && url.pathname === "/api/images/generate") {
+        const body = await readBody(req);
+        if (!body.imageId) return json(res, 400, { error: "imageId required" });
+        const project = bridge.requireProject();
+        const summaries = await generateImages(project, bridge.config, [body.imageId]);
+        bridge.broadcast({ type: "files_changed", project: project.slug });
+        return json(res, 200, { ok: true, generated: summaries[0]?.files.length ?? 0, errors: summaries[0]?.errors ?? [] });
+      }
+      if (req.method === "POST" && url.pathname === "/api/images/upload") {
+        const body = await readBody(req);
+        if (!body.imageId || !body.dataBase64) return json(res, 400, { error: "imageId and dataBase64 required" });
+        const project = bridge.requireProject();
+        const dir = join(project.imagesDir, String(body.imageId).replace(/[/\\]/g, ""));
+        if (!existsSync(dir)) return json(res, 404, { error: `no such image slot: ${body.imageId}` });
+        const nums = readdirSync(dir)
+          .map((f) => /^v(\d+)\.png$/.exec(f)?.[1])
+          .filter(Boolean)
+          .map(Number);
+        const next = nums.length ? Math.max(...nums) + 1 : 1;
+        writeFileSync(join(dir, `v${next}.png`), Buffer.from(String(body.dataBase64), "base64"));
+        selectVariant(project, body.imageId, next);
+        bridge.broadcast({ type: "files_changed", project: project.slug });
+        return json(res, 200, { ok: true, variant: next });
+      }
+      if (req.method === "POST" && url.pathname === "/api/images/style") {
+        const body = await readBody(req);
+        if (!body.imageId) return json(res, 400, { error: "imageId required" });
+        const project = bridge.requireProject();
+        setImageStyle(project, body.imageId, { objectPosition: body.objectPosition, zoom: body.zoom });
+        bridge.broadcast({ type: "files_changed", project: project.slug });
+        return json(res, 200, { ok: true });
       }
 
       if (url.pathname === "/api/workspace") {
