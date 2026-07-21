@@ -1,0 +1,14 @@
+[
+  {
+    "id": "roastery_hero",
+    "prompt": "Warm, natural-lit editorial photo of a small-batch specialty coffee roastery in Portland. A professional roaster in a craft apron inspecting freshly roasted coffee beans in a metallic cooling tray. Warm cream, espresso brown, and copper color palette. Shallow depth of field, highly tactile textures, professional photography, soft natural light.",
+    "aspect": "3:4",
+    "variants": 1
+  },
+  {
+    "id": "brewing_accent",
+    "prompt": "Warm editorial close-up of a barista's hands using a copper kettle to pour water over a ceramic pour-over coffee dripper. Rich coffee bloom with delicate steam rising. Warm natural light from a window, shallow depth of field, focus on the craft and textures. Espresso brown, copper, and warm cream tones.",
+    "aspect": "4:3",
+    "variants": 1
+  }
+]

@@ -1,0 +1,18 @@
+{
+  "verdict": "revise",
+  "issues": [
+    {
+      "page": 2,
+      "region": "Entire page",
+      "problem": "An unnecessary second blank page has been generated, which violates the one-pager format requirement.",
+      "fix": "Adjust the page height, margins, or CSS print settings to prevent the empty overflow onto page 2."
+    },
+    {
+      "page": 1,
+      "region": "Right-hand hero image",
+      "problem": "The hero image on the right still bleeds on three edges (top, right, and bottom), continuing to violate the style guide rule: 'Images bleed to page edge on at most one side.'",
+      "fix": "Add vertical margins to the top and bottom of the image so that it only bleeds off the right-hand edge."
+    }
+  ],
+  "notes": "We need to fix both the multi-edge image bleeding and the extra blank second page to fit the strict one-pager format."
+}

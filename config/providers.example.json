@@ -1,17 +1,29 @@
 {
+  "designer": {
+    "provider": "moonshotai",
+    "model": "kimi-k3",
+    "thinkingLevel": "medium",
+    "apiKeyEnv": "MOONSHOT_API_KEY"
+  },
   "images": {
     "provider": "gemini",
     "model": "nano-banana-2",
-    "variantsPerPrompt": 3
+    "variantsPerPrompt": 3,
+    "apiKeyEnv": "GEMINI_API_KEY"
   },
   "reviewer": {
     "provider": "gemini",
     "model": "gemini-3.5-flash",
-    "maxRounds": 6
+    "maxRounds": 6,
+    "apiKeyEnv": "GEMINI_API_KEY"
   },
   "render": {
     "format": "A4",
     "printBackground": true,
     "preferCSSPageSize": true
+  },
+  "webFetch": {
+    "maxFetchesPerRun": 10,
+    "maxContentChars": 20000
   }
 }

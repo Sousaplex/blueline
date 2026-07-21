@@ -1,7 +1,13 @@
-// review: rasterizes out/proof.pdf to PNGs, sends them + brief + style guide to
-// the vision reviewer, writes review/round-<N>.json (ReviewResult).
-// TODO(next slice): pdf->png via Playwright page screenshots or pdftoppm, then
-// GeminiReviewProvider with a structured-output schema matching ReviewResult.
+// review: rasterize out/proof.pdf and get a structured verdict from the vision reviewer.
+import { loadConfig } from "../engine/config.ts";
+import { Project } from "../engine/project.ts";
+import { runReview } from "../engine/review.ts";
+
 const projectDir = process.argv[2];
 if (!projectDir) throw new Error("usage: npm run review -- projects/<slug>");
-throw new Error("review: reviewer not implemented yet — see providers/types.ts");
+
+const project = new Project(projectDir);
+const { round, result } = await runReview(project, loadConfig());
+console.log(`round ${round}: ${result.verdict}`);
+console.log(JSON.stringify(result, null, 2));
+process.exitCode = result.verdict === "pass" ? 0 : 2;

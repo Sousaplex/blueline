@@ -1,0 +1,18 @@
+{
+  "verdict": "revise",
+  "issues": [
+    {
+      "page": 1,
+      "region": "Right-hand hero image",
+      "problem": "The hero image bleeds on three edges (top, right, and bottom). The style guide states: 'Images bleed to page edge on at most one side.'",
+      "fix": "Recess the hero image so it respects the top and bottom margins, bleeding only on the right edge."
+    },
+    {
+      "page": 1,
+      "region": "Call to Action (CTA) at bottom",
+      "problem": "The CTA text ('Book a cupping — hello@strangeloop.coffee') is set in deep teal, but the style guide specifies Copper (#C1673C) for the CTA.",
+      "fix": "Change the CTA text color to Copper (#C1673C) to comply with the brand palette guidelines."
+    }
+  ],
+  "notes": "The layout is otherwise beautiful, well-spaced, and highly professional with excellent typographic hierarchy and adherence to the content brief."
+}

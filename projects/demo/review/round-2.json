@@ -1,0 +1,12 @@
+{
+  "verdict": "revise",
+  "issues": [
+    {
+      "page": 1,
+      "region": "Right-hand hero image",
+      "problem": "The hero image on the right still bleeds on three edges (top, right, and bottom), violating the style guide rule: 'Images bleed to page edge on at most one side.'",
+      "fix": "Add a margin to the top and bottom of the hero image so that it only bleeds on the right edge."
+    }
+  ],
+  "notes": "The CTA text color has been successfully updated to Copper (#C1673C). Once the right-hand image bleeding issue is resolved, this piece is ready for approval."
+}

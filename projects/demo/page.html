@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Strangeloop Coffee — Wholesale</title>
+  <style>
+    /* Print Setup */
+    @page {
+      size: A4 portrait;
+      margin: 0;
+    }
+    
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 210mm;
+      height: 297mm;
+      background-color: #F5EEE4; /* Warm cream */
+      color: #2B1D16; /* Espresso brown */
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      -webkit-print-color-adjust: exact;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+
+    /* Content Layout */
+    .left-column {
+      position: absolute;
+      left: 20mm;
+      top: 20mm;
+      height: 257mm; /* Fixed height to prevent any overflow or page 2 generation */
+      width: 110mm;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .right-column {
+      position: absolute;
+      right: 0;
+      top: 30mm; /* Recessed even further from top to clearly satisfy the 1-side bleed rule */
+      height: 237mm; /* Recessed even further from bottom to satisfy the 1-side bleed rule */
+      width: 60mm;
+    }
+
+    /* Brand Header */
+    .brand-header {
+      margin-bottom: 8mm;
+    }
+
+    .brand-name {
+      font-family: "Georgia", serif;
+      font-size: 18pt;
+      font-weight: bold;
+      color: #1F4A46; /* Deep teal */
+      display: block;
+      letter-spacing: -0.2px;
+    }
+
+    .brand-tagline {
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      font-size: 8.5pt;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: #C1673C; /* Copper */
+      display: block;
+      margin-top: 1.5mm;
+    }
+
+    /* Divider */
+    .divider {
+      height: 1pt;
+      background-color: #C1673C;
+      margin-bottom: 8mm;
+    }
+
+    /* Headline */
+    .main-headline {
+      font-family: "Georgia", serif;
+      font-size: 24pt;
+      line-height: 1.2;
+      color: #2B1D16;
+      font-weight: normal;
+      margin-bottom: 8mm;
+      letter-spacing: -0.5px;
+    }
+
+    /* Accent Image */
+    .accent-image-container {
+      width: 100%;
+      height: 42mm;
+      margin-bottom: 8mm;
+      overflow: hidden;
+    }
+
+    .accent-image {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    /* Sections */
+    .sections-container {
+      display: flex;
+      flex-direction: column;
+      gap: 6mm;
+      margin-bottom: 8mm;
+    }
+
+    .section {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5mm;
+    }
+
+    .section-title {
+      font-family: "Georgia", serif;
+      font-size: 11pt;
+      font-weight: bold;
+      color: #C1673C;
+    }
+
+    .section-body {
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      font-size: 9.5pt;
+      line-height: 1.45;
+      color: #2B1D16;
+    }
+
+    /* CTA Section */
+    .cta-container {
+      margin-top: auto; /* Pushes CTA to the bottom of the column */
+    }
+
+    .cta-divider {
+      height: 1pt;
+      background-color: #C1673C;
+      margin-bottom: 5mm;
+    }
+
+    .cta-title {
+      font-family: "Georgia", serif;
+      font-size: 14pt;
+      font-weight: bold;
+      color: #C1673C; /* Complies with the brand palette guidelines specifying Copper for CTA */
+      margin-bottom: 1.5mm;
+    }
+
+    .cta-sub {
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      font-size: 9pt;
+      line-height: 1.4;
+      color: #2B1D16;
+    }
+
+    /* Hero Image */
+    .hero-image {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Left Column -->
+  <div class="left-column">
+    <div class="brand-header">
+      <span class="brand-name" data-pc-id="brand-name">Strangeloop Coffee</span>
+      <span class="brand-tagline" data-pc-id="brand-tagline">Roasted in loops, poured with intent</span>
+    </div>
+    
+    <div class="divider"></div>
+    
+    <h1 class="main-headline" data-pc-id="main-headline">
+      Never serve coffee older than ten days off roast.
+    </h1>
+
+    <div class="accent-image-container">
+      <img class="accent-image" src="images/brewing_accent/v1.png" data-image-id="brewing_accent" alt="Barista preparing pour-over coffee">
+    </div>
+
+    <div class="sections-container">
+      <div class="section">
+        <h3 class="section-title" data-pc-id="section-1-heading">01 / Small Batches, Fresh Delivery</h3>
+        <p class="section-body" data-pc-id="section-1-body">
+          We roast Tuesdays and Fridays on our 15kg Loring Smart Roast, delivering to our Pacific NW partners within 48 hours. Your customers will never drink coffee older than 10 days off roast.
+        </p>
+      </div>
+
+      <div class="section">
+        <h3 class="section-title" data-pc-id="section-2-heading">02 / Direct Farms & Transparency</h3>
+        <p class="section-body" data-pc-id="section-2-body">
+          We build direct relationships with nine select farm partners in Ethiopia, Colombia, and Guatemala. Our FOB prices are published openly every year because trust is built on open books.
+        </p>
+      </div>
+
+      <div class="section">
+        <h3 class="section-title" data-pc-id="section-3-heading">03 / Complete Barista Support</h3>
+        <p class="section-body" data-pc-id="section-3-body">
+          Every wholesale partnership includes zero minimum orders for the first three months, twice-quarterly on-site barista training, and custom seasonal menu consulting to keep your coffee program thriving.
+        </p>
+      </div>
+    </div>
+
+    <div class="cta-container">
+      <div class="cta-divider"></div>
+      <div class="cta-title" data-pc-id="cta-title">Book a cupping — hello@strangeloop.coffee</div>
+      <div class="cta-sub" data-pc-id="cta-sub">Our Portland cupping room is open every Thursday at 10:00 AM. Come taste the loop.</div>
+    </div>
+  </div>
+
+  <!-- Right Column (Bleeds to the right edge) -->
+  <div class="right-column">
+    <img class="hero-image" src="images/roastery_hero/v1.png" data-image-id="roastery_hero" alt="Strangeloop coffee roastery">
+  </div>
+
+</body>
+</html>

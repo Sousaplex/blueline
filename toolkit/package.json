@@ -4,18 +4,28 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "agent": "tsx src/engine/run.ts",
+    "typecheck": "tsc -p tsconfig.json",
     "gen-images": "tsx src/commands/gen-images.ts",
     "render": "tsx src/commands/render.ts",
     "review": "tsx src/commands/review.ts",
-    "viewer": "tsx src/commands/viewer.ts"
+    "viewer": "tsx src/commands/viewer.ts",
+    "test": "node --import tsx --test src/engine/*.test.ts"
   },
   "dependencies": {
+    "@earendil-works/pi-coding-agent": "^0.80.10",
     "@google/genai": "^1.0.0",
-    "playwright": "^1.50.0"
+    "@mozilla/readability": "^0.6.0",
+    "linkedom": "^0.18.13",
+    "pdf-to-img": "^6.2.0",
+    "playwright": "^1.50.0",
+    "turndown": "^7.2.4",
+    "typebox": "^1.1.38"
   },
   "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/turndown": "^5.0.6",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0",
-    "@types/node": "^22.0.0"
+    "typescript": "^5.7.0"
   }
 }

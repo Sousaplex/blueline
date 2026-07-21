@@ -2,5 +2,7 @@ node_modules/
 config/providers.json
 projects/*/out/
 projects/*/images/*/
+projects/*/fetched/
+projects/*/.pi/
 .DS_Store
 .env
