@@ -4,5 +4,7 @@ projects/*/out/
 projects/*/images/*/
 projects/*/fetched/
 projects/*/.pi/
+app/dist/
+app/dist-electron/
 .DS_Store
 .env

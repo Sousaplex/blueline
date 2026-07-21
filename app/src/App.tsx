@@ -1,4 +1,4 @@
-import { Play, RefreshCw } from "lucide-react";
+import { Download, Play, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentPane, type FeedItem } from "./components/AgentPane";
 import { LeftPane } from "./components/LeftPane";
@@ -6,7 +6,14 @@ import { PreviewPane } from "./components/PreviewPane";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { BrowserEngineClient, type EngineEvent, type ProjectState } from "./engine-client";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { BrowserEngineClient, type EngineEvent, type ProjectListing, type ProjectState } from "./engine-client";
 
 export function App() {
   const client = useMemo(() => new BrowserEngineClient(), []);
@@ -16,6 +23,7 @@ export function App() {
   const [feed, setFeed] = useState<FeedItem[]>([]);
   const [cacheKey, setCacheKey] = useState(() => Date.now());
   const [viewRound, setViewRound] = useState<number | null>(null); // null = latest
+  const [projects, setProjects] = useState<ProjectListing[]>([]);
   const refreshTimer = useRef<number | undefined>(undefined);
 
   const refresh = useCallback(async () => {
@@ -29,6 +37,7 @@ export function App() {
 
   useEffect(() => {
     void refresh();
+    void client.listProjects().then(setProjects);
     return client.subscribe((event: EngineEvent) => {
       switch (event.type) {
         case "text_delta":
@@ -53,6 +62,13 @@ export function App() {
           break;
         case "settings_changed":
           void refresh();
+          break;
+        case "project_changed":
+          setFeed([]);
+          setViewRound(null);
+          setCacheKey(Date.now());
+          void refresh();
+          void client.listProjects().then(setProjects);
           break;
         case "files_changed":
           window.clearTimeout(refreshTimer.current);
@@ -96,7 +112,24 @@ export function App() {
     <div className="flex h-screen flex-col bg-background text-foreground">
       <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
         <span className="text-sm font-semibold tracking-tight">presscheck</span>
-        <span className="text-sm text-muted-foreground">/ {project.slug}</span>
+        <Select
+          value={project.slug}
+          onValueChange={(slug) => {
+            const target = projects.find((p) => p.slug === slug);
+            if (target && !target.current) void client.openProject(target.dir);
+          }}
+        >
+          <SelectTrigger size="sm" className="w-44 border-none shadow-none">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {(projects.length ? projects : [{ slug: project.slug, dir: "", hasBrief: true, current: true }]).map((p) => (
+              <SelectItem key={p.slug} value={p.slug} disabled={!p.hasBrief}>
+                {p.slug}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         {running && <Badge variant="secondary" className="animate-pulse">running</Badge>}
         <div className="flex-1" />
         <Badge variant="outline" className="font-mono text-xs">{project.designerModel}</Badge>
@@ -105,6 +138,18 @@ export function App() {
         </Button>
         <Button size="sm" variant="outline" disabled={!project.hasPage} onClick={() => void actions.render()}>
           <RefreshCw data-slot="icon" /> Re-render
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!project.hasProof}
+          onClick={() =>
+            void client.exportPdf().then((path) => {
+              if (path) setFeed((f) => [...f, { kind: "text", text: `Exported: ${path}`, at: Date.now() }]);
+            })
+          }
+        >
+          <Download data-slot="icon" /> Export
         </Button>
         <SettingsDialog client={client} />
       </header>

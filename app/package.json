@@ -6,7 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "typecheck": "tsc -b"
+    "typecheck": "tsc -b",
+    "electron:compile": "esbuild electron/main.ts electron/preload.ts --bundle --platform=node --external:electron --outdir=dist-electron --format=cjs --out-extension:.js=.cjs",
+    "electron:dev": "npm run electron:compile && electron .",
+    "electron:app": "npm run build && npm run electron:compile && electron .",
+    "electron:smoke": "npm run build && npm run electron:compile && PRESSCHECK_SMOKE=1 electron ."
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",
@@ -27,7 +31,16 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",
+    "electron": "^43.1.1",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.1",
     "typescript": "^5.7.0",
     "vite": "^6.0.0"
-  }
+  },
+  "allowScripts": {
+    "electron@43.1.1": true,
+    "esbuild@0.28.1": true,
+    "esbuild@0.25.12": true
+  },
+  "main": "dist-electron/main.cjs"
 }

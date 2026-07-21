@@ -37,9 +37,36 @@ class Bridge {
   private proofCache = new Map<string, { mtime: number; pages: Buffer[] }>();
   private registryRuntime?: ModelRuntime;
   config: PresscheckConfig;
+  project: Project;
 
-  constructor(readonly project: Project) {
+  constructor(project: Project) {
+    this.project = project;
     this.config = loadConfig();
+  }
+
+  listProjects(): { dir: string; slug: string; hasBrief: boolean; current: boolean }[] {
+    const root = join(REPO_ROOT, "projects");
+    if (!existsSync(root)) return [];
+    return readdirSync(root, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => ({
+        dir: `projects/${e.name}`,
+        slug: e.name,
+        hasBrief: existsSync(join(root, e.name, "brief.md")),
+        current: e.name === this.project.slug,
+      }));
+  }
+
+  async openProject(projectDir: string): Promise<void> {
+    if (this.running) throw new Error("Stop the current run before switching projects");
+    const next = new Project(projectDir); // validates existence, creates subdirs
+    if (this.pc) {
+      await this.pc.dispose();
+      this.pc = undefined;
+    }
+    this.project = next;
+    this.buffer = [];
+    this.broadcast({ type: "project_changed", slug: next.slug });
   }
 
   broadcast(event: WireEvent): void {
@@ -206,8 +233,7 @@ async function readBody(req: IncomingMessage): Promise<any> {
 }
 
 export async function startServer(projectDir: string, port: number): Promise<void> {
-  const project = new Project(projectDir);
-  const bridge = new Bridge(project);
+  const bridge = new Bridge(new Project(projectDir));
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://localhost:${port}`);
@@ -221,11 +247,27 @@ export async function startServer(projectDir: string, port: number): Promise<voi
         return res.end();
       }
 
+      // Built viewer (app/dist) as web root — Electron loads http://localhost:<port>/
+      // so /api, /ws and /files stay same-origin without a dev-server proxy.
+      const appDist = join(REPO_ROOT, "app", "dist");
+      if (req.method === "GET" && !url.pathname.startsWith("/api") && !url.pathname.startsWith("/files") && url.pathname !== "/ws") {
+        const rel = url.pathname === "/" ? "index.html" : normalize(decodeURIComponent(url.pathname.slice(1)));
+        const file = join(appDist, rel);
+        if (!rel.startsWith("..") && existsSync(file) && statSync(file).isFile()) {
+          const mime = MIME[extname(file)] ?? (extname(file) === ".js" ? "text/javascript" : "application/octet-stream");
+          res.writeHead(200, { "content-type": mime });
+          return res.end(readFileSync(file));
+        }
+        if (url.pathname === "/") {
+          return json(res, 200, { presscheck: "bridge running", note: "build the viewer (app: npm run build) to serve the UI here" });
+        }
+      }
+
       // Static project files (page.html, images/) for the live preview iframe.
       if (url.pathname.startsWith("/files/")) {
         const rel = normalize(decodeURIComponent(url.pathname.slice("/files/".length)));
         if (rel.startsWith("..")) return json(res, 403, { error: "forbidden" });
-        const file = join(project.dir, rel);
+        const file = join(bridge.project.dir, rel);
         if (!existsSync(file) || !statSync(file).isFile()) return json(res, 404, { error: "not found" });
         res.writeHead(200, {
           "content-type": MIME[extname(file)] ?? "application/octet-stream",
@@ -236,6 +278,13 @@ export async function startServer(projectDir: string, port: number): Promise<voi
       }
 
       if (url.pathname === "/api/project") return json(res, 200, bridge.projectState());
+      if (url.pathname === "/api/projects") return json(res, 200, { projects: bridge.listProjects() });
+      if (req.method === "POST" && url.pathname === "/api/open") {
+        const body = await readBody(req);
+        if (!body.projectDir) return json(res, 400, { error: "projectDir required" });
+        await bridge.openProject(body.projectDir);
+        return json(res, 200, { ok: true });
+      }
 
       if (url.pathname === "/api/proof/meta") {
         const round = url.searchParams.get("round");
@@ -284,13 +333,13 @@ export async function startServer(projectDir: string, port: number): Promise<voi
       }
       if (req.method === "POST" && url.pathname === "/api/copy") {
         const body = await readBody(req);
-        updateCopy(project, body.pcId, body.text);
+        updateCopy(bridge.project, body.pcId, body.text);
         bridge.broadcast({ type: "files_changed" });
         return json(res, 200, { ok: true });
       }
       if (req.method === "POST" && url.pathname === "/api/variant") {
         const body = await readBody(req);
-        selectVariant(project, body.imageId, Number(body.variant));
+        selectVariant(bridge.project, body.imageId, Number(body.variant));
         bridge.broadcast({ type: "files_changed" });
         return json(res, 200, { ok: true });
       }
@@ -305,7 +354,7 @@ export async function startServer(projectDir: string, port: number): Promise<voi
   wss.on("connection", (ws) => bridge.attach(ws));
 
   await new Promise<void>((resolve) => server.listen(port, resolve));
-  console.log(`presscheck bridge — project=${project.slug} http://localhost:${port}`);
+  console.log(`presscheck bridge — project=${bridge.project.slug} http://localhost:${port}`);
 
   const shutdown = async () => {
     await bridge.dispose();

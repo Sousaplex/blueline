@@ -61,10 +61,29 @@ export type EngineEvent =
   | { type: "status"; running: boolean }
   | { type: "files_changed" }
   | { type: "settings_changed" }
+  | { type: "project_changed"; slug: string }
   | { type: "error"; message: string };
+
+export interface ProjectListing {
+  dir: string;
+  slug: string;
+  hasBrief: boolean;
+  current: boolean;
+}
+
+/** Injected by the Electron preload script; absent in browser mode. */
+declare global {
+  interface Window {
+    presscheck?: { exportPdf(): Promise<string | null>; isElectron: true };
+  }
+}
 
 export interface EngineClient {
   getProject(): Promise<ProjectState>;
+  listProjects(): Promise<ProjectListing[]>;
+  openProject(projectDir: string): Promise<void>;
+  /** Returns the saved path (Electron printToPDF) or null (browser fallback opened the proof). */
+  exportPdf(): Promise<string | null>;
   getSettings(): Promise<EngineSettings>;
   updateSettings(patch: SettingsPatch): Promise<void>;
   run(prompt?: string): Promise<void>;
@@ -132,6 +151,19 @@ export class BrowserEngineClient implements EngineClient {
     const res = await fetch("/api/settings");
     if (!res.ok) throw new Error(`settings: HTTP ${res.status}`);
     return res.json();
+  }
+
+  async listProjects(): Promise<ProjectListing[]> {
+    const res = await fetch("/api/projects");
+    return (await res.json()).projects;
+  }
+
+  openProject(projectDir: string) { return post("/api/open", { projectDir }); }
+
+  async exportPdf(): Promise<string | null> {
+    if (window.presscheck) return window.presscheck.exportPdf();
+    window.open("/files/out/proof.pdf", "_blank"); // browser fallback: latest proof
+    return null;
   }
 
   updateSettings(patch: SettingsPatch) { return post("/api/settings", patch); }
