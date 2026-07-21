@@ -1,45 +1,121 @@
-# Presscheck
+<p align="center">
+  <img src="docs/media/logo.png" width="112" alt="blueline logo" />
+</p>
 
-AI art-director sidecar: an agent (Claude Code today, anything tomorrow) iteratively
-designs print marketing material — HTML → PDF → visual review → fix — until a vision
-model says the proof matches the brief, then a human polishes it in a live viewer.
+<h1 align="center">blueline</h1>
 
-## Architecture
+<p align="center">
+  Print-ready marketing collateral, designed and press-checked by an agent.<br/>
+  <em>A blueline is the final proof a printer hands you to sign off — this app produces it.</em>
+</p>
 
-Two halves, deliberately decoupled:
+<p align="center">
+  <img src="docs/media/screenshot.png" alt="blueline app: proof view with review rounds, sources, and agent pane" />
+</p>
 
-**1. The brain (swappable).** Any agentic harness that can read files, edit files, and run
-CLI commands. Today that is a Claude Code session opened in this directory — `CLAUDE.md`
-is its operating manual. The harness is *not* load-bearing: every capability the agent
-uses is a plain CLI command in `toolkit/`, so the same loop can later be driven by the
-Claude Agent SDK embedded in an app (see "Standalone later" below).
+## What it does
 
-**2. The toolkit (this repo's actual code).** Deterministic tools the agent shells out to:
+You write a brief — audience, message, format. An embedded coding agent designs a
+self-contained print-CSS HTML page, generates imagery, renders a PDF proof, and submits it
+to a vision-model reviewer that press-checks it: composition, brand adherence, pagination,
+dead space, page count. The agent fixes what the reviewer flags and goes again, round after
+round, until the proof passes. Then you take over in a live editor — rewrite copy inline,
+swap or re-generate photos, pan/zoom crops, nudge blocks by the millimetre — and export a
+print-ready PDF that is pixel-identical to the preview.
 
-| command | what it does |
-|---|---|
-| `npm run gen-images -- projects/<slug>` | reads `images/prompts.json`, calls the configured image provider (default: Gemini Nano Banana 2), writes variants |
-| `npm run render -- projects/<slug>` | headless-Chromium print of `page.html` → `out/proof.pdf` |
-| `npm run review -- projects/<slug>` | rasterizes the PDF, sends pages + brief + style guide to the vision reviewer (default: Gemini Flash 3.5), writes structured feedback |
-| `npm run viewer -- projects/<slug>` | localhost editor: inline copy editing, image-variant shuffling, export (PDF/PNG/print-ready) |
+## Features
 
-Providers are behind one interface (`toolkit/src/providers/`) configured in
-`config/providers.json` — adding DALL·E/Flux/etc. is one file.
-
-## Why not Tauri (yet)
-
-The end-user surface is the **viewer**, and the viewer is a web page. A localhost web app
-gets you the whole product loop with zero packaging friction, and the agent can drive and
-verify it directly. Tauri buys native menus, file associations, and a .dmg — none of which
-change the loop. **Standalone later:** when it's time to ship this without Claude Code,
-wrap the toolkit + Claude Agent SDK (the same loop, programmatic) in a Tauri shell. The
-repo layout already assumes that split, so nothing gets rewritten.
+- **Autonomous design loop** — draft → generate images → render → vision review → fix,
+  with a hard round cap. Reviews are archived per round (JSON + PDF + page state).
+- **Mechanical quality gates** the reviewer cannot override: measured dead-space bands and
+  wrong page counts force a revise verdict.
+- **True WYSIWYG export** — the preview window and the PDF exporter are the same Chromium
+  (`printToPDF`), so what you see is literally what prints.
+- **Live editing** — inline copy edits, image variant shuffle / upload / regenerate,
+  crop pan + zoom, and a Nudge tool (arrow keys move blocks in mm; spacing steppers).
+- **Branching** — fork any review round to explore an alternate next round; fan an
+  approved design out into a whole document series ("six like this, one per topic");
+  design-direction variants run as sibling projects. Lineage is tracked and the library
+  shows the tree.
+- **Parallel runs** — up to two projects design simultaneously; extras queue.
+- **Brand-aware research** — `web_fetch` has a brand mode that extracts a site's real
+  palette, fonts, and logo; `web_search` (Gemini grounding) fills factual gaps.
+- **Workspace model** — projects plus shared `context/` (drag-and-drop files, folders,
+  images) and `styles/` brand guides, selectable per project.
+- **MCP server** — Claude Code or any MCP client can create projects, write briefs, queue
+  runs, branch rounds, and spin up series; everything appears live in the app.
+- **Model-agnostic** — the designer is any provider/model [Pi](https://github.com/badlogic/pi-mono)
+  supports (Gemini by default; Kimi K3, Claude, etc. are a Settings dropdown away).
 
 ## Getting started
 
+### Desktop app
+
+Grab `blueline-<version>-arm64.dmg` from `app/release/` (unsigned for now — right-click →
+Open on first launch). First run walks you through picking a workspace folder and pasting a
+`GEMINI_API_KEY` (one free key powers design, imagery, review, and research; get one at
+aistudio.google.com). Keys are stored locally in the app's own `.env` and applied live.
+
+### Development
+
 ```bash
-cd toolkit && npm install
-cp config/providers.example.json config/providers.json  # add GEMINI_API_KEY
-# drop source material in context/, brand assets in styles/
-# open Claude Code here and say: "new one-pager for <thing>"
+# engine + bridge (serves the built viewer at :7717)
+cd toolkit && npm i && npm run serve
+
+# viewer with hot reload at :5177 (proxies to the bridge)
+cd app && npm i && npm run dev
+
+# electron shell in dev
+cd app && npm run electron:app
+
+# package the mac app + dmg
+cd app && npm run package
+
+# engine guard tests
+cd toolkit && npm test
 ```
+
+CLI loop without any UI:
+
+```bash
+cd toolkit && npm run agent -- projects/<slug>
+```
+
+### MCP (drive it from Claude Code)
+
+```bash
+claude mcp add blueline -- npx tsx <repo>/toolkit/src/mcp/server.ts
+```
+
+Tools: `workspace_status`, `create_project`, `update_brief`, `add_source`, `run_project`,
+`run_status`, `get_reviews`, `branch_project`, `create_series`, `set_project_meta`,
+`open_project`. The bridge (app or `npm run serve`) must be running.
+
+## Architecture
+
+```
+┌─ Electron shell (app/) ────────────────────────────────┐
+│  React viewer (shadcn/radix, dark by default)          │
+│  printToPDF export — same Chromium as the preview      │
+└──────────────┬─────────────────────────────────────────┘
+               │ HTTP + WebSocket (:7717)
+┌─ Engine bridge (toolkit/src/engine/server.ts) ─────────┐
+│  per-project Pi agent sessions · run queue (2 parallel)│
+│  tools: render · review · gen_images · web_fetch ·     │
+│         web_search  (read/write/edit/grep/find/ls,     │
+│         no bash)                                       │
+│  reviewer: Gemini vision + mechanical gates            │
+│  images: Gemini image model, append-only variants      │
+└──────────────┬─────────────────────────────────────────┘
+               │
+        workspace/  projects/<slug>/ · context/ · styles/
+```
+
+Each project directory is self-describing: `brief.md`, `project.json` (name, series,
+lineage, page settings), `page.html` (the deliverable), `images/`, `out/proof.pdf`,
+`review/round-N.{json,pdf,html}`. Delete nothing, branch anything.
+
+## Status
+
+Working: everything above, verified end-to-end. Not yet: print-shop export marks
+(bleed/crop), code signing/notarization, per-engine eval harness.
