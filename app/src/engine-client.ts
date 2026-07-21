@@ -100,6 +100,8 @@ export interface EngineClient {
   closeProject(): Promise<void>;
   deleteProject(slug: string): Promise<void>;
   updateBrief(content: string): Promise<void>;
+  suggestVariants(slug: string, count: number): Promise<{ label: string; direction: string }[]>;
+  createVariants(slug: string, directions: { label: string; direction: string }[]): Promise<void>;
   selectSources(files: string[] | null): Promise<void>;
   uploadSource(kind: "context" | "style", name: string, dataBase64: string): Promise<void>;
   /** Pick a workspace dir (native dialog in Electron, path prompt in browser) and switch to it. */
@@ -181,6 +183,21 @@ export class BrowserEngineClient implements EngineClient {
   closeProject() { return post("/api/project/close"); }
   deleteProject(slug: string) { return post("/api/project/delete", { slug }); }
   updateBrief(content: string) { return post("/api/brief", { content }); }
+
+  async suggestVariants(slug: string, count: number): Promise<{ label: string; direction: string }[]> {
+    const res = await fetch("/api/variants/suggest", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ slug, count }),
+    });
+    const payload = await res.json();
+    if (!res.ok) throw new Error(payload.error ?? `suggest: HTTP ${res.status}`);
+    return payload.directions;
+  }
+
+  createVariants(slug: string, directions: { label: string; direction: string }[]) {
+    return post("/api/variants", { slug, directions });
+  }
   selectSources(files: string[] | null) { return post("/api/sources/select", { files }); }
   uploadSource(kind: "context" | "style", name: string, dataBase64: string) {
     return post("/api/sources/upload", { kind, name, dataBase64 });

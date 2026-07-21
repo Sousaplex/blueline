@@ -10,7 +10,8 @@
     "electron:compile": "esbuild electron/main.ts electron/preload.ts --bundle --platform=node --external:electron --outdir=dist-electron --format=cjs --out-extension:.js=.cjs",
     "electron:dev": "npm run electron:compile && electron .",
     "electron:app": "npm run build && npm run electron:compile && electron .",
-    "electron:smoke": "npm run build && npm run electron:compile && PRESSCHECK_SMOKE=1 electron ."
+    "electron:smoke": "npm run build && npm run electron:compile && PRESSCHECK_SMOKE=1 electron .",
+    "package": "npm run build && npm run electron:compile && electron-builder --mac"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",
@@ -42,5 +43,45 @@
     "esbuild@0.28.1": true,
     "esbuild@0.25.12": true
   },
-  "main": "dist-electron/main.cjs"
+  "main": "dist-electron/main.cjs",
+  "build": {
+    "appId": "com.presscheck.app",
+    "productName": "presscheck",
+    "asar": false,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "dist-electron/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../toolkit",
+        "to": "toolkit",
+        "filter": [
+          "src/**",
+          "package.json",
+          "tsconfig.json",
+          "node_modules/**"
+        ]
+      },
+      {
+        "from": "dist",
+        "to": "app/dist"
+      },
+      {
+        "from": "../config/providers.example.json",
+        "to": "config/providers.example.json"
+      }
+    ],
+    "mac": {
+      "target": [
+        "dir",
+        "dmg"
+      ],
+      "identity": null
+    }
+  }
 }

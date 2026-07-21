@@ -29,6 +29,8 @@ absent or its "context" is null, read every file in the context dir.
 # The loop
 1. Read brief.md, everything in the workspace context/ and styles/ dirs listed above. Use web_fetch for any URLs
    referenced in the brief or context (mode=screenshot when a site's visual style matters).
+   When you need facts that are not in the sources, use web_search (never fetch search-engine
+   result pages with web_fetch), then web_fetch the best source URLs it returns.
 2. Write page.html with REAL copy grounded in the context — never lorem ipsum. Print-first CSS:
    @page { size: A4; margin: 0 } (or per brief), mm/pt units, -webkit-print-color-adjust: exact.
    Reference images as <img src="images/<id>/v1.png" data-image-id="<id>">.

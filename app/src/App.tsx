@@ -6,6 +6,7 @@ import { LeftPane } from "./components/LeftPane";
 import { NewProjectDialog } from "./components/NewProjectDialog";
 import { PreviewPane } from "./components/PreviewPane";
 import { SettingsDialog } from "./components/SettingsDialog";
+import { VariantsDialog } from "./components/VariantsDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -223,6 +224,7 @@ export function App() {
         <Button size="sm" disabled={currentRunState !== "idle"} onClick={() => void actions.run()}>
           <Play data-slot="icon" /> Run
         </Button>
+        <VariantsDialog client={client} slug={project.slug} />
         <Button size="sm" variant="outline" disabled={!project.hasPage} onClick={() => void actions.render()}>
           <RefreshCw data-slot="icon" /> Re-render
         </Button>

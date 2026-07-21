@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
-import { REPO_ROOT } from "./config.ts";
+import { DATA_ROOT } from "./config.ts";
 import { Workspace } from "./workspace.ts";
 
 /** Paths and accessors for one project working directory inside a workspace. */
@@ -10,7 +10,7 @@ export class Project {
   readonly workspace: Workspace;
 
   constructor(projectDirArg: string, workspace?: Workspace) {
-    this.workspace = workspace ?? new Workspace(REPO_ROOT).ensure();
+    this.workspace = workspace ?? new Workspace(DATA_ROOT).ensure();
     // Accept absolute paths, workspace-relative ("projects/x") and bare slugs.
     this.dir = isAbsolute(projectDirArg)
       ? projectDirArg

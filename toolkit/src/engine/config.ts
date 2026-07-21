@@ -1,5 +1,5 @@
-import { readFileSync, existsSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export interface DesignerConfig {
@@ -15,19 +15,28 @@ export interface PresscheckConfig {
   reviewer: { provider: string; model: string; maxRounds: number; apiKeyEnv?: string };
   render: { format: string; printBackground: boolean; preferCSSPageSize: boolean };
   webFetch: { maxFetchesPerRun: number; maxContentChars: number };
+  webSearch: { model: string; maxSearchesPerRun: number; apiKeyEnv?: string };
 }
 
-const DEFAULTS: Pick<PresscheckConfig, "webFetch"> = {
+const DEFAULTS: Pick<PresscheckConfig, "webFetch" | "webSearch"> = {
   webFetch: { maxFetchesPerRun: 10, maxContentChars: 20_000 },
+  webSearch: { model: "gemini-3.5-flash", maxSearchesPerRun: 5, apiKeyEnv: "GEMINI_API_KEY" },
 };
 
-// repo root = ../../.. from this file (toolkit/src/engine/config.ts)
+// Code root = ../../.. from this file (toolkit/src/engine/config.ts). In the
+// packaged app this is <app>/Contents/Resources — read-only, code + defaults.
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
-// Load REPO_ROOT/.env into process.env (existing env wins). Keeps API keys working
-// in contexts without a shell environment (Electron app, launchd, etc).
-const envPath = resolve(REPO_ROOT, ".env");
-if (existsSync(envPath)) {
+// Data root = where mutable state lives: providers.json, workspace.json, .env,
+// and the default workspace. The packaged app sets PRESSCHECK_HOME to the OS
+// app-data dir; in dev it equals REPO_ROOT so nothing changes.
+export const DATA_ROOT = process.env.PRESSCHECK_HOME ? resolve(process.env.PRESSCHECK_HOME) : REPO_ROOT;
+if (DATA_ROOT !== REPO_ROOT) mkdirSync(DATA_ROOT, { recursive: true });
+
+// Load .env from the data root (and, in dev, the repo) — existing env wins.
+for (const root of new Set([DATA_ROOT, REPO_ROOT])) {
+  const envPath = resolve(root, ".env");
+  if (!existsSync(envPath)) continue;
   for (const line of readFileSync(envPath, "utf8").split("\n")) {
     const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line);
     if (!m || line.trim().startsWith("#")) continue;
@@ -37,7 +46,7 @@ if (existsSync(envPath)) {
 }
 
 export function loadConfig(): PresscheckConfig {
-  const configPath = resolve(REPO_ROOT, "config", "providers.json");
+  const configPath = resolve(DATA_ROOT, "config", "providers.json");
   const examplePath = resolve(REPO_ROOT, "config", "providers.example.json");
   const path = existsSync(configPath) ? configPath : examplePath;
   const raw = JSON.parse(readFileSync(path, "utf8"));

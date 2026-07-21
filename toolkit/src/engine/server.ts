@@ -8,11 +8,13 @@ import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync 
 import { extname, join, normalize, resolve } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { WebSocketServer, type WebSocket } from "ws";
-import { REPO_ROOT, loadConfig, type PresscheckConfig } from "./config.ts";
+import { DATA_ROOT, REPO_ROOT, loadConfig, type PresscheckConfig } from "./config.ts";
 import { listEditable, listImageSlots, selectVariant, updateCopy } from "./page-edit.ts";
 import { Project } from "./project.ts";
 import { PlaywrightBackend } from "./render.ts";
+import { resetSearchBudget } from "./search.ts";
 import { createPresscheckSession, type PresscheckSession } from "./session.ts";
+import { suggestDirections, variantBrief, type Direction } from "./variants.ts";
 import { resetFetchBudget } from "./web-fetch.ts";
 import { BRIEF_TEMPLATE, Workspace } from "./workspace.ts";
 
@@ -146,7 +148,9 @@ class Bridge {
   private async startRun(slug: string, kickoff?: string): Promise<void> {
     try {
       const pc = await this.ensureSession(slug);
-      resetFetchBudget(this.project?.slug === slug ? this.project : new Project(slug, this.workspace));
+      const project = this.project?.slug === slug ? this.project : new Project(slug, this.workspace);
+      resetFetchBudget(project);
+      resetSearchBudget(project);
       this.runStates.set(slug, "running");
       this.broadcast({ type: "run_state", project: slug, state: "running" });
       const prompt =
@@ -224,7 +228,7 @@ class Bridge {
   }
 
   async updateSettings(patch: Partial<PresscheckConfig>): Promise<void> {
-    const configPath = resolve(REPO_ROOT, "config", "providers.json");
+    const configPath = resolve(DATA_ROOT, "config", "providers.json");
     const current: Record<string, unknown> = existsSync(configPath)
       ? JSON.parse(readFileSync(configPath, "utf8"))
       : { ...this.config };
@@ -288,6 +292,29 @@ class Bridge {
     if (this.project?.slug === slug) await this.closeProject();
     rmSync(dir, { recursive: true, force: true });
     this.broadcast({ type: "projects_changed" });
+  }
+
+  /** Fan a project out into direction variants — sibling projects, queued to run. */
+  async createVariants(baseSlug: string, directions: Direction[]): Promise<{ slug: string; state: RunState }[]> {
+    const baseDir = join(this.workspace.projectsDir, baseSlug);
+    if (!existsSync(join(baseDir, "brief.md"))) throw new Error(`"${baseSlug}" has no brief.md`);
+    const baseBrief = readFileSync(join(baseDir, "brief.md"), "utf8");
+    const created: { slug: string; state: RunState }[] = [];
+    for (const direction of directions) {
+      if (!direction.label?.trim() || !direction.direction?.trim()) continue;
+      const { slug } = this.workspace.createProject(`${baseSlug}-${direction.label}`, variantBrief(baseBrief, direction));
+      const sourcesJson = join(baseDir, "sources.json");
+      if (existsSync(sourcesJson)) {
+        writeFileSync(join(this.workspace.projectsDir, slug, "sources.json"), readFileSync(sourcesJson));
+      }
+      created.push({ slug, state: "idle" });
+    }
+    if (!created.length) throw new Error("No valid directions provided");
+    this.broadcast({ type: "projects_changed" });
+    for (const entry of created) {
+      entry.state = await this.run(entry.slug);
+    }
+    return created;
   }
 
   async setWorkspace(root: string): Promise<void> {
@@ -536,6 +563,22 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
         });
       }
 
+      if (req.method === "POST" && url.pathname === "/api/variants/suggest") {
+        const body = await readBody(req);
+        const slug = body.slug ?? bridge.requireProject().slug;
+        const project = new Project(slug, bridge.workspace);
+        const directions = await suggestDirections(project, bridge.config, Math.min(Number(body.count ?? 3), 4));
+        return json(res, 200, { directions });
+      }
+      if (req.method === "POST" && url.pathname === "/api/variants") {
+        const body = await readBody(req);
+        const slug = body.slug ?? bridge.requireProject().slug;
+        if (!Array.isArray(body.directions) || !body.directions.length) {
+          return json(res, 400, { error: "directions[] required" });
+        }
+        const created = await bridge.createVariants(slug, body.directions);
+        return json(res, 200, { created });
+      }
       if (req.method === "POST" && url.pathname === "/api/run") {
         const body = await readBody(req);
         const state = await bridge.run(body.slug, body.prompt);

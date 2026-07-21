@@ -6,13 +6,58 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
 
-// dist-electron/main.js -> app/ -> repo root
+// Dev: dist-electron/main.cjs -> app/ -> repo root. Packaged: everything the
+// bridge needs ships under Contents/Resources, and mutable state moves to the
+// per-user app-data dir via PRESSCHECK_HOME.
 const REPO_ROOT = resolve(__dirname, "..", "..");
-const TOOLKIT_DIR = join(REPO_ROOT, "toolkit");
+const PACKAGED = app.isPackaged;
+const TOOLKIT_DIR = PACKAGED ? join(process.resourcesPath, "toolkit") : join(REPO_ROOT, "toolkit");
+const PRESSCHECK_HOME = process.env.PRESSCHECK_HOME ?? (PACKAGED ? app.getPath("userData") : undefined);
 const BRIDGE_PORT = Number(process.env.PRESSCHECK_PORT ?? 7717);
 const BRIDGE_URL = `http://localhost:${BRIDGE_PORT}`;
 const SMOKE = process.env.PRESSCHECK_SMOKE === "1";
 const SMOKE_DIR = process.env.PRESSCHECK_SMOKE_DIR ?? join(app.getPath("temp"), "presscheck-smoke");
+
+const childEnv = (): NodeJS.ProcessEnv => ({
+  ...process.env,
+  ...(PRESSCHECK_HOME ? { PRESSCHECK_HOME } : {}),
+  ...(PACKAGED ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
+});
+
+/** Run a node script with Electron's bundled Node (works inside the packaged app). */
+function spawnNode(args: string[]): ChildProcess {
+  if (PACKAGED) {
+    return spawn(process.execPath, args, { cwd: TOOLKIT_DIR, stdio: "inherit", env: childEnv() });
+  }
+  return spawn("npx", ["tsx", ...args.slice(1)], { cwd: TOOLKIT_DIR, stdio: "inherit", env: childEnv() });
+}
+
+const TSX_CLI = join(TOOLKIT_DIR, "node_modules", "tsx", "dist", "cli.mjs");
+
+/** Packaged first-run: make sure Playwright's Chromium exists (no-op when present). */
+async function ensureChromium(): Promise<void> {
+  if (!PACKAGED) return;
+  const progress = new BrowserWindow({ width: 380, height: 120, frame: false, resizable: false });
+  await progress.loadURL(
+    "data:text/html," +
+      encodeURIComponent(
+        `<body style="font-family:system-ui;background:#18181b;color:#fafafa;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div>Preparing render engine…</div></body>`,
+      ),
+  );
+  try {
+    await new Promise<void>((resolvePromise, reject) => {
+      const child = spawn(
+        process.execPath,
+        [join(TOOLKIT_DIR, "node_modules", "playwright", "cli.js"), "install", "chromium"],
+        { cwd: TOOLKIT_DIR, stdio: "inherit", env: childEnv() },
+      );
+      child.on("exit", (code) => (code === 0 ? resolvePromise() : reject(new Error(`playwright install exited ${code}`))));
+      child.on("error", reject);
+    });
+  } finally {
+    progress.destroy();
+  }
+}
 
 let bridgeChild: ChildProcess | undefined;
 let mainWindow: BrowserWindow | undefined;
@@ -28,11 +73,7 @@ async function bridgeAlive(): Promise<boolean> {
 
 async function ensureBridge(): Promise<void> {
   if (await bridgeAlive()) return; // reuse a dev bridge if one is already running
-  bridgeChild = spawn("npx", ["tsx", "src/engine/server.ts", "--port", String(BRIDGE_PORT)], {
-    cwd: TOOLKIT_DIR,
-    stdio: "inherit",
-    env: { ...process.env },
-  });
+  bridgeChild = spawnNode([TSX_CLI, "src/engine/server.ts", "--port", String(BRIDGE_PORT)]);
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     if (await bridgeAlive()) return;
@@ -84,6 +125,7 @@ async function runSmokeTest(): Promise<void> {
 
 app.whenReady().then(async () => {
   try {
+    await ensureChromium();
     await ensureBridge();
     mainWindow = new BrowserWindow({
       width: 1440,
@@ -102,7 +144,7 @@ app.whenReady().then(async () => {
     });
 
     const rendererUrl = process.env.VITE_DEV_SERVER_URL ?? `${BRIDGE_URL}/`;
-    if (!process.env.VITE_DEV_SERVER_URL && !existsSync(join(REPO_ROOT, "app", "dist", "index.html"))) {
+    if (!PACKAGED && !process.env.VITE_DEV_SERVER_URL && !existsSync(join(REPO_ROOT, "app", "dist", "index.html"))) {
       throw new Error("app/dist not built — run `npm run build` in app/ (or set VITE_DEV_SERVER_URL)");
     }
     await mainWindow.loadURL(rendererUrl);

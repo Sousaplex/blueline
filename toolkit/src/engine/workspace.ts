@@ -6,9 +6,9 @@
 // with the demo). The last-used workspace persists in config/workspace.json.
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { REPO_ROOT } from "./config.ts";
+import { DATA_ROOT } from "./config.ts";
 
-const STATE_PATH = join(REPO_ROOT, "config", "workspace.json");
+const STATE_PATH = join(DATA_ROOT, "config", "workspace.json");
 
 export interface WorkspaceState {
   root: string;
@@ -65,7 +65,7 @@ export class Workspace {
   }
 
   persist(lastProject?: string): void {
-    mkdirSync(join(REPO_ROOT, "config"), { recursive: true });
+    mkdirSync(join(DATA_ROOT, "config"), { recursive: true });
     writeFileSync(STATE_PATH, JSON.stringify({ root: this.root, lastProject } satisfies WorkspaceState, null, 2));
   }
 
@@ -79,7 +79,7 @@ export class Workspace {
         // fall through to default on a stale/broken state file
       }
     }
-    return { workspace: new Workspace(REPO_ROOT).ensure() };
+    return { workspace: new Workspace(DATA_ROOT).ensure() };
   }
 }
 

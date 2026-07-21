@@ -5,6 +5,7 @@ import { generateImages } from "./images.ts";
 import type { Project } from "./project.ts";
 import type { RenderBackend } from "./render.ts";
 import { RoundLimitError, runReview } from "./review.ts";
+import { runWebSearch } from "./search.ts";
 import { fetchWeb } from "./web-fetch.ts";
 
 function text(t: string) {
@@ -91,5 +92,19 @@ export function buildPresscheckTools(project: Project, backend: RenderBackend, c
     },
   });
 
-  return [render, review, genImages, webFetch];
+  const webSearch = defineTool({
+    name: "web_search",
+    label: "Web search",
+    description:
+      "Search the web (Google-grounded). Returns a factual answer plus source URLs — use web_fetch to read a promising source in full. Prefer this over fetching search-engine pages.",
+    promptSnippet: "web_search: query -> grounded answer + source urls",
+    parameters: Type.Object({
+      query: Type.String({ description: "what to find out, phrased as a research question" }),
+    }),
+    async execute(_id, params) {
+      return text(await runWebSearch(project, config, params.query));
+    },
+  });
+
+  return [render, review, genImages, webFetch, webSearch];
 }
