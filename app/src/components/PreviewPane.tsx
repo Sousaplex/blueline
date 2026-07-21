@@ -1,10 +1,11 @@
-import { ChevronLeft, ChevronRight, History, ImagePlus, Loader2, Minus, Move, Plus, RefreshCw, RotateCcw, Sparkles, Type, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Code2, History, Loader2, Move, RefreshCw, Save, Type } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { EngineClient, ProjectState } from "../engine-client";
+import type { SelectionInfo } from "../selection";
 
-type Mode = "proof" | "live";
+type Mode = "proof" | "live" | "code";
 type EditTool = "text" | "nudge";
 
 const PX_TO_MM = 25.4 / 96;
@@ -36,6 +37,8 @@ export function PreviewPane({
   actions,
   viewRound,
   onViewRound,
+  onSelect,
+  onRequestDelete,
 }: {
   project: ProjectState;
   client: EngineClient;
@@ -43,18 +46,25 @@ export function PreviewPane({
   actions: Actions;
   viewRound: number | null;
   onViewRound: (round: number | null) => void;
+  onSelect: (selection: SelectionInfo | null) => void;
+  onRequestDelete: (pcId: string) => void;
 }) {
-  const [mode, setMode] = useState<Mode>("proof");
-  const [editTool, setEditTool] = useState<EditTool>("text");
+  // Deep-linkable initial view (?mode=live|code&tool=nudge) — also used by automated tests.
+  const initialParams = useRef(new URLSearchParams(window.location.search));
+  const [mode, setMode] = useState<Mode>(() => {
+    const m = initialParams.current.get("mode");
+    return m === "live" || m === "code" ? m : "proof";
+  });
+  const [editTool, setEditTool] = useState<EditTool>(() => (initialParams.current.get("tool") === "nudge" ? "nudge" : "text"));
   const [pageCount, setPageCount] = useState(0);
   const [page, setPage] = useState(0);
   const [dirty, setDirty] = useState(false);
   const [activeImage, setActiveImage] = useState<string | null>(null);
   const [nudge, setNudge] = useState<NudgeState | null>(null);
-  const [zoom, setZoom] = useState(1);
-  const [genBusy, setGenBusy] = useState(false);
+  const [source, setSource] = useState<string | null>(null);
+  const [sourceDirty, setSourceDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const uploadInput = useRef<HTMLInputElement>(null);
   const activeImageRef = useRef<string | null>(null);
   activeImageRef.current = activeImage;
   const editToolRef = useRef<EditTool>(editTool);
@@ -66,6 +76,9 @@ export function PreviewPane({
   const nudgeEl = (pcId: string): HTMLElement | null =>
     iframeRef.current?.contentDocument?.querySelector<HTMLElement>(`[data-pc-id="${pcId}"]`) ?? null;
 
+  const reportBlock = (n: NudgeState, tag?: string) =>
+    onSelect({ kind: "block", id: n.pcId, tag, nudge: { x: n.x, y: n.y, marginTop: n.marginTop } });
+
   /** Apply a nudge to the iframe immediately; persist to page.html debounced. */
   const applyNudge = (next: NudgeState) => {
     nudgeRef.current = next; // sync, so rapid key-repeat bursts accumulate correctly
@@ -76,6 +89,7 @@ export function PreviewPane({
       if (next.marginTop != null) el.style.marginTop = `${next.marginTop.toFixed(1)}mm`;
       else el.style.removeProperty("margin-top");
     }
+    reportBlock(next, el?.tagName);
     window.clearTimeout(persistTimer.current);
     persistTimer.current = window.setTimeout(() => {
       void client
@@ -86,11 +100,17 @@ export function PreviewPane({
   const applyNudgeRef = useRef(applyNudge);
   applyNudgeRef.current = applyNudge;
 
-  const clearNudgeSelection = () => {
+  const clearSelections = () => {
     const doc = iframeRef.current?.contentDocument;
     doc?.querySelectorAll(".pc-nudge-active").forEach((el) => el.classList.remove("pc-nudge-active"));
+    doc?.querySelectorAll("img.pc-active").forEach((el) => el.classList.remove("pc-active"));
+    nudgeRef.current = null;
     setNudge(null);
+    setActiveImage(null);
+    onSelect(null);
   };
+  const clearSelectionsRef = useRef(clearSelections);
+  clearSelectionsRef.current = clearSelections;
 
   const roundInfo = viewRound != null ? project.rounds.find((r) => r.round === viewRound) : undefined;
   const roundHasProof = roundInfo?.hasProof ?? false;
@@ -104,14 +124,23 @@ export function PreviewPane({
   // Switching edit tools clears selections and flips the iframe's cursor affordance.
   useEffect(() => {
     const doc = iframeRef.current?.contentDocument;
-    if (doc?.body) {
-      doc.body.classList.toggle("pc-nudge-mode", editTool === "nudge");
-      doc.querySelectorAll(".pc-nudge-active").forEach((el) => el.classList.remove("pc-nudge-active"));
-      doc.querySelectorAll("img.pc-active").forEach((el) => el.classList.remove("pc-active"));
-    }
-    setNudge(null);
-    setActiveImage(null);
+    if (doc?.body) doc.body.classList.toggle("pc-nudge-mode", editTool === "nudge");
+    clearSelectionsRef.current();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editTool]);
+
+  // Leaving live mode drops the selection; entering code mode loads the source.
+  useEffect(() => {
+    if (mode !== "live") clearSelectionsRef.current();
+    if (mode === "code") {
+      setSource(null);
+      void client.getPageSource().then((s) => {
+        setSource(s);
+        setSourceDirty(false);
+      }).catch((e) => setSource(`<!-- failed to load: ${e instanceof Error ? e.message : e} -->`));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
 
   useEffect(() => {
     if (viewRound != null && !roundHasProof) return setPageCount(0);
@@ -131,29 +160,35 @@ export function PreviewPane({
       [data-pc-id]:focus { outline: 2px solid rgba(120,120,255,.95); outline-offset: 2px; }
       body.pc-nudge-mode [data-pc-id]:hover { outline: 2px dashed rgba(245,158,11,.8); cursor: move; }
       .pc-nudge-active { outline: 2px solid rgba(245,158,11,1) !important; outline-offset: 2px; cursor: move !important; }
+      .pc-drop-before { box-shadow: inset 0 4px 0 0 rgba(59,130,246,.9) !important; }
+      .pc-drop-after { box-shadow: inset 0 -4px 0 0 rgba(59,130,246,.9) !important; }
+      .pc-dragging { opacity: .6; }
       img[data-image-id]:hover { outline: 2px dashed rgba(52,199,89,.8); outline-offset: 2px; cursor: pointer; }
       img[data-image-id].pc-active { outline: 2px solid rgba(52,199,89,1); outline-offset: 2px; cursor: grab; }
     `;
     doc.head.appendChild(style);
     doc.body.classList.toggle("pc-nudge-mode", editToolRef.current === "nudge");
 
-    const selectForNudge = (el: HTMLElement) => {
-      doc.querySelectorAll(".pc-nudge-active").forEach((other) => other.classList.remove("pc-nudge-active"));
-      el.classList.add("pc-nudge-active");
-      setActiveImage(null);
-      const next = { pcId: el.getAttribute("data-pc-id")!, ...readNudge(el) };
-      nudgeRef.current = next; // sync, so keystrokes right after the click see the selection
-      setNudge(next);
-    };
-
     // An element holding other blocks must never become contenteditable: blurring it
-    // would replace ALL of its children with flat text (this destroyed a page once —
-    // and a card with h3+p children slipped through a tag-list version of this check,
-    // so the rule is: ANY non-inline child element makes it structural).
+    // would replace ALL of its children with flat text. Rule: ANY non-inline child.
     const INLINE_TAGS = new Set(["B", "I", "EM", "STRONG", "SPAN", "A", "BR", "SMALL", "SUP", "SUB", "CODE", "U", "MARK", "WBR", "TIME", "ABBR"]);
     const isStructural = (el: HTMLElement) =>
       Boolean(el.querySelector("[data-pc-id], [data-image-id], img")) ||
       [...el.children].some((child) => !INLINE_TAGS.has(child.tagName.toUpperCase()));
+
+    const selectForNudge = (el: HTMLElement) => {
+      doc.querySelectorAll(".pc-nudge-active").forEach((other) => other.classList.remove("pc-nudge-active"));
+      doc.querySelectorAll("img.pc-active").forEach((other) => other.classList.remove("pc-active"));
+      setActiveImage(null);
+      el.classList.add("pc-nudge-active");
+      const next = { pcId: el.getAttribute("data-pc-id")!, ...readNudge(el) };
+      nudgeRef.current = next; // sync, so keystrokes right after the click see the selection
+      setNudge(next);
+      reportBlock(next, el.tagName);
+    };
+
+    const clearDropMarkers = () =>
+      doc.querySelectorAll(".pc-drop-before, .pc-drop-after").forEach((el) => el.classList.remove("pc-drop-before", "pc-drop-after"));
 
     doc.querySelectorAll<HTMLElement>("[data-pc-id]").forEach((el) => {
       el.addEventListener("click", (ev) => {
@@ -165,6 +200,14 @@ export function PreviewPane({
         }
         ev.preventDefault();
         if (isStructural(el)) return; // containers are nudge-only, not text-editable
+        const cs = doc.defaultView!.getComputedStyle(el);
+        onSelect({
+          kind: "text",
+          id: el.getAttribute("data-pc-id")!,
+          tag: el.tagName,
+          text: el.textContent ?? "",
+          styles: { fontSize: cs.fontSize, fontWeight: cs.fontWeight, lineHeight: cs.lineHeight, color: cs.color, textAlign: cs.textAlign },
+        });
         el.dataset.pcOriginal = el.textContent ?? "";
         el.setAttribute("contenteditable", "plaintext-only");
         el.focus();
@@ -180,34 +223,64 @@ export function PreviewPane({
         void actions.updateCopy(pcId, text).then(() => setDirty(true));
       });
 
-      // Drag-to-move when this element is the nudge selection.
-      let drag: { x: number; y: number; startX: number; startY: number } | null = null;
+      // Nudge-mode drag: plain drag = translate; ⌥-drag = reorder in document flow.
+      let drag: { x: number; y: number; startX: number; startY: number; reorder: boolean; target: HTMLElement | null; after: boolean } | null = null;
       el.addEventListener("mousedown", (ev) => {
         const n = nudgeRef.current;
         if (editToolRef.current !== "nudge" || n?.pcId !== el.getAttribute("data-pc-id")) return;
         ev.preventDefault();
-        drag = { x: ev.clientX, y: ev.clientY, startX: n.x, startY: n.y };
+        drag = { x: ev.clientX, y: ev.clientY, startX: n.x, startY: n.y, reorder: ev.altKey, target: null, after: false };
+        if (drag.reorder) el.classList.add("pc-dragging");
       });
       doc.addEventListener("mousemove", (ev) => {
         if (!drag) return;
         const n = nudgeRef.current;
         if (!n || n.pcId !== el.getAttribute("data-pc-id")) return (drag = null);
+        if (drag.reorder) {
+          clearDropMarkers();
+          const under = doc.elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>("[data-pc-id]");
+          if (under && under !== el && !el.contains(under) && !under.contains(el)) {
+            const rect = under.getBoundingClientRect();
+            drag.after = ev.clientY > rect.top + rect.height / 2;
+            drag.target = under;
+            under.classList.add(drag.after ? "pc-drop-after" : "pc-drop-before");
+          } else {
+            drag.target = null;
+          }
+          return;
+        }
         applyNudgeRef.current({
           ...n,
           x: drag.startX + (ev.clientX - drag.x) * PX_TO_MM,
           y: drag.startY + (ev.clientY - drag.y) * PX_TO_MM,
         });
       });
-      doc.addEventListener("mouseup", () => (drag = null));
+      doc.addEventListener("mouseup", () => {
+        if (!drag) return;
+        const d = drag;
+        drag = null;
+        el.classList.remove("pc-dragging");
+        clearDropMarkers();
+        if (d.reorder && d.target) {
+          const id = el.getAttribute("data-pc-id")!;
+          const beforeId = d.target.getAttribute("data-pc-id")!;
+          clearSelectionsRef.current();
+          void client.moveElementBefore(id, beforeId, d.after).then(() => setDirty(true));
+        }
+      });
     });
 
-    // Arrow-key nudging (focus lives inside the iframe after a click).
+    // Keyboard: arrows nudge, Escape deselects, Delete asks to remove the element.
     doc.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") {
+        clearSelectionsRef.current();
+        return;
+      }
       const n = nudgeRef.current;
       if (!n || editToolRef.current !== "nudge") return;
-      if (ev.key === "Escape") {
-        doc.querySelectorAll(".pc-nudge-active").forEach((el) => el.classList.remove("pc-nudge-active"));
-        setNudge(null);
+      if (ev.key === "Delete" || ev.key === "Backspace") {
+        ev.preventDefault();
+        onRequestDelete(n.pcId);
         return;
       }
       const step = ev.shiftKey ? 2 : 0.5;
@@ -223,7 +296,7 @@ export function PreviewPane({
       applyNudgeRef.current({ ...n, x: n.x + d[0], y: n.y + d[1] });
     });
 
-    // Image slots: click selects (opens the image toolbar); drag pans object-position.
+    // Image slots: click selects (Inspector shows controls); drag pans object-position.
     doc.querySelectorAll<HTMLImageElement>("img[data-image-id]").forEach((img) => {
       const id = img.getAttribute("data-image-id")!;
       let drag: { x: number; y: number; posX: number; posY: number; moved: boolean } | null = null;
@@ -235,17 +308,19 @@ export function PreviewPane({
 
       img.addEventListener("click", (ev) => {
         ev.preventDefault();
+        ev.stopPropagation();
         if (drag?.moved) return; // click after a drag = end of pan, not a select toggle
         doc.querySelectorAll(".pc-nudge-active").forEach((other) => other.classList.remove("pc-nudge-active"));
-        setNudge(null); // an image selection replaces a block selection
+        nudgeRef.current = null;
+        setNudge(null);
         doc.querySelectorAll("img.pc-active").forEach((other) => other.classList.remove("pc-active"));
         if (activeImageRef.current === id) {
           setActiveImage(null);
+          onSelect(null);
         } else {
           img.classList.add("pc-active");
-          const m = /scale\(([\d.]+)\)/.exec(img.style.transform ?? "");
-          setZoom(m ? Number(m[1]) : 1);
           setActiveImage(id);
+          onSelect({ kind: "image", id, tag: "IMG" });
         }
       });
 
@@ -269,39 +344,22 @@ export function PreviewPane({
       doc.addEventListener("mouseup", () => {
         if (!drag || activeImageRef.current !== id) return;
         if (drag.moved) {
-          void client
-            .setImageStyle(id, { objectPosition: img.style.objectPosition })
-            .then(() => setDirty(true));
+          void client.setImageStyle(id, { objectPosition: img.style.objectPosition }).then(() => setDirty(true));
         }
         drag = null;
       });
     });
   };
 
-  const activeSlot = project.images.find((s) => s.id === activeImage);
-
-  const applyZoom = (z: number) => {
-    setZoom(z);
-    const img = iframeRef.current?.contentDocument?.querySelector<HTMLImageElement>(
-      `img[data-image-id="${activeImage}"]`,
-    );
-    if (img) img.style.transform = z === 1 ? "" : `scale(${z.toFixed(2)})`;
-  };
-
-  const persistZoom = () => {
-    if (activeImage) void client.setImageStyle(activeImage, { zoom }).then(() => setDirty(true));
-  };
-
-  const onUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file || !activeImage) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = String(reader.result).split(",")[1] ?? "";
-      void client.uploadImageVariant(activeImage, base64).then(() => setDirty(true));
-    };
-    reader.readAsDataURL(file);
+  const saveSource = () => {
+    if (source == null) return;
+    setSaving(true);
+    void client
+      .savePageSource(source)
+      .then(() => actions.render())
+      .then(() => setSourceDirty(false))
+      .catch((e) => setSource((s) => s)) // error surfaces via the bridge error event
+      .finally(() => setSaving(false));
   };
 
   if (!project.hasPage) {
@@ -323,6 +381,9 @@ export function PreviewPane({
             <TabsTrigger value="live" className="text-xs" disabled={viewRound != null}>
               Live edit
             </TabsTrigger>
+            <TabsTrigger value="code" className="gap-1 text-xs" disabled={viewRound != null}>
+              <Code2 className="size-3" /> Code
+            </TabsTrigger>
           </TabsList>
         </Tabs>
 
@@ -332,11 +393,17 @@ export function PreviewPane({
               <TabsTrigger value="text" className="gap-1 text-xs" title="Click text to edit copy">
                 <Type className="size-3" /> Text
               </TabsTrigger>
-              <TabsTrigger value="nudge" className="gap-1 text-xs" title="Click a block, then arrow keys / drag to nudge its position">
+              <TabsTrigger value="nudge" className="gap-1 text-xs" title="Click a block, then arrow keys / drag to nudge; ⌥-drag to reorder">
                 <Move className="size-3" /> Nudge
               </TabsTrigger>
             </TabsList>
           </Tabs>
+        )}
+
+        {mode === "code" && (
+          <Button size="sm" className="h-7 text-xs" disabled={saving || !sourceDirty || source == null} onClick={saveSource}>
+            {saving ? <Loader2 className="animate-spin" data-slot="icon" /> : <Save data-slot="icon" />} Save & re-render
+          </Button>
         )}
 
         {viewRound != null && (
@@ -370,145 +437,49 @@ export function PreviewPane({
         )}
       </div>
 
-      <div className="flex flex-1 items-start justify-center overflow-auto bg-muted/30 p-6">
-        {mode === "proof" ? (
-          viewRound != null && !roundHasProof ? (
-            <p className="text-sm text-muted-foreground">
-              No archived proof for round {viewRound} (older run) — its issues are listed on the left.
-            </p>
-          ) : pageCount > 0 ? (
-            <img
-              className="h-auto max-w-full rounded-sm bg-white shadow-lg ring-1 ring-black/10"
-              src={client.proofPageUrl(page, cacheKey, proofRound)}
-              alt={`proof page ${page + 1}`}
-            />
-          ) : (
-            <p className="text-sm text-muted-foreground">No proof yet — re-render or run.</p>
-          )
+      {mode === "code" ? (
+        source == null ? (
+          <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">loading source…</div>
         ) : (
-          <iframe
-            ref={iframeRef}
-            title="live preview"
-            className="min-h-[297mm] w-[210mm] rounded-sm border-0 bg-white shadow-lg ring-1 ring-black/10"
-            src={client.fileUrl("page.html", cacheKey)}
-            onLoad={armLiveEditing}
-          />
-        )}
-      </div>
-
-      {mode === "live" && editTool === "nudge" && nudge && viewRound == null && (
-        <div className="flex shrink-0 items-center gap-3 border-t bg-muted/40 px-4 py-2 text-xs">
-          <span className="font-mono font-medium">{nudge.pcId}</span>
-          <span className="tabular-nums text-muted-foreground">
-            x {nudge.x.toFixed(1)}mm · y {nudge.y.toFixed(1)}mm
-          </span>
-          <div className="flex items-center gap-1">
-            <span className="text-muted-foreground">space above</span>
-            <Button
-              variant="outline"
-              size="icon-sm"
-              className="size-6"
-              aria-label="Less space above"
-              onClick={() => applyNudge({ ...nudge, marginTop: (nudge.marginTop ?? 0) - 1 })}
-            >
-              <Minus />
-            </Button>
-            <span className="w-12 text-center tabular-nums">{nudge.marginTop != null ? `${nudge.marginTop.toFixed(1)}mm` : "auto"}</span>
-            <Button
-              variant="outline"
-              size="icon-sm"
-              className="size-6"
-              aria-label="More space above"
-              onClick={() => applyNudge({ ...nudge, marginTop: (nudge.marginTop ?? 0) + 1 })}
-            >
-              <Plus />
-            </Button>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-6 text-xs"
-            onClick={() => applyNudge({ ...nudge, x: 0, y: 0, marginTop: null })}
-          >
-            <RotateCcw data-slot="icon" /> Reset
-          </Button>
-          <span className="text-muted-foreground">arrow keys nudge · shift = 2mm steps · drag to move</span>
-          <div className="flex-1" />
-          <Button variant="ghost" size="icon-sm" className="size-6" onClick={clearNudgeSelection}>
-            <X />
-          </Button>
-        </div>
-      )}
-
-      {mode === "live" && editTool === "nudge" && !nudge && viewRound == null && (
-        <div className="flex h-9 shrink-0 items-center border-t bg-muted/40 px-4 text-xs text-muted-foreground">
-          Click any block in the page to nudge its position and spacing.
-        </div>
-      )}
-
-      {mode === "live" && activeSlot && viewRound == null && (
-        <div className="flex shrink-0 items-center gap-3 border-t bg-muted/40 px-4 py-2 text-xs">
-          <span className="font-mono font-medium">{activeSlot.id}</span>
-          <div className="flex items-center gap-1">
-            <Button
-              variant="outline"
-              size="icon-sm"
-              className="size-6"
-              disabled={!activeSlot.current || activeSlot.current <= Math.min(...activeSlot.variants)}
-              onClick={() => void actions.selectVariant(activeSlot.id, activeSlot.current! - 1).then(() => setDirty(true))}
-            >
-              <ChevronLeft />
-            </Button>
-            <span className="tabular-nums">v{activeSlot.current ?? "?"} / {activeSlot.variants.length}</span>
-            <Button
-              variant="outline"
-              size="icon-sm"
-              className="size-6"
-              disabled={!activeSlot.current || activeSlot.current >= Math.max(...activeSlot.variants)}
-              onClick={() => void actions.selectVariant(activeSlot.id, activeSlot.current! + 1).then(() => setDirty(true))}
-            >
-              <ChevronRight />
-            </Button>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-6 text-xs"
-            disabled={genBusy}
-            onClick={() => {
-              setGenBusy(true);
-              void client.generateMoreImages(activeSlot.id).finally(() => setGenBusy(false));
+          <textarea
+            spellCheck={false}
+            className="min-h-0 flex-1 resize-none bg-muted/20 p-4 font-mono text-xs leading-relaxed outline-none"
+            value={source}
+            onChange={(e) => {
+              setSource(e.target.value);
+              setSourceDirty(true);
             }}
-          >
-            {genBusy ? <Loader2 className="animate-spin" data-slot="icon" /> : <Sparkles data-slot="icon" />} Generate more
-          </Button>
-          <Button variant="outline" size="sm" className="h-6 text-xs" onClick={() => uploadInput.current?.click()}>
-            <ImagePlus data-slot="icon" /> Upload…
-          </Button>
-          <input ref={uploadInput} type="file" accept="image/*" hidden onChange={onUpload} />
-          <div className="flex items-center gap-2">
-            <span className="text-muted-foreground">zoom</span>
-            <input
-              type="range"
-              min={1}
-              max={2.5}
-              step={0.05}
-              value={zoom}
-              onChange={(e) => applyZoom(Number(e.target.value))}
-              onMouseUp={persistZoom}
-              className="w-28 accent-primary"
+          />
+        )
+      ) : (
+        <div className="flex flex-1 items-start justify-center overflow-auto bg-muted/30 p-6">
+          {mode === "proof" ? (
+            viewRound != null && !roundHasProof ? (
+              <p className="text-sm text-muted-foreground">
+                No archived proof for round {viewRound} (older run) — its issues are listed on the left.
+              </p>
+            ) : pageCount > 0 ? (
+              <img
+                className="h-auto max-w-full rounded-sm bg-white shadow-lg ring-1 ring-black/10"
+                src={client.proofPageUrl(page, cacheKey, proofRound)}
+                alt={`proof page ${page + 1}`}
+              />
+            ) : (
+              <p className="text-sm text-muted-foreground">No proof yet — re-render or run.</p>
+            )
+          ) : (
+            <iframe
+              ref={iframeRef}
+              title="live preview"
+              className="min-h-[297mm] w-[210mm] rounded-sm border-0 bg-white shadow-lg ring-1 ring-black/10"
+              src={client.fileUrl("page.html", cacheKey)}
+              onLoad={armLiveEditing}
             />
-            <span className="w-8 tabular-nums">{zoom.toFixed(2)}×</span>
-          </div>
-          <span className="text-muted-foreground">drag the photo to reposition the crop</span>
-          <div className="flex-1" />
-          <Button variant="ghost" size="icon-sm" className="size-6" onClick={() => setActiveImage(null)}>
-            <X />
-          </Button>
+          )}
         </div>
       )}
 
-      {(mode === "proof" || (!activeSlot && editTool === "text")) && project.images.length > 0 && viewRound == null && (
+      {mode === "proof" && project.images.length > 0 && viewRound == null && (
         <div className="flex shrink-0 items-center gap-6 overflow-x-auto border-t px-4 py-2">
           {project.images.map((slot) => (
             <div key={slot.id} className="flex items-center gap-1.5 text-xs">
@@ -536,7 +507,6 @@ export function PreviewPane({
               </Button>
             </div>
           ))}
-          {mode === "live" && <span className="text-xs text-muted-foreground">click a photo in the page to edit its crop</span>}
         </div>
       )}
     </main>

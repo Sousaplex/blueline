@@ -122,6 +122,36 @@ test("updateCopy treats any non-inline child as structure (the h3+p card case)",
   assert.ok(html.includes("<h3>Title</h3>") && html.includes("Bigger claim"));
 });
 
+const { deleteElement, moveElement, moveElementBefore, pageSource, writePageSource } = await import("./page-edit.ts");
+
+test("element delete/move/source operations", () => {
+  const p = tempProject();
+  writeFileSync(
+    p.pageHtml,
+    `<html><head><style>b{}</style></head><body><div data-pc-id="wrap"><p data-pc-id="a">A</p><p data-pc-id="b">B</p><p data-pc-id="c">C</p></div></body></html>`,
+  );
+  const order = () => {
+    const html = readFileSync(p.pageHtml, "utf8");
+    return ["a", "b", "c"].filter((id) => html.includes(`data-pc-id="${id}"`)).sort(
+      (x, y) => html.indexOf(`data-pc-id="${x}"`) - html.indexOf(`data-pc-id="${y}"`),
+    ).join("");
+  };
+  moveElement(p, "c", "up");
+  assert.equal(order(), "acb");
+  moveElementBefore(p, "b", "a");
+  assert.equal(order(), "bac");
+  moveElement(p, "b", "up"); // already first — no-op
+  assert.equal(order(), "bac");
+  deleteElement(p, "a");
+  assert.equal(order(), "bc");
+  assert.throws(() => moveElementBefore(p, "wrap", "b"), /into itself/);
+  assert.throws(() => deleteElement(p, "nope"), /No element/);
+  assert.throws(() => writePageSource(p, "<div>hi</div>"), /complete HTML/);
+  const src = pageSource(p);
+  writePageSource(p, src); // round-trip of a valid document is accepted
+  assert.equal(pageSource(p), src);
+});
+
 test("element nudge clamps offsets and round-trips through page.html", () => {
   const p = tempProject();
   writeFileSync(p.pageHtml, `<html><body><section data-pc-id="stats" style="color: red">x</section></body></html>`);

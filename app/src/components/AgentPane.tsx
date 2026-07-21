@@ -148,7 +148,7 @@ export function AgentPane({
   };
 
   return (
-    <aside className="flex h-full min-h-0 flex-col overflow-hidden border-l">
+    <aside className="flex h-full min-h-0 flex-col overflow-hidden">
       <div className="flex h-11 shrink-0 items-center gap-1 border-b px-3">
         <button
           className={cn("rounded-md px-2.5 py-1 text-sm font-medium", tab === "agent" ? "bg-accent" : "text-muted-foreground hover:text-foreground")}

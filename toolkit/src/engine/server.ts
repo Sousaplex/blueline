@@ -12,13 +12,18 @@ import { DATA_ROOT, REPO_ROOT, loadConfig, saveApiKeys, type PresscheckConfig } 
 import { gitClone, gitConnect, gitStatus, gitSync } from "./git-sync.ts";
 import { generateImages } from "./images.ts";
 import {
+  deleteElement,
   getElementStyle,
   listEditable,
   listImageSlots,
+  moveElement,
+  moveElementBefore,
+  pageSource,
   selectVariant,
   setElementStyle,
   setImageStyle,
   updateCopy,
+  writePageSource,
 } from "./page-edit.ts";
 import { Project, listSourceFiles, safeRelPath, type ProjectMeta } from "./project.ts";
 import { PlaywrightBackend } from "./render.ts";
@@ -939,6 +944,39 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
         return json(res, 200, { ok: true });
       }
 
+
+
+      if (req.method === "POST" && url.pathname === "/api/element/delete") {
+        const body = await readBody(req);
+        if (!body.pcId) return json(res, 400, { error: "pcId required" });
+        const project = bridge.requireProject();
+        deleteElement(project, String(body.pcId));
+        sys("delete_element", `${project.slug}: ${body.pcId}`);
+        bridge.broadcast({ type: "files_changed", project: project.slug });
+        return json(res, 200, { ok: true });
+      }
+      if (req.method === "POST" && url.pathname === "/api/element/move") {
+        const body = await readBody(req);
+        if (!body.pcId) return json(res, 400, { error: "pcId required" });
+        const project = bridge.requireProject();
+        if (body.beforePcId) moveElementBefore(project, String(body.pcId), String(body.beforePcId), body.after === true);
+        else if (body.direction === "up" || body.direction === "down") moveElement(project, String(body.pcId), body.direction);
+        else return json(res, 400, { error: "direction or beforePcId required" });
+        bridge.broadcast({ type: "files_changed", project: project.slug });
+        return json(res, 200, { ok: true });
+      }
+      if (url.pathname === "/api/page/source") {
+        const project = bridge.requireProject();
+        if (req.method === "POST") {
+          const body = await readBody(req);
+          writePageSource(project, String(body.content ?? ""));
+          sys("edit_source", `${project.slug}: page.html (${String(body.content ?? "").length} chars)`);
+          bridge.broadcast({ type: "files_changed", project: project.slug });
+          return json(res, 200, { ok: true });
+        }
+        res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "access-control-allow-origin": "*", "cache-control": "no-store" });
+        return res.end(pageSource(project));
+      }
 
       if (url.pathname === "/api/system") {
         return json(res, 200, { events: bridge.systemEvents() });

@@ -181,6 +181,11 @@ export interface EngineClient {
   createSeries(slug: string, rootName: string, topics: string[], run: boolean): Promise<{ slug: string; state: RunState }[]>;
   setElementStyle(pcId: string, style: { translateX?: number; translateY?: number; marginTop?: number | null }): Promise<void>;
   getElementStyle(pcId: string): Promise<ElementNudge>;
+  deleteElement(pcId: string): Promise<void>;
+  moveElement(pcId: string, direction: "up" | "down"): Promise<void>;
+  moveElementBefore(pcId: string, beforePcId: string, after?: boolean): Promise<void>;
+  getPageSource(): Promise<string>;
+  savePageSource(content: string): Promise<void>;
   /** System-tab replay: recent API/MCP-triggered actions. */
   getSystemEvents(): Promise<SystemEvent[]>;
   gitStatus(): Promise<GitStatus>;
@@ -376,6 +381,18 @@ export class BrowserEngineClient implements EngineClient {
   setImageStyle(imageId: string, style: { objectPosition?: string; zoom?: number }) {
     return post("/api/images/style", { imageId, ...style });
   }
+
+  deleteElement(pcId: string) { return post("/api/element/delete", { pcId }); }
+  moveElement(pcId: string, direction: "up" | "down") { return post("/api/element/move", { pcId, direction }); }
+  moveElementBefore(pcId: string, beforePcId: string, after?: boolean) {
+    return post("/api/element/move", { pcId, beforePcId, after });
+  }
+  async getPageSource(): Promise<string> {
+    const res = await fetch("/api/page/source");
+    if (!res.ok) throw new Error(`source: HTTP ${res.status}`);
+    return res.text();
+  }
+  savePageSource(content: string) { return post("/api/page/source", { content }); }
 
   async getSystemEvents(): Promise<SystemEvent[]> {
     const res = await fetch("/api/system");

@@ -141,6 +141,59 @@ export function getElementStyle(project: Project, pcId: string): { translateX: n
   };
 }
 
+/** Remove an element from the page entirely (viewer confirms before calling). */
+export function deleteElement(project: Project, pcId: string): void {
+  const { dom } = loadDom(project);
+  const el = dom.document.querySelector(`[data-pc-id="${pcId}"]`);
+  if (!el) throw new Error(`No element with data-pc-id="${pcId}"`);
+  if (el.tagName === "BODY" || el.tagName === "HTML") throw new Error("Cannot delete the page root");
+  el.remove();
+  save(project, dom.document);
+}
+
+/** Swap an element with its previous/next sibling in document flow. */
+export function moveElement(project: Project, pcId: string, direction: "up" | "down"): void {
+  const { dom } = loadDom(project);
+  const el = dom.document.querySelector(`[data-pc-id="${pcId}"]`);
+  if (!el) throw new Error(`No element with data-pc-id="${pcId}"`);
+  const parent = el.parentElement;
+  if (!parent) throw new Error("Element has no parent");
+  const sibling = direction === "up" ? el.previousElementSibling : el.nextElementSibling;
+  if (!sibling) return; // already at the edge — no-op
+  if (direction === "up") parent.insertBefore(el, sibling);
+  else parent.insertBefore(sibling, el);
+  save(project, dom.document);
+}
+
+/** Reorder by drag: move `pcId` to sit before `beforePcId` (or append to that parent when after=true). */
+export function moveElementBefore(project: Project, pcId: string, beforePcId: string, after = false): void {
+  const { dom } = loadDom(project);
+  const el = dom.document.querySelector(`[data-pc-id="${pcId}"]`);
+  const target = dom.document.querySelector(`[data-pc-id="${beforePcId}"]`);
+  if (!el) throw new Error(`No element with data-pc-id="${pcId}"`);
+  if (!target) throw new Error(`No element with data-pc-id="${beforePcId}"`);
+  if (el === target || el.contains(target)) throw new Error("Cannot move an element into itself");
+  const parent = target.parentElement;
+  if (!parent) throw new Error("Target has no parent");
+  parent.insertBefore(el, after ? target.nextSibling : target);
+  save(project, dom.document);
+}
+
+/** Raw page source for the Code view. */
+export function pageSource(project: Project): string {
+  if (!existsSync(project.pageHtml)) throw new Error("page.html does not exist yet");
+  return readFileSync(project.pageHtml, "utf8");
+}
+
+/** Replace page.html from the Code view — sanity-checked, not schema-validated. */
+export function writePageSource(project: Project, html: string): void {
+  const s = String(html);
+  if (s.length < 100 || !/<body[\s>]/i.test(s) || !/<\/html>/i.test(s)) {
+    throw new Error("That does not look like a complete HTML document (needs <body> and </html>)");
+  }
+  writeFileSync(project.pageHtml, s);
+}
+
 /** Persist pan/zoom for an image: object-position + scale, keeping object-fit cover. */
 export function setImageStyle(
   project: Project,

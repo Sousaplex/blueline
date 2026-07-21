@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import logo from "./assets/logo.png";
 import { AgentPane, type FeedItem } from "./components/AgentPane";
 import { HomeScreen } from "./components/HomeScreen";
+import { InspectorPane } from "./components/InspectorPane";
 import { LeftPane } from "./components/LeftPane";
 import { LibrarySheet } from "./components/LibrarySheet";
 import { NewProjectDialog } from "./components/NewProjectDialog";
@@ -23,6 +24,7 @@ import {
   type SetupState,
   type SystemEvent,
 } from "./engine-client";
+import type { SelectionInfo } from "./selection";
 
 /** Fold one wire event into the feed (used for both live events and replay). */
 function applyEvent(feed: FeedItem[], event: EngineEvent): FeedItem[] {
@@ -64,6 +66,8 @@ export function App() {
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [setup, setSetup] = useState<SetupState | null>(null);
   const [systemFeed, setSystemFeed] = useState<SystemEvent[]>([]);
+  const [selection, setSelection] = useState<SelectionInfo | null>(null);
+  const [deleteRequestId, setDeleteRequestId] = useState<string | null>(null);
   const refreshTimer = useRef<number | undefined>(undefined);
   const currentSlug = useRef<string | null>(null);
 
@@ -261,8 +265,29 @@ export function App() {
       </header>
       <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)_340px] grid-rows-1 overflow-hidden">
         <LeftPane project={project} client={client} cacheKey={cacheKey} viewRound={viewRound} onViewRound={setViewRound} />
-        <PreviewPane project={project} client={client} cacheKey={cacheKey} actions={actions} viewRound={viewRound} onViewRound={setViewRound} />
-        <AgentPane feed={feed} systemFeed={systemFeed} running={running} onChat={(t) => void actions.chat(t)} />
+        <PreviewPane
+          project={project}
+          client={client}
+          cacheKey={cacheKey}
+          actions={actions}
+          viewRound={viewRound}
+          onViewRound={setViewRound}
+          onSelect={setSelection}
+          onRequestDelete={setDeleteRequestId}
+        />
+        <div className="flex h-full min-h-0 flex-col overflow-hidden border-l">
+          <InspectorPane
+            selection={selection}
+            project={project}
+            client={client}
+            deleteRequestId={deleteRequestId}
+            onDeleteHandled={() => setDeleteRequestId(null)}
+            onDeselect={() => setSelection(null)}
+          />
+          <div className="min-h-0 flex-1">
+            <AgentPane feed={feed} systemFeed={systemFeed} running={running} onChat={(t) => void actions.chat(t)} />
+          </div>
+        </div>
       </div>
     </div>
   );
