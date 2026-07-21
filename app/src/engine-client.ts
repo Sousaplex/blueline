@@ -35,6 +35,8 @@ export interface ProjectState {
   hasPage: boolean;
   hasProof: boolean;
   running: boolean;
+  runState: RunState;
+  runStates: Record<string, RunState>;
   designerModel: string;
 }
 
@@ -54,18 +56,20 @@ export type SettingsPatch = {
   images?: Partial<EngineSettings["config"]["images"]>;
 };
 
+export type RunState = "idle" | "queued" | "running";
+
 export type EngineEvent =
-  | { type: "hello"; running: boolean; replay: EngineEvent[] }
-  | { type: "text_delta"; delta: string }
-  | { type: "tool_start"; tool: string; args: Record<string, unknown> }
-  | { type: "tool_end"; tool: string; summary: string }
-  | { type: "status"; running: boolean }
-  | { type: "files_changed" }
+  | { type: "hello"; project: string | null; runStates: Record<string, RunState>; replay: EngineEvent[] }
+  | { type: "text_delta"; project?: string; delta: string }
+  | { type: "tool_start"; project?: string; tool: string; args: Record<string, unknown> }
+  | { type: "tool_end"; project?: string; tool: string; summary: string }
+  | { type: "run_state"; project: string; state: RunState }
+  | { type: "files_changed"; project?: string }
   | { type: "settings_changed" }
   | { type: "project_changed"; slug: string | null }
   | { type: "workspace_changed"; root: string; slug: string | null }
   | { type: "projects_changed" }
-  | { type: "error"; message: string };
+  | { type: "error"; project?: string; message: string };
 
 export interface ProjectListing {
   dir: string;
@@ -74,6 +78,7 @@ export interface ProjectListing {
   current: boolean;
   rounds: number;
   hasProof: boolean;
+  runState: RunState;
 }
 
 /** Injected by the Electron preload script; absent in browser mode. */
@@ -103,8 +108,9 @@ export interface EngineClient {
   exportPdf(): Promise<string | null>;
   getSettings(): Promise<EngineSettings>;
   updateSettings(patch: SettingsPatch): Promise<void>;
-  run(prompt?: string): Promise<void>;
+  run(slug?: string, prompt?: string): Promise<void>;
   chat(text: string): Promise<void>;
+  getFeed(slug: string): Promise<EngineEvent[]>;
   render(): Promise<void>;
   updateCopy(pcId: string, text: string): Promise<void>;
   selectVariant(imageId: string, variant: number): Promise<void>;
@@ -136,13 +142,7 @@ export class BrowserEngineClient implements EngineClient {
     const proto = location.protocol === "https:" ? "wss" : "ws";
     this.ws = new WebSocket(`${proto}://${location.host}/ws`);
     this.ws.onmessage = (msg) => {
-      const event = JSON.parse(msg.data) as EngineEvent;
-      if (event.type === "hello") {
-        for (const replayed of event.replay) this.emit(replayed);
-        this.emit({ type: "status", running: event.running });
-        return;
-      }
-      this.emit(event);
+      this.emit(JSON.parse(msg.data) as EngineEvent);
     };
     this.ws.onclose = () => {
       if (!this.closed) setTimeout(() => this.connect(), 2000);
@@ -202,8 +202,13 @@ export class BrowserEngineClient implements EngineClient {
   }
 
   updateSettings(patch: SettingsPatch) { return post("/api/settings", patch); }
-  run(prompt?: string) { return post("/api/run", { prompt }); }
+  run(slug?: string, prompt?: string) { return post("/api/run", { slug, prompt }); }
   chat(text: string) { return post("/api/chat", { text }); }
+
+  async getFeed(slug: string): Promise<EngineEvent[]> {
+    const res = await fetch(`/api/feed?slug=${encodeURIComponent(slug)}`);
+    return (await res.json()).feed ?? [];
+  }
   render() { return post("/api/render"); }
   updateCopy(pcId: string, text: string) { return post("/api/copy", { pcId, text }); }
   selectVariant(imageId: string, variant: number) { return post("/api/variant", { imageId, variant }); }

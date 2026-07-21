@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Clincove One-Pager</title>
+  <style>
+    /* Print Setup */
+    @page {
+      size: A4;
+      margin: 0;
+    }
+    
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      width: 210mm;
+      height: 297mm;
+      background-color: #F5EEE4; /* Warm cream */
+      color: #2B1D16; /* Espresso brown */
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      font-size: 10pt;
+      line-height: 1.45;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    /* Layout Container */
+    .page {
+      position: relative;
+      width: 210mm;
+      height: 297mm;
+      padding: 16mm;
+      overflow: hidden;
+    }
+
+    /* Header */
+    header {
+      height: 30mm;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      padding-bottom: 4mm;
+    }
+
+    .brand-container {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+
+    .logo {
+      font-family: Georgia, serif;
+      font-size: 28pt;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      line-height: 1.1;
+      color: #2B1D16;
+    }
+
+    /* Typography */
+    h1, h2, h3, h4, .logo, .subtitle-banner h2, .section-title, .highlight-title {
+      font-family: Georgia, "Times New Roman", Times, serif !important;
+    }
+
+    .logo span {
+      color: #C1673C; /* Copper accent */
+    }
+
+    .tagline {
+      font-family: Georgia, serif;
+      font-style: italic;
+      font-size: 10.5pt;
+      color: #1F4A46; /* Deep teal sparingly */
+      margin-bottom: 2mm;
+    }
+
+    .header-rule {
+      width: 100%;
+      height: 1pt;
+      background-color: #C1673C;
+      margin-top: 2mm;
+    }
+
+    /* Subtitle Banner */
+    .subtitle-banner {
+      margin-top: 5mm;
+      margin-bottom: 6mm;
+    }
+
+    .subtitle-banner h2 {
+      font-family: Georgia, serif;
+      font-size: 14pt;
+      font-weight: 400;
+      line-height: 1.3;
+      color: #2B1D16;
+    }
+
+    /* Main Content Grid */
+    .content-grid {
+      display: flex;
+      height: 200mm;
+      position: relative;
+    }
+
+    /* Left Column (Primary Copy) */
+    .left-col {
+      width: 106mm;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding-right: 6mm;
+    }
+
+    .section-block {
+      margin-bottom: 6mm;
+    }
+
+    .section-block:last-child {
+      margin-bottom: 0;
+    }
+
+    .section-title {
+      font-family: Georgia, serif;
+      font-size: 12.5pt;
+      font-weight: 700;
+      color: #2B1D16;
+      margin-bottom: 2mm;
+      line-height: 1.2;
+    }
+
+    .section-body {
+      font-size: 9.5pt;
+      color: #2B1D16;
+      text-align: justify;
+    }
+
+    /* Vertical Separator */
+    .vertical-rule {
+      position: absolute;
+      left: 112mm;
+      top: 0;
+      width: 1pt;
+      height: 100%;
+      background-color: rgba(193, 103, 60, 0.3); /* Transparent copper */
+    }
+
+    /* Right Column (Sidebar & Bleed Image) */
+    .right-col {
+      position: absolute;
+      left: 118mm;
+      width: 92mm; /* Goes to the edge of the page: 118mm + 92mm = 210mm */
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Right-side Bleed Image */
+    .bleed-image-container {
+      width: 92mm; /* Reaches the absolute right edge */
+      height: 62mm;
+      overflow: hidden;
+      margin-bottom: 6mm;
+    }
+
+    .sidebar-image {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    /* Highlights Section (with padding to respect margins) */
+    .highlights-container {
+      padding-right: 16mm; /* Keeps text within 16mm margin of page edge */
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      flex-grow: 1;
+    }
+
+    .highlight-block {
+      margin-bottom: 4mm;
+    }
+
+    .highlight-block:last-child {
+      margin-bottom: 0;
+    }
+
+    .highlight-title {
+      font-family: Georgia, serif;
+      font-size: 11pt;
+      font-weight: 700;
+      color: #1F4A46; /* Deep teal */
+      margin-bottom: 1mm;
+      line-height: 1.2;
+    }
+
+    .highlight-body {
+      font-size: 9pt;
+      color: #2B1D16;
+    }
+
+    /* Footer */
+    footer {
+      position: absolute;
+      bottom: 16mm;
+      left: 16mm;
+      width: calc(210mm - 32mm);
+      height: 20mm;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+    }
+
+    .footer-rule {
+      width: 100%;
+      height: 1pt;
+      background-color: #C1673C;
+      margin-bottom: 3mm;
+    }
+
+    .footer-content {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+
+    .footer-cta {
+      font-family: Georgia, serif;
+      font-size: 11pt;
+      font-weight: 700;
+      color: #C1673C; /* Copper */
+    }
+
+    .footer-note {
+      font-size: 8pt;
+      color: #2B1D16;
+      opacity: 0.7;
+      text-align: right;
+      max-width: 90mm;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="page">
+    <!-- Header -->
+    <header>
+      <div class="brand-container">
+        <h1 class="logo" data-pc-id="logo">CLINCOVE</h1>
+        <div class="tagline" data-pc-id="tagline">Secure-by-Design Clinical Automation</div>
+      </div>
+      <div class="header-rule"></div>
+    </header>
+
+    <!-- Subtitle Banner -->
+    <div class="subtitle-banner">
+      <h2 data-pc-id="hero-title">Bridging Advanced AI Agent Automation with Enterprise HIPAA Compliance</h2>
+    </div>
+
+    <!-- Main Content Grid -->
+    <div class="content-grid">
+      
+      <!-- Left Column (Primary Copy) -->
+      <div class="left-col">
+        <div class="section-block">
+          <h3 class="section-title" data-pc-id="sec-1-title">Seamless Clincove DB Integration</h3>
+          <p class="section-body" data-pc-id="sec-1-body">
+            Clincove orchestrates the secure execution of state-of-the-art AI agents directly against live clinical trial databases. By integrating the resilient StrangeLoop execution engine with a deterministic HTTP tool boundary, Clincove automates repetitive operational tasks—such as patient scheduling, study configuration, and data-plane synchronization—without exposing sensitive infrastructure to external networks.
+          </p>
+        </div>
+
+        <div class="section-block">
+          <h3 class="section-title" data-pc-id="sec-2-title">Uncompromising PHI Scope Isolation</h3>
+          <p class="section-body" data-pc-id="sec-2-body">
+            At the core of Clincove's architecture is a multi-layered, secure memory perimeter. Using deterministic data-plane scope predicates, the platform enforces strict tenant-level isolation on all semantic, episodic, and session memories. Records under specific research boundaries (e.g., Study <code>SL-TEST-A</code>, Patient <code>P1</code>) are completely isolated from sibling records or foreign studies (e.g., <code>SL-TEST-B</code>), strictly executing the HIPAA-mandated deny-by-default principle.
+          </p>
+        </div>
+
+        <div class="section-block">
+          <h3 class="section-title" data-pc-id="sec-3-title">Durable &amp; Self-Correcting Execution</h3>
+          <p class="section-body" data-pc-id="sec-3-body">
+            Built on a fault-tolerant Elixir/OTP state machine, Clincove degrades honestly rather than hallucinating when tools fail. External API timeouts and errors are handled transparently. If a Large Language Model produces a malformed payload that violates the target <code>inputSchema</code>, the engine's built-in self-correction loop catches the schema mismatch, rejects the malformed input, and triggers immediate model self-correction within milliseconds to maintain clinical data integrity.
+          </p>
+        </div>
+      </div>
+
+      <!-- Vertical Separator Rule -->
+      <div class="vertical-rule"></div>
+
+      <!-- Right Column (Sidebar & Bleed Image) -->
+      <div class="right-col">
+        <!-- Right-side Bleed Image -->
+        <div class="bleed-image-container">
+          <img src="images/hero/v1.png" data-image-id="hero" class="sidebar-image" alt="Clinical Research Collaboration">
+        </div>
+
+        <!-- Highlights Section -->
+        <div class="highlights-container">
+          <div class="highlight-block">
+            <h4 class="highlight-title" data-pc-id="hl-1-title">Durable OTP Resilience</h4>
+            <p class="highlight-body" data-pc-id="hl-1-body">
+              An active RunReaper watchdog prevents zombie tasks. In the event of an unexpected server restart, all orphaned runs are cleanly swept to a terminal failed state to ensure zero orphaned background threads.
+            </p>
+          </div>
+
+          <div class="highlight-block">
+            <h4 class="highlight-title" data-pc-id="hl-2-title">SSRF &amp; Network Vaults</h4>
+            <p class="highlight-body" data-pc-id="hl-2-body">
+              Engine-level SSRF guards block malicious loopback requests by default. Robust authorization tokens and empty scope rejections prevent unauthorized data egress and protect patient privacy.
+            </p>
+          </div>
+
+          <div class="highlight-block">
+            <h4 class="highlight-title" data-pc-id="hl-3-title">Real-Time Traceability</h4>
+            <p class="highlight-body" data-pc-id="hl-3-body">
+              Every agent step is audited. Monotonic event traces and live Server-Sent Events (SSE) offer clinical operations teams a complete, real-time window into decision pathways and execution runs.
+            </p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Footer -->
+    <footer>
+      <div class="footer-rule"></div>
+      <div class="footer-content">
+        <div class="footer-cta" data-pc-id="footer-cta">Secure your clinical workflows. Contact integration@clincove.com</div>
+        <div class="footer-note" data-pc-id="footer-note">
+          Clincove is fully HIPAA compliant and audited under SOC2 Type II. Powered by the StrangeLoop Agent Engine.
+        </div>
+      </div>
+    </footer>
+
+  </div>
+
+</body>
+</html>

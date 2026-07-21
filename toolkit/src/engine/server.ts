@@ -1,8 +1,8 @@
-// Engine bridge: HTTP + WebSocket server the viewer talks to in browser mode.
-// In M3 the Electron main process replaces this transport with IPC — the wire
-// contract here is the EngineClient interface on the renderer side.
+// Engine bridge: HTTP + WebSocket server the viewer (and the MCP server) talk to.
+// Viewing and running are decoupled: each project gets its own Pi session and
+// event buffer, up to MAX_CONCURRENT_RUNS execute in parallel, extras queue FIFO.
 //
-// Usage: npm run serve -- projects/<slug> [--port 7717]
+// Usage: npm run serve -- [projects/<slug>] [--port 7717]
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { extname, join, normalize, resolve } from "node:path";
@@ -11,6 +11,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { REPO_ROOT, loadConfig, type PresscheckConfig } from "./config.ts";
 import { listEditable, listImageSlots, selectVariant, updateCopy } from "./page-edit.ts";
 import { Project } from "./project.ts";
+import { PlaywrightBackend } from "./render.ts";
 import { createPresscheckSession, type PresscheckSession } from "./session.ts";
 import { resetFetchBudget } from "./web-fetch.ts";
 import { BRIEF_TEMPLATE, Workspace } from "./workspace.ts";
@@ -21,22 +22,31 @@ const MIME: Record<string, string> = {
   ".jpg": "image/jpeg",
   ".svg": "image/svg+xml",
   ".css": "text/css",
+  ".js": "text/javascript",
   ".json": "application/json",
   ".pdf": "application/pdf",
+  ".woff2": "font/woff2",
 };
+
+const MAX_CONCURRENT_RUNS = 2;
 
 interface WireEvent {
   type: string;
+  project?: string;
   [k: string]: unknown;
 }
 
+export type RunState = "idle" | "queued" | "running";
+
 class Bridge {
-  private pc?: PresscheckSession;
-  private running = false;
-  private buffer: WireEvent[] = [];
+  private sessions = new Map<string, PresscheckSession>(); // slug -> session
+  private runStates = new Map<string, RunState>(); // slug -> queued|running
+  private runQueue: string[] = [];
+  private buffers = new Map<string, WireEvent[]>(); // slug -> recent events
   private sockets = new Set<WebSocket>();
   private proofCache = new Map<string, { mtime: number; pages: Buffer[] }>();
   private registryRuntime?: ModelRuntime;
+  readonly backend = new PlaywrightBackend(); // shared across all sessions
   config: PresscheckConfig;
   workspace: Workspace;
   project?: Project;
@@ -47,155 +57,148 @@ class Bridge {
     this.config = loadConfig();
   }
 
-  /** Project-scoped routes call this; throws a clear error when nothing is open. */
   requireProject(): Project {
     if (!this.project) throw new Error("No project open — create or open a project first");
     return this.project;
   }
 
-  listProjects(): { dir: string; slug: string; hasBrief: boolean; current: boolean; rounds: number; hasProof: boolean }[] {
-    return this.workspace.listProjects().map((p) => ({
-      ...p,
-      current: p.slug === this.project?.slug,
-      rounds: existsSync(join(p.dir, "review"))
-        ? readdirSync(join(p.dir, "review")).filter((f) => /^round-\d+\.json$/.test(f)).length
-        : 0,
-      hasProof: existsSync(join(p.dir, "out", "proof.pdf")),
-    }));
+  runState(slug: string): RunState {
+    return this.runStates.get(slug) ?? "idle";
   }
 
-  async closeProject(): Promise<void> {
-    if (this.running) throw new Error("Stop the current run before closing the project");
-    if (this.pc) {
-      await this.pc.dispose();
-      this.pc = undefined;
-    }
-    this.project = undefined;
-    this.buffer = [];
-    this.workspace.persist(undefined);
-    this.broadcast({ type: "project_changed", slug: null });
-  }
-
-  async deleteProject(slug: string): Promise<void> {
-    if (!/^[a-z0-9-]+$/.test(slug)) throw new Error(`Invalid project slug: ${slug}`);
-    const dir = join(this.workspace.projectsDir, slug);
-    if (!existsSync(dir)) throw new Error(`No such project: ${slug}`);
-    const deletingCurrent = this.project?.slug === slug;
-    if (deletingCurrent && this.running) throw new Error("Stop the current run before deleting this project");
-    if (deletingCurrent) await this.closeProject();
-    rmSync(dir, { recursive: true, force: true });
-    this.broadcast({ type: "projects_changed" });
-  }
-
-  async openProject(projectDir: string): Promise<void> {
-    if (this.running) throw new Error("Stop the current run before switching projects");
-    const next = new Project(projectDir, this.workspace); // validates existence, creates subdirs
-    if (this.pc) {
-      await this.pc.dispose();
-      this.pc = undefined;
-    }
-    this.project = next;
-    this.buffer = [];
-    this.workspace.persist(next.slug);
-    this.broadcast({ type: "project_changed", slug: next.slug });
-  }
-
-  async createProject(name: string, brief?: string): Promise<void> {
-    const { dir } = this.workspace.createProject(name, brief?.trim() || BRIEF_TEMPLATE);
-    await this.openProject(dir);
-  }
-
-  async setWorkspace(root: string): Promise<void> {
-    if (this.running) throw new Error("Stop the current run before switching workspaces");
-    const next = new Workspace(root).ensure();
-    if (this.pc) {
-      await this.pc.dispose();
-      this.pc = undefined;
-    }
-    this.workspace = next;
-    this.buffer = [];
-    const first = next.listProjects().find((p) => p.hasBrief);
-    this.project = first ? new Project(first.dir, next) : undefined;
-    next.persist(this.project?.slug);
-    this.broadcast({ type: "workspace_changed", root: next.root, slug: this.project?.slug ?? null });
+  private runningCount(): number {
+    return [...this.runStates.values()].filter((s) => s === "running").length;
   }
 
   broadcast(event: WireEvent): void {
-    this.buffer.push(event);
-    if (this.buffer.length > 500) this.buffer.splice(0, this.buffer.length - 500);
+    if (event.project) {
+      const buffer = this.buffers.get(event.project) ?? [];
+      buffer.push(event);
+      if (buffer.length > 500) buffer.splice(0, buffer.length - 500);
+      this.buffers.set(event.project, buffer);
+    }
     const msg = JSON.stringify(event);
     for (const ws of this.sockets) if (ws.readyState === ws.OPEN) ws.send(msg);
   }
 
   attach(ws: WebSocket): void {
     this.sockets.add(ws);
-    ws.send(JSON.stringify({ type: "hello", running: this.running, replay: this.buffer.slice(-200) }));
+    ws.send(
+      JSON.stringify({
+        type: "hello",
+        project: this.project?.slug ?? null,
+        runStates: Object.fromEntries(this.runStates),
+        replay: this.project ? (this.buffers.get(this.project.slug) ?? []).slice(-200) : [],
+      }),
+    );
     ws.on("close", () => this.sockets.delete(ws));
   }
 
-  private async ensureSession(): Promise<PresscheckSession> {
-    if (!this.pc) {
-      this.pc = await createPresscheckSession({ project: this.requireProject() });
-      this.pc.session.subscribe((event: any) => {
-        switch (event.type) {
-          case "message_update": {
-            const e = event.assistantMessageEvent;
-            if (e?.type === "text_delta") this.broadcast({ type: "text_delta", delta: e.delta });
-            break;
-          }
-          case "tool_execution_start":
-            this.broadcast({ type: "tool_start", tool: event.toolName ?? event.name, args: event.args ?? {} });
-            break;
-          case "tool_execution_end": {
-            const summary = event.result?.content?.find((c: any) => c.type === "text")?.text ?? "";
-            this.broadcast({ type: "tool_end", tool: event.toolName ?? event.name, summary: summary.slice(0, 2000) });
-            this.broadcast({ type: "files_changed" });
-            break;
-          }
-          case "agent_start":
-            this.running = true;
-            this.broadcast({ type: "status", running: true });
-            break;
-          case "agent_end":
-            this.running = false;
-            this.broadcast({ type: "status", running: false });
-            break;
+  feedFor(slug: string): WireEvent[] {
+    return this.buffers.get(slug) ?? [];
+  }
+
+  /** One Pi session per project, created on demand, events tagged with the slug. */
+  private async ensureSession(slug: string): Promise<PresscheckSession> {
+    const existing = this.sessions.get(slug);
+    if (existing) return existing;
+    const project = this.project?.slug === slug ? this.project : new Project(slug, this.workspace);
+    const pc = await createPresscheckSession({ project, backend: this.backend });
+    this.sessions.set(slug, pc);
+    pc.session.subscribe((event: any) => {
+      switch (event.type) {
+        case "message_update": {
+          const e = event.assistantMessageEvent;
+          if (e?.type === "text_delta") this.broadcast({ type: "text_delta", project: slug, delta: e.delta });
+          break;
         }
-      });
-    }
-    return this.pc;
-  }
-
-  async run(kickoff?: string): Promise<void> {
-    if (this.running) throw new Error("Agent is already running");
-    const pc = await this.ensureSession();
-    resetFetchBudget(this.requireProject());
-    const prompt =
-      kickoff ??
-      "Produce the deliverable for this project. Start by reading brief.md, then follow your loop until the reviewer passes the piece or the round limit is hit.";
-    void pc.session.prompt(prompt).catch((err) => {
-      this.running = false;
-      this.broadcast({ type: "error", message: err instanceof Error ? err.message : String(err) });
-      this.broadcast({ type: "status", running: false });
+        case "tool_execution_start":
+          this.broadcast({ type: "tool_start", project: slug, tool: event.toolName ?? event.name, args: event.args ?? {} });
+          break;
+        case "tool_execution_end": {
+          const summary = event.result?.content?.find((c: any) => c.type === "text")?.text ?? "";
+          this.broadcast({ type: "tool_end", project: slug, tool: event.toolName ?? event.name, summary: summary.slice(0, 4000) });
+          this.broadcast({ type: "files_changed", project: slug });
+          break;
+        }
+        case "agent_start":
+          this.runStates.set(slug, "running");
+          this.broadcast({ type: "run_state", project: slug, state: "running" });
+          break;
+        case "agent_end":
+          this.runStates.delete(slug);
+          this.broadcast({ type: "run_state", project: slug, state: "idle" });
+          this.pumpQueue();
+          break;
+      }
     });
+    return pc;
   }
 
+  private pumpQueue(): void {
+    while (this.runningCount() < MAX_CONCURRENT_RUNS && this.runQueue.length) {
+      const slug = this.runQueue.shift()!;
+      if (this.runStates.get(slug) !== "queued") continue;
+      void this.startRun(slug);
+    }
+  }
+
+  private async startRun(slug: string, kickoff?: string): Promise<void> {
+    try {
+      const pc = await this.ensureSession(slug);
+      resetFetchBudget(this.project?.slug === slug ? this.project : new Project(slug, this.workspace));
+      this.runStates.set(slug, "running");
+      this.broadcast({ type: "run_state", project: slug, state: "running" });
+      const prompt =
+        kickoff ??
+        "Produce the deliverable for this project. Start by reading brief.md, then follow your loop until the reviewer passes the piece or the round limit is hit.";
+      void pc.session.prompt(prompt).catch((err) => {
+        this.runStates.delete(slug);
+        this.broadcast({ type: "error", project: slug, message: err instanceof Error ? err.message : String(err) });
+        this.broadcast({ type: "run_state", project: slug, state: "idle" });
+        this.pumpQueue();
+      });
+    } catch (err) {
+      this.runStates.delete(slug);
+      this.broadcast({ type: "error", project: slug, message: err instanceof Error ? err.message : String(err) });
+      this.broadcast({ type: "run_state", project: slug, state: "idle" });
+      this.pumpQueue();
+    }
+  }
+
+  /** Start (or queue) a run for a project — defaults to the currently open one. */
+  async run(slug?: string, kickoff?: string): Promise<RunState> {
+    const target = slug ?? this.requireProject().slug;
+    if (this.runState(target) !== "idle") throw new Error(`"${target}" is already ${this.runState(target)}`);
+    if (!existsSync(join(this.workspace.projectsDir, target, "brief.md"))) {
+      throw new Error(`"${target}" has no brief.md yet`);
+    }
+    if (this.runningCount() >= MAX_CONCURRENT_RUNS) {
+      this.runStates.set(target, "queued");
+      this.runQueue.push(target);
+      this.broadcast({ type: "run_state", project: target, state: "queued" });
+      return "queued";
+    }
+    await this.startRun(target, kickoff);
+    return "running";
+  }
+
+  /** Steering chat goes to the currently open project's session. */
   async chat(text: string): Promise<void> {
-    const pc = await this.ensureSession();
+    const slug = this.requireProject().slug;
+    const pc = await this.ensureSession(slug);
     const opts = pc.session.isStreaming ? { streamingBehavior: "steer" as const } : undefined;
     void pc.session.prompt(text, opts).catch((err) => {
-      this.broadcast({ type: "error", message: err instanceof Error ? err.message : String(err) });
+      this.broadcast({ type: "error", project: slug, message: err instanceof Error ? err.message : String(err) });
     });
   }
 
   async render(): Promise<void> {
     const project = this.requireProject();
-    const pc = await this.ensureSession();
-    await pc.backend.renderPdf(project.pageHtml, project.proofPdf, this.config.render);
-    this.broadcast({ type: "files_changed" });
+    await this.backend.renderPdf(project.pageHtml, project.proofPdf, this.config.render);
+    this.broadcast({ type: "files_changed", project: project.slug });
   }
 
-  /** Rasterized pages for the latest proof, or an archived round's proof. */
   async proofPages(round?: number): Promise<Buffer[]> {
     const project = this.requireProject();
     const path = round != null ? join(project.reviewDir, `round-${round}.pdf`) : project.proofPdf;
@@ -212,7 +215,6 @@ class Bridge {
     return pages;
   }
 
-  /** Provider/model registry for the settings UI (independent of the live session). */
   async modelRegistry(): Promise<{ id: string; models: string[] }[]> {
     this.registryRuntime ??= await ModelRuntime.create();
     return this.registryRuntime
@@ -221,7 +223,6 @@ class Bridge {
       .filter((p) => p.models.length > 0);
   }
 
-  /** Merge a settings patch into config/providers.json and apply it. */
   async updateSettings(patch: Partial<PresscheckConfig>): Promise<void> {
     const configPath = resolve(REPO_ROOT, "config", "providers.json");
     const current: Record<string, unknown> = existsSync(configPath)
@@ -232,18 +233,84 @@ class Bridge {
     }
     writeFileSync(configPath, JSON.stringify(current, null, 2) + "\n");
     this.config = loadConfig();
-    // Designer/reviewer changes need a fresh session (model + tools bind at creation).
-    if (this.pc && !this.running) {
-      await this.pc.dispose();
-      this.pc = undefined;
+    // Idle sessions pick up the new models on recreation; running ones finish on the old config.
+    for (const [slug, pc] of this.sessions) {
+      if (this.runState(slug) === "idle") {
+        await pc.dispose();
+        this.sessions.delete(slug);
+      }
     }
     this.broadcast({ type: "settings_changed" });
+  }
+
+  listProjects() {
+    return this.workspace.listProjects().map((p) => ({
+      ...p,
+      current: p.slug === this.project?.slug,
+      runState: this.runState(p.slug),
+      rounds: existsSync(join(p.dir, "review"))
+        ? readdirSync(join(p.dir, "review")).filter((f) => /^round-\d+\.json$/.test(f)).length
+        : 0,
+      hasProof: existsSync(join(p.dir, "out", "proof.pdf")),
+    }));
+  }
+
+  async openProject(projectDir: string): Promise<void> {
+    const next = new Project(projectDir, this.workspace);
+    this.project = next;
+    this.workspace.persist(next.slug);
+    this.broadcast({ type: "project_changed", slug: next.slug });
+  }
+
+  async createProject(name: string, brief?: string): Promise<void> {
+    const { dir } = this.workspace.createProject(name, brief?.trim() || BRIEF_TEMPLATE);
+    this.broadcast({ type: "projects_changed" });
+    await this.openProject(dir);
+  }
+
+  async closeProject(): Promise<void> {
+    this.project = undefined;
+    this.workspace.persist(undefined);
+    this.broadcast({ type: "project_changed", slug: null });
+  }
+
+  async deleteProject(slug: string): Promise<void> {
+    if (!/^[a-z0-9-]+$/.test(slug)) throw new Error(`Invalid project slug: ${slug}`);
+    if (this.runState(slug) !== "idle") throw new Error(`"${slug}" is ${this.runState(slug)} — stop it before deleting`);
+    const dir = join(this.workspace.projectsDir, slug);
+    if (!existsSync(dir)) throw new Error(`No such project: ${slug}`);
+    const session = this.sessions.get(slug);
+    if (session) {
+      await session.dispose();
+      this.sessions.delete(slug);
+    }
+    this.buffers.delete(slug);
+    if (this.project?.slug === slug) await this.closeProject();
+    rmSync(dir, { recursive: true, force: true });
+    this.broadcast({ type: "projects_changed" });
+  }
+
+  async setWorkspace(root: string): Promise<void> {
+    if (this.runningCount() > 0 || this.runQueue.length > 0) {
+      throw new Error("Runs are active — wait for them to finish before switching workspaces");
+    }
+    const next = new Workspace(root).ensure();
+    for (const pc of this.sessions.values()) await pc.dispose();
+    this.sessions.clear();
+    this.buffers.clear();
+    this.runStates.clear();
+    this.workspace = next;
+    this.project = undefined;
+    next.persist(undefined);
+    this.broadcast({ type: "workspace_changed", root: next.root, slug: null });
   }
 
   projectState() {
     const base = {
       workspaceRoot: this.workspace.root,
-      running: this.running,
+      running: this.project ? this.runState(this.project.slug) === "running" : false,
+      runState: this.project ? this.runState(this.project.slug) : "idle",
+      runStates: Object.fromEntries(this.runStates),
       designerModel: `${this.config.designer.provider}/${this.config.designer.model}`,
       styleFiles: existsSync(this.workspace.stylesDir)
         ? readdirSync(this.workspace.stylesDir).filter((f) => !f.startsWith("."))
@@ -283,8 +350,21 @@ class Bridge {
     };
   }
 
+  /** Slug-addressable review data (for the MCP server — no UI switching needed). */
+  reviewsFor(slug: string) {
+    const dir = join(this.workspace.projectsDir, slug, "review");
+    if (!existsSync(dir)) return [];
+    return readdirSync(dir)
+      .map((f) => /^round-(\d+)\.json$/.exec(f)?.[1])
+      .filter(Boolean)
+      .map(Number)
+      .sort((a, b) => a - b)
+      .map((n) => ({ round: n, ...JSON.parse(readFileSync(join(dir, `round-${n}.json`), "utf8")) }));
+  }
+
   async dispose() {
-    await this.pc?.dispose();
+    for (const pc of this.sessions.values()) await pc.dispose();
+    await this.backend.close();
   }
 }
 
@@ -303,14 +383,12 @@ async function readBody(req: IncomingMessage): Promise<any> {
 export async function startServer(projectDirArg: string | undefined, port: number): Promise<void> {
   const { workspace, lastProject } = Workspace.load();
   let project: Project | undefined;
-  // Only restore an explicitly-requested or last-opened project — never auto-grab
-  // one, so the home screen is a real state.
   const candidate = projectDirArg ?? lastProject;
   if (candidate) {
     try {
       project = new Project(candidate, workspace);
     } catch {
-      project = undefined; // stale lastProject — start with no project open
+      project = undefined;
     }
   }
   const bridge = new Bridge(workspace, project);
@@ -327,15 +405,13 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
         return res.end();
       }
 
-      // Built viewer (app/dist) as web root — Electron loads http://localhost:<port>/
-      // so /api, /ws and /files stay same-origin without a dev-server proxy.
+      // Built viewer (app/dist) as web root.
       const appDist = join(REPO_ROOT, "app", "dist");
       if (req.method === "GET" && !url.pathname.startsWith("/api") && !url.pathname.startsWith("/files") && url.pathname !== "/ws") {
         const rel = url.pathname === "/" ? "index.html" : normalize(decodeURIComponent(url.pathname.slice(1)));
         const file = join(appDist, rel);
         if (!rel.startsWith("..") && existsSync(file) && statSync(file).isFile()) {
-          const mime = MIME[extname(file)] ?? (extname(file) === ".js" ? "text/javascript" : "application/octet-stream");
-          res.writeHead(200, { "content-type": mime });
+          res.writeHead(200, { "content-type": MIME[extname(file)] ?? "application/octet-stream" });
           return res.end(readFileSync(file));
         }
         if (url.pathname === "/") {
@@ -343,7 +419,7 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
         }
       }
 
-      // Static project files (page.html, images/) for the live preview iframe.
+      // Static project files for the live preview iframe.
       if (url.pathname.startsWith("/files/")) {
         if (!bridge.project) return json(res, 404, { error: "no project open" });
         const rel = normalize(decodeURIComponent(url.pathname.slice("/files/".length)));
@@ -360,6 +436,17 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
 
       if (url.pathname === "/api/project") return json(res, 200, bridge.projectState());
       if (url.pathname === "/api/projects") return json(res, 200, { projects: bridge.listProjects() });
+      if (url.pathname === "/api/feed") {
+        const slug = url.searchParams.get("slug");
+        if (!slug) return json(res, 400, { error: "slug required" });
+        return json(res, 200, { feed: bridge.feedFor(slug).slice(-200) });
+      }
+      if (url.pathname === "/api/reviews") {
+        const slug = url.searchParams.get("slug");
+        if (!slug) return json(res, 400, { error: "slug required" });
+        return json(res, 200, { reviews: bridge.reviewsFor(slug) });
+      }
+
       if (req.method === "POST" && url.pathname === "/api/open") {
         const body = await readBody(req);
         if (!body.projectDir) return json(res, 400, { error: "projectDir required" });
@@ -372,31 +459,6 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
         await bridge.createProject(body.name, body.brief);
         return json(res, 200, { ok: true });
       }
-      if (req.method === "POST" && url.pathname === "/api/brief") {
-        const body = await readBody(req);
-        if (typeof body.content !== "string" || !body.content.trim()) {
-          return json(res, 400, { error: "content required" });
-        }
-        bridge.requireProject().writeBrief(body.content);
-        bridge.broadcast({ type: "files_changed" });
-        return json(res, 200, { ok: true });
-      }
-      if (req.method === "POST" && url.pathname === "/api/sources/select") {
-        const body = await readBody(req);
-        bridge.requireProject().setSelectedSources(Array.isArray(body.files) ? body.files : null);
-        bridge.broadcast({ type: "files_changed" });
-        return json(res, 200, { ok: true });
-      }
-      if (req.method === "POST" && url.pathname === "/api/sources/upload") {
-        const body = await readBody(req);
-        const kind = body.kind === "style" ? "style" : "context";
-        const name = String(body.name ?? "").split(/[/\\]/).pop();
-        if (!name || !body.dataBase64) return json(res, 400, { error: "name and dataBase64 required" });
-        const dir = kind === "style" ? bridge.workspace.stylesDir : bridge.workspace.contextDir;
-        writeFileSync(join(dir, name), Buffer.from(String(body.dataBase64), "base64"));
-        bridge.broadcast({ type: "files_changed" });
-        return json(res, 200, { ok: true, path: join(dir, name) });
-      }
       if (req.method === "POST" && url.pathname === "/api/project/close") {
         await bridge.closeProject();
         return json(res, 200, { ok: true });
@@ -407,6 +469,33 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
         await bridge.deleteProject(body.slug);
         return json(res, 200, { ok: true });
       }
+
+      if (req.method === "POST" && url.pathname === "/api/brief") {
+        const body = await readBody(req);
+        if (typeof body.content !== "string" || !body.content.trim()) {
+          return json(res, 400, { error: "content required" });
+        }
+        bridge.requireProject().writeBrief(body.content);
+        bridge.broadcast({ type: "files_changed", project: bridge.project!.slug });
+        return json(res, 200, { ok: true });
+      }
+      if (req.method === "POST" && url.pathname === "/api/sources/select") {
+        const body = await readBody(req);
+        bridge.requireProject().setSelectedSources(Array.isArray(body.files) ? body.files : null);
+        bridge.broadcast({ type: "files_changed", project: bridge.project!.slug });
+        return json(res, 200, { ok: true });
+      }
+      if (req.method === "POST" && url.pathname === "/api/sources/upload") {
+        const body = await readBody(req);
+        const kind = body.kind === "style" ? "style" : "context";
+        const name = String(body.name ?? "").split(/[/\\]/).pop();
+        if (!name || !body.dataBase64) return json(res, 400, { error: "name and dataBase64 required" });
+        const dir = kind === "style" ? bridge.workspace.stylesDir : bridge.workspace.contextDir;
+        writeFileSync(join(dir, name), Buffer.from(String(body.dataBase64), "base64"));
+        bridge.broadcast({ type: "files_changed", project: bridge.project?.slug });
+        return json(res, 200, { ok: true, path: join(dir, name) });
+      }
+
       if (url.pathname === "/api/workspace") {
         if (req.method === "POST") {
           const body = await readBody(req);
@@ -449,8 +538,8 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
 
       if (req.method === "POST" && url.pathname === "/api/run") {
         const body = await readBody(req);
-        await bridge.run(body.prompt);
-        return json(res, 200, { ok: true });
+        const state = await bridge.run(body.slug, body.prompt);
+        return json(res, 200, { ok: true, state });
       }
       if (req.method === "POST" && url.pathname === "/api/chat") {
         const body = await readBody(req);
@@ -460,18 +549,6 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
       }
       if (req.method === "POST" && url.pathname === "/api/render") {
         await bridge.render();
-        return json(res, 200, { ok: true });
-      }
-      if (req.method === "POST" && url.pathname === "/api/copy") {
-        const body = await readBody(req);
-        updateCopy(bridge.requireProject(), body.pcId, body.text);
-        bridge.broadcast({ type: "files_changed" });
-        return json(res, 200, { ok: true });
-      }
-      if (req.method === "POST" && url.pathname === "/api/variant") {
-        const body = await readBody(req);
-        selectVariant(bridge.requireProject(), body.imageId, Number(body.variant));
-        bridge.broadcast({ type: "files_changed" });
         return json(res, 200, { ok: true });
       }
 

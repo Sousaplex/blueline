@@ -37,6 +37,7 @@ export interface CreateSessionOptions {
 export async function createPresscheckSession(opts: CreateSessionOptions): Promise<PresscheckSession> {
   const config = loadConfig();
   const project = opts.project ?? new Project(opts.projectDir ?? "projects/demo");
+  const ownsBackend = !opts.backend;
   const backend = opts.backend ?? new PlaywrightBackend();
 
   const [providerId, modelId] = opts.modelOverride
@@ -97,7 +98,7 @@ export async function createPresscheckSession(opts: CreateSessionOptions): Promi
     backend,
     async dispose() {
       session.dispose();
-      await backend.close();
+      if (ownsBackend) await backend.close(); // shared backends are owned by the caller
     },
   };
 }

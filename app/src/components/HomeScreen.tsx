@@ -1,4 +1,4 @@
-import { CheckCircle2, FileText, FolderOpen, Plus, Trash2 } from "lucide-react";
+import { CheckCircle2, FileText, FolderOpen, Loader2, Play, Plus, Timer, Trash2 } from "lucide-react";
 import { useState } from "react";
 import {
   AlertDialog,
@@ -67,22 +67,49 @@ export function HomeScreen({
               >
                 <div className="flex items-start justify-between gap-2">
                   <span className="truncate font-medium">{p.slug}</span>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    className="opacity-0 transition-opacity group-hover:opacity-100"
-                    aria-label={`Delete ${p.slug}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setPendingDelete(p.slug);
-                    }}
-                  >
-                    <Trash2 className="text-destructive" />
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    {p.runState === "idle" && p.hasBrief && (
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="opacity-0 transition-opacity group-hover:opacity-100"
+                        aria-label={`Run ${p.slug}`}
+                        title="Run the design loop"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          act(() => client.run(p.slug));
+                        }}
+                      >
+                        <Play />
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="opacity-0 transition-opacity group-hover:opacity-100"
+                      aria-label={`Delete ${p.slug}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPendingDelete(p.slug);
+                      }}
+                    >
+                      <Trash2 className="text-destructive" />
+                    </Button>
+                  </div>
                 </div>
                 <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                  {p.runState === "running" && (
+                    <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                      <Loader2 className="size-3 animate-spin" /> running
+                    </span>
+                  )}
+                  {p.runState === "queued" && (
+                    <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                      <Timer className="size-3" /> queued
+                    </span>
+                  )}
                   {!p.hasBrief && <span className="text-amber-600 dark:text-amber-400">no brief.md</span>}
-                  {p.hasBrief && (
+                  {p.hasBrief && p.runState === "idle" && (
                     <span className="flex items-center gap-1">
                       <FileText className="size-3" /> brief
                     </span>
