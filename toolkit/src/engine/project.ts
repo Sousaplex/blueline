@@ -1,14 +1,22 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { REPO_ROOT } from "./config.ts";
+import { Workspace } from "./workspace.ts";
 
-/** Paths and accessors for one projects/<slug>/ working directory. */
+/** Paths and accessors for one project working directory inside a workspace. */
 export class Project {
   readonly dir: string;
   readonly slug: string;
+  readonly workspace: Workspace;
 
-  constructor(projectDirArg: string) {
-    this.dir = resolve(REPO_ROOT, projectDirArg);
+  constructor(projectDirArg: string, workspace?: Workspace) {
+    this.workspace = workspace ?? new Workspace(REPO_ROOT).ensure();
+    // Accept absolute paths, workspace-relative ("projects/x") and bare slugs.
+    this.dir = isAbsolute(projectDirArg)
+      ? projectDirArg
+      : projectDirArg.includes("/")
+        ? resolve(this.workspace.root, projectDirArg)
+        : join(this.workspace.projectsDir, projectDirArg);
     if (!existsSync(this.dir)) throw new Error(`Project directory not found: ${this.dir}`);
     this.slug = this.dir.split("/").filter(Boolean).pop()!;
     for (const sub of ["images", "out", "review", "fetched"]) {
@@ -29,9 +37,9 @@ export class Project {
     return readFileSync(p, "utf8");
   }
 
-  /** Concatenated style guides from styles/ (repo-level, shared across projects). */
+  /** Concatenated style guides from the workspace's styles/ directory. */
   styleGuide(): string {
-    const stylesDir = join(REPO_ROOT, "styles");
+    const stylesDir = this.workspace.stylesDir;
     if (!existsSync(stylesDir)) return "";
     return readdirSync(stylesDir)
       .filter((f) => /\.(md|txt)$/i.test(f))

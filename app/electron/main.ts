@@ -28,7 +28,7 @@ async function bridgeAlive(): Promise<boolean> {
 
 async function ensureBridge(): Promise<void> {
   if (await bridgeAlive()) return; // reuse a dev bridge if one is already running
-  bridgeChild = spawn("npx", ["tsx", "src/engine/server.ts", "projects/demo", "--port", String(BRIDGE_PORT)], {
+  bridgeChild = spawn("npx", ["tsx", "src/engine/server.ts", "--port", String(BRIDGE_PORT)], {
     cwd: TOOLKIT_DIR,
     stdio: "inherit",
     env: { ...process.env },
@@ -119,6 +119,15 @@ app.whenReady().then(async () => {
 });
 
 ipcMain.handle("export-pdf", async () => exportPdf());
+
+ipcMain.handle("choose-directory", async () => {
+  const picked = await dialog.showOpenDialog(mainWindow!, {
+    title: "Choose workspace folder",
+    message: "Pick the folder where presscheck keeps projects, context, and styles",
+    properties: ["openDirectory", "createDirectory"],
+  });
+  return picked.canceled ? null : (picked.filePaths[0] ?? null);
+});
 
 app.on("window-all-closed", () => app.quit());
 app.on("quit", () => {

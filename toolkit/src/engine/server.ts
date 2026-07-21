@@ -13,6 +13,7 @@ import { listEditable, listImageSlots, selectVariant, updateCopy } from "./page-
 import { Project } from "./project.ts";
 import { createPresscheckSession, type PresscheckSession } from "./session.ts";
 import { resetFetchBudget } from "./web-fetch.ts";
+import { BRIEF_TEMPLATE, Workspace } from "./workspace.ts";
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -37,36 +38,56 @@ class Bridge {
   private proofCache = new Map<string, { mtime: number; pages: Buffer[] }>();
   private registryRuntime?: ModelRuntime;
   config: PresscheckConfig;
-  project: Project;
+  workspace: Workspace;
+  project?: Project;
 
-  constructor(project: Project) {
+  constructor(workspace: Workspace, project?: Project) {
+    this.workspace = workspace;
     this.project = project;
     this.config = loadConfig();
   }
 
+  /** Project-scoped routes call this; throws a clear error when nothing is open. */
+  requireProject(): Project {
+    if (!this.project) throw new Error("No project open — create or open a project first");
+    return this.project;
+  }
+
   listProjects(): { dir: string; slug: string; hasBrief: boolean; current: boolean }[] {
-    const root = join(REPO_ROOT, "projects");
-    if (!existsSync(root)) return [];
-    return readdirSync(root, { withFileTypes: true })
-      .filter((e) => e.isDirectory())
-      .map((e) => ({
-        dir: `projects/${e.name}`,
-        slug: e.name,
-        hasBrief: existsSync(join(root, e.name, "brief.md")),
-        current: e.name === this.project.slug,
-      }));
+    return this.workspace.listProjects().map((p) => ({ ...p, current: p.slug === this.project?.slug }));
   }
 
   async openProject(projectDir: string): Promise<void> {
     if (this.running) throw new Error("Stop the current run before switching projects");
-    const next = new Project(projectDir); // validates existence, creates subdirs
+    const next = new Project(projectDir, this.workspace); // validates existence, creates subdirs
     if (this.pc) {
       await this.pc.dispose();
       this.pc = undefined;
     }
     this.project = next;
     this.buffer = [];
+    this.workspace.persist(next.slug);
     this.broadcast({ type: "project_changed", slug: next.slug });
+  }
+
+  async createProject(name: string, brief?: string): Promise<void> {
+    const { dir } = this.workspace.createProject(name, brief?.trim() || BRIEF_TEMPLATE);
+    await this.openProject(dir);
+  }
+
+  async setWorkspace(root: string): Promise<void> {
+    if (this.running) throw new Error("Stop the current run before switching workspaces");
+    const next = new Workspace(root).ensure();
+    if (this.pc) {
+      await this.pc.dispose();
+      this.pc = undefined;
+    }
+    this.workspace = next;
+    this.buffer = [];
+    const first = next.listProjects().find((p) => p.hasBrief);
+    this.project = first ? new Project(first.dir, next) : undefined;
+    next.persist(this.project?.slug);
+    this.broadcast({ type: "workspace_changed", root: next.root, slug: this.project?.slug ?? null });
   }
 
   broadcast(event: WireEvent): void {
@@ -84,7 +105,7 @@ class Bridge {
 
   private async ensureSession(): Promise<PresscheckSession> {
     if (!this.pc) {
-      this.pc = await createPresscheckSession({ projectDir: this.project.dir });
+      this.pc = await createPresscheckSession({ project: this.requireProject() });
       this.pc.session.subscribe((event: any) => {
         switch (event.type) {
           case "message_update": {
@@ -118,7 +139,7 @@ class Bridge {
   async run(kickoff?: string): Promise<void> {
     if (this.running) throw new Error("Agent is already running");
     const pc = await this.ensureSession();
-    resetFetchBudget(this.project);
+    resetFetchBudget(this.requireProject());
     const prompt =
       kickoff ??
       "Produce the deliverable for this project. Start by reading brief.md, then follow your loop until the reviewer passes the piece or the round limit is hit.";
@@ -138,14 +159,16 @@ class Bridge {
   }
 
   async render(): Promise<void> {
+    const project = this.requireProject();
     const pc = await this.ensureSession();
-    await pc.backend.renderPdf(this.project.pageHtml, this.project.proofPdf, this.config.render);
+    await pc.backend.renderPdf(project.pageHtml, project.proofPdf, this.config.render);
     this.broadcast({ type: "files_changed" });
   }
 
   /** Rasterized pages for the latest proof, or an archived round's proof. */
   async proofPages(round?: number): Promise<Buffer[]> {
-    const path = round != null ? join(this.project.reviewDir, `round-${round}.pdf`) : this.project.proofPdf;
+    const project = this.requireProject();
+    const path = round != null ? join(project.reviewDir, `round-${round}.pdf`) : project.proofPdf;
     if (!existsSync(path)) return [];
     const mtime = statSync(path).mtimeMs;
     const cached = this.proofCache.get(path);
@@ -188,6 +211,20 @@ class Bridge {
   }
 
   projectState() {
+    const base = {
+      workspaceRoot: this.workspace.root,
+      running: this.running,
+      designerModel: `${this.config.designer.provider}/${this.config.designer.model}`,
+      contextFiles: existsSync(this.workspace.contextDir)
+        ? readdirSync(this.workspace.contextDir).filter((f) => !f.startsWith("."))
+        : [],
+      styleFiles: existsSync(this.workspace.stylesDir)
+        ? readdirSync(this.workspace.stylesDir).filter((f) => !f.startsWith("."))
+        : [],
+    };
+    if (!this.project) {
+      return { ...base, slug: null, brief: "", rounds: [], images: [], editable: [], hasPage: false, hasProof: false };
+    }
     const rounds = readdirSync(this.project.reviewDir)
       .map((f) => /^round-(\d+)\.json$/.exec(f)?.[1])
       .filter(Boolean)
@@ -195,23 +232,18 @@ class Bridge {
       .sort((a, b) => a - b)
       .map((n) => ({
         round: n,
-        hasProof: existsSync(join(this.project.reviewDir, `round-${n}.pdf`)),
-        ...JSON.parse(readFileSync(join(this.project.reviewDir, `round-${n}.json`), "utf8")),
+        hasProof: existsSync(join(this.project!.reviewDir, `round-${n}.pdf`)),
+        ...JSON.parse(readFileSync(join(this.project!.reviewDir, `round-${n}.json`), "utf8")),
       }));
-    const contextDir = join(REPO_ROOT, "context");
-    const stylesDir = join(REPO_ROOT, "styles");
     return {
+      ...base,
       slug: this.project.slug,
       brief: existsSync(join(this.project.dir, "brief.md")) ? this.project.brief() : "",
-      contextFiles: existsSync(contextDir) ? readdirSync(contextDir).filter((f) => !f.startsWith(".")) : [],
-      styleFiles: existsSync(stylesDir) ? readdirSync(stylesDir).filter((f) => !f.startsWith(".")) : [],
       rounds,
       images: listImageSlots(this.project),
       editable: listEditable(this.project),
       hasPage: existsSync(this.project.pageHtml),
       hasProof: existsSync(this.project.proofPdf),
-      running: this.running,
-      designerModel: `${this.config.designer.provider}/${this.config.designer.model}`,
     };
   }
 
@@ -232,8 +264,18 @@ async function readBody(req: IncomingMessage): Promise<any> {
   return raw ? JSON.parse(raw) : {};
 }
 
-export async function startServer(projectDir: string, port: number): Promise<void> {
-  const bridge = new Bridge(new Project(projectDir));
+export async function startServer(projectDirArg: string | undefined, port: number): Promise<void> {
+  const { workspace, lastProject } = Workspace.load();
+  let project: Project | undefined;
+  const candidate = projectDirArg ?? lastProject ?? workspace.listProjects().find((p) => p.hasBrief)?.slug;
+  if (candidate) {
+    try {
+      project = new Project(candidate, workspace);
+    } catch {
+      project = undefined; // stale lastProject — start with no project open
+    }
+  }
+  const bridge = new Bridge(workspace, project);
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://localhost:${port}`);
@@ -265,6 +307,7 @@ export async function startServer(projectDir: string, port: number): Promise<voi
 
       // Static project files (page.html, images/) for the live preview iframe.
       if (url.pathname.startsWith("/files/")) {
+        if (!bridge.project) return json(res, 404, { error: "no project open" });
         const rel = normalize(decodeURIComponent(url.pathname.slice("/files/".length)));
         if (rel.startsWith("..")) return json(res, 403, { error: "forbidden" });
         const file = join(bridge.project.dir, rel);
@@ -284,6 +327,21 @@ export async function startServer(projectDir: string, port: number): Promise<voi
         if (!body.projectDir) return json(res, 400, { error: "projectDir required" });
         await bridge.openProject(body.projectDir);
         return json(res, 200, { ok: true });
+      }
+      if (req.method === "POST" && url.pathname === "/api/project/new") {
+        const body = await readBody(req);
+        if (!body.name) return json(res, 400, { error: "name required" });
+        await bridge.createProject(body.name, body.brief);
+        return json(res, 200, { ok: true });
+      }
+      if (url.pathname === "/api/workspace") {
+        if (req.method === "POST") {
+          const body = await readBody(req);
+          if (!body.root) return json(res, 400, { error: "root required" });
+          await bridge.setWorkspace(body.root);
+          return json(res, 200, { ok: true });
+        }
+        return json(res, 200, { root: bridge.workspace.root, projects: bridge.listProjects() });
       }
 
       if (url.pathname === "/api/proof/meta") {
@@ -333,13 +391,13 @@ export async function startServer(projectDir: string, port: number): Promise<voi
       }
       if (req.method === "POST" && url.pathname === "/api/copy") {
         const body = await readBody(req);
-        updateCopy(bridge.project, body.pcId, body.text);
+        updateCopy(bridge.requireProject(), body.pcId, body.text);
         bridge.broadcast({ type: "files_changed" });
         return json(res, 200, { ok: true });
       }
       if (req.method === "POST" && url.pathname === "/api/variant") {
         const body = await readBody(req);
-        selectVariant(bridge.project, body.imageId, Number(body.variant));
+        selectVariant(bridge.requireProject(), body.imageId, Number(body.variant));
         bridge.broadcast({ type: "files_changed" });
         return json(res, 200, { ok: true });
       }
@@ -354,7 +412,9 @@ export async function startServer(projectDir: string, port: number): Promise<voi
   wss.on("connection", (ws) => bridge.attach(ws));
 
   await new Promise<void>((resolve) => server.listen(port, resolve));
-  console.log(`presscheck bridge — project=${bridge.project.slug} http://localhost:${port}`);
+  console.log(
+    `presscheck bridge — workspace=${bridge.workspace.root} project=${bridge.project?.slug ?? "(none)"} http://localhost:${port}`,
+  );
 
   const shutdown = async () => {
     await bridge.dispose();
@@ -364,12 +424,15 @@ export async function startServer(projectDir: string, port: number): Promise<voi
   process.on("SIGTERM", shutdown);
 }
 
-// CLI entry
+// CLI entry — project arg optional; falls back to the persisted workspace state.
 const isMain = process.argv[1]?.endsWith("server.ts");
 if (isMain) {
   const args = process.argv.slice(2);
-  const projectDir = args.find((a) => !a.startsWith("--")) ?? "projects/demo";
-  const portIdx = args.indexOf("--port");
-  const port = portIdx >= 0 ? Number(args[portIdx + 1]) : 7717;
+  let projectDir: string | undefined;
+  let port = 7717;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--port") port = Number(args[++i]);
+    else if (!args[i].startsWith("--")) projectDir = args[i];
+  }
   await startServer(projectDir, port);
 }

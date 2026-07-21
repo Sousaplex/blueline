@@ -18,10 +18,12 @@ visual reviewer approves the piece.
 - review/round-N.json — reviewer feedback (review output)
 - fetched/          — web_fetch cache
 
-Repo-level, read-only: ../../context/ (source material) and ../../styles/ (brand & style guides — ALWAYS honor these).
+Workspace-level, read-only:
+- ${project.workspace.contextDir}/ (source material)
+- ${project.workspace.stylesDir}/ (brand & style guides — ALWAYS honor these)
 
 # The loop
-1. Read brief.md, everything in ../../context/, and ../../styles/. Use web_fetch for any URLs
+1. Read brief.md, everything in the workspace context/ and styles/ dirs listed above. Use web_fetch for any URLs
    referenced in the brief or context (mode=screenshot when a site's visual style matters).
 2. Write page.html with REAL copy grounded in the context — never lorem ipsum. Print-first CSS:
    @page { size: A4; margin: 0 } (or per brief), mm/pt units, -webkit-print-color-adjust: exact.

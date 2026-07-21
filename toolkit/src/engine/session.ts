@@ -26,7 +26,9 @@ export interface PresscheckSession {
 }
 
 export interface CreateSessionOptions {
-  projectDir: string;
+  /** Either a ready Project (workspace-aware) or a path for the default workspace. */
+  project?: Project;
+  projectDir?: string;
   /** override config/providers.json designer block, e.g. "anthropic/claude-sonnet-4-5" */
   modelOverride?: string;
   backend?: RenderBackend;
@@ -34,7 +36,7 @@ export interface CreateSessionOptions {
 
 export async function createPresscheckSession(opts: CreateSessionOptions): Promise<PresscheckSession> {
   const config = loadConfig();
-  const project = new Project(opts.projectDir);
+  const project = opts.project ?? new Project(opts.projectDir ?? "projects/demo");
   const backend = opts.backend ?? new PlaywrightBackend();
 
   const [providerId, modelId] = opts.modelOverride

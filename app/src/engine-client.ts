@@ -24,7 +24,8 @@ export interface ImageSlot {
 }
 
 export interface ProjectState {
-  slug: string;
+  workspaceRoot: string;
+  slug: string | null;
   brief: string;
   contextFiles: string[];
   styleFiles: string[];
@@ -62,6 +63,7 @@ export type EngineEvent =
   | { type: "files_changed" }
   | { type: "settings_changed" }
   | { type: "project_changed"; slug: string }
+  | { type: "workspace_changed"; root: string; slug: string | null }
   | { type: "error"; message: string };
 
 export interface ProjectListing {
@@ -74,7 +76,11 @@ export interface ProjectListing {
 /** Injected by the Electron preload script; absent in browser mode. */
 declare global {
   interface Window {
-    presscheck?: { exportPdf(): Promise<string | null>; isElectron: true };
+    presscheck?: {
+      exportPdf(): Promise<string | null>;
+      chooseDirectory(): Promise<string | null>;
+      isElectron: true;
+    };
   }
 }
 
@@ -82,6 +88,9 @@ export interface EngineClient {
   getProject(): Promise<ProjectState>;
   listProjects(): Promise<ProjectListing[]>;
   openProject(projectDir: string): Promise<void>;
+  createProject(name: string, brief?: string): Promise<void>;
+  /** Pick a workspace dir (native dialog in Electron, path prompt in browser) and switch to it. */
+  chooseWorkspace(): Promise<boolean>;
   /** Returns the saved path (Electron printToPDF) or null (browser fallback opened the proof). */
   exportPdf(): Promise<string | null>;
   getSettings(): Promise<EngineSettings>;
@@ -159,6 +168,17 @@ export class BrowserEngineClient implements EngineClient {
   }
 
   openProject(projectDir: string) { return post("/api/open", { projectDir }); }
+
+  createProject(name: string, brief?: string) { return post("/api/project/new", { name, brief }); }
+
+  async chooseWorkspace(): Promise<boolean> {
+    const root = window.presscheck
+      ? await window.presscheck.chooseDirectory()
+      : window.prompt("Workspace folder (absolute path):");
+    if (!root) return false;
+    await post("/api/workspace", { root });
+    return true;
+  }
 
   async exportPdf(): Promise<string | null> {
     if (window.presscheck) return window.presscheck.exportPdf();

@@ -1,7 +1,8 @@
-import { Download, Play, RefreshCw } from "lucide-react";
+import { Download, FolderOpen, Play, Plus, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentPane, type FeedItem } from "./components/AgentPane";
 import { LeftPane } from "./components/LeftPane";
+import { NewProjectDialog } from "./components/NewProjectDialog";
 import { PreviewPane } from "./components/PreviewPane";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +25,7 @@ export function App() {
   const [cacheKey, setCacheKey] = useState(() => Date.now());
   const [viewRound, setViewRound] = useState<number | null>(null); // null = latest
   const [projects, setProjects] = useState<ProjectListing[]>([]);
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
   const refreshTimer = useRef<number | undefined>(undefined);
 
   const refresh = useCallback(async () => {
@@ -64,6 +66,7 @@ export function App() {
           void refresh();
           break;
         case "project_changed":
+        case "workspace_changed":
           setFeed([]);
           setViewRound(null);
           setCacheKey(Date.now());
@@ -108,26 +111,56 @@ export function App() {
   }
   if (!project) return <div className="flex h-screen items-center justify-center text-sm text-muted-foreground">loading…</div>;
 
+  if (!project.slug) {
+    return (
+      <div className="flex h-screen flex-col items-center justify-center gap-4 bg-background text-foreground">
+        <h1 className="text-lg font-semibold">presscheck</h1>
+        <p className="text-sm text-muted-foreground">
+          Workspace: <code className="rounded bg-muted px-1.5 py-0.5">{project.workspaceRoot}</code>
+        </p>
+        <p className="text-sm text-muted-foreground">No projects here yet.</p>
+        <div className="flex gap-2">
+          <Button onClick={() => setNewProjectOpen(true)}>
+            <Plus data-slot="icon" /> New project
+          </Button>
+          <Button variant="outline" onClick={() => void client.chooseWorkspace()}>
+            <FolderOpen data-slot="icon" /> Change workspace
+          </Button>
+        </div>
+        <NewProjectDialog client={client} open={newProjectOpen} onOpenChange={setNewProjectOpen} />
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
       <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
         <span className="text-sm font-semibold tracking-tight">presscheck</span>
         <Select
-          value={project.slug}
-          onValueChange={(slug) => {
-            const target = projects.find((p) => p.slug === slug);
+          value={project.slug ?? "__none"}
+          onValueChange={(value) => {
+            if (value === "__new") return setNewProjectOpen(true);
+            if (value === "__workspace") return void client.chooseWorkspace();
+            const target = projects.find((p) => p.slug === value);
             if (target && !target.current) void client.openProject(target.dir);
           }}
         >
-          <SelectTrigger size="sm" className="w-44 border-none shadow-none">
-            <SelectValue />
+          <SelectTrigger size="sm" className="w-52 border-none shadow-none" title={project.workspaceRoot}>
+            <SelectValue placeholder="no project" />
           </SelectTrigger>
           <SelectContent>
-            {(projects.length ? projects : [{ slug: project.slug, dir: "", hasBrief: true, current: true }]).map((p) => (
+            {!project.slug && <SelectItem value="__none" disabled>no project open</SelectItem>}
+            {projects.map((p) => (
               <SelectItem key={p.slug} value={p.slug} disabled={!p.hasBrief}>
                 {p.slug}
               </SelectItem>
             ))}
+            <SelectItem value="__new">
+              <Plus className="size-3.5" /> New project…
+            </SelectItem>
+            <SelectItem value="__workspace">
+              <FolderOpen className="size-3.5" /> Change workspace…
+            </SelectItem>
           </SelectContent>
         </Select>
         {running && <Badge variant="secondary" className="animate-pulse">running</Badge>}
@@ -152,6 +185,7 @@ export function App() {
           <Download data-slot="icon" /> Export
         </Button>
         <SettingsDialog client={client} />
+        <NewProjectDialog client={client} open={newProjectOpen} onOpenChange={setNewProjectOpen} />
       </header>
       {/* grid-rows-1 => minmax(0,1fr): bounds the row to the viewport so panes scroll internally */}
       <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)_340px] grid-rows-1 overflow-hidden">
