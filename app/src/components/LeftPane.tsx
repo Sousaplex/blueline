@@ -16,7 +16,7 @@ export function LeftPane({
 }) {
   const shown = project.rounds.find((r) => r.round === viewRound);
   return (
-    <ScrollArea className="border-r">
+    <ScrollArea className="h-full min-h-0 border-r">
       <div className="flex flex-col gap-5 p-4">
         <section>
           <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">Brief</h3>

@@ -85,7 +85,7 @@ export function PreviewPane({
   }
 
   return (
-    <main className="flex min-w-0 flex-col">
+    <main className="flex min-h-0 min-w-0 flex-col">
       <div className="flex h-11 shrink-0 items-center gap-3 border-b px-3">
         <Tabs value={mode} onValueChange={(v) => setMode(v as Mode)}>
           <TabsList className="h-8">

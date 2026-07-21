@@ -48,7 +48,7 @@ export function AgentPane({
   };
 
   return (
-    <aside className="flex min-h-0 flex-col border-l">
+    <aside className="flex h-full min-h-0 flex-col overflow-hidden border-l">
       <div className="flex h-11 shrink-0 items-center gap-2 border-b px-4">
         <h3 className="text-sm font-medium">Agent</h3>
         <span
