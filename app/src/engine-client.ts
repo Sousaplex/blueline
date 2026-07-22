@@ -188,6 +188,8 @@ export interface EngineClient {
   closeProject(): Promise<void>;
   deleteProject(slug: string): Promise<void>;
   updateBrief(content: string): Promise<void>;
+  /** AI-draft structured brief fields from a rough idea (mustInclude joined with newlines). */
+  draftBrief(idea: string, format?: string): Promise<{ title: string; audience: string; goal: string; messages: string[]; mustInclude: string; tone: string }>;
   suggestVariants(slug: string, count: number): Promise<{ label: string; direction: string }[]>;
   createVariants(slug: string, directions: { label: string; direction: string }[]): Promise<void>;
   selectSources(files: string[] | null): Promise<void>;
@@ -316,6 +318,17 @@ export class BrowserEngineClient implements EngineClient {
   closeProject() { return post("/api/project/close"); }
   deleteProject(slug: string) { return post("/api/project/delete", { slug }); }
   updateBrief(content: string) { return post("/api/brief", { content }); }
+  async draftBrief(idea: string, format?: string) {
+    const res = await fetch("/api/brief/draft", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ idea, format }),
+    });
+    const payload = await res.json();
+    if (!res.ok) throw new Error(payload.error ?? `draft: HTTP ${res.status}`);
+    const f = payload.fields;
+    return { ...f, mustInclude: (f.mustInclude ?? []).join("\n") };
+  }
 
   async suggestVariants(slug: string, count: number): Promise<{ label: string; direction: string }[]> {
     const res = await fetch("/api/variants/suggest", {

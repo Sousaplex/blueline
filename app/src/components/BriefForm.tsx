@@ -1,17 +1,51 @@
 // Structured brief editor: labeled fields that keep the template's shape visible
 // (unlike a placeholder that vanishes on the first keystroke), with a Markdown
 // tab for freeform editing. Unrecognized sections survive round-trips.
+import { Loader2, Sparkles } from "lucide-react";
 import { useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { composeBrief, parseBrief, type BriefFields } from "@/lib/brief";
 
-export function BriefForm({ initial, onChange }: { initial: string; onChange: (md: string) => void }) {
+export function BriefForm({
+  initial,
+  onChange,
+  draft,
+}: {
+  initial: string;
+  onChange: (md: string) => void;
+  /** When provided, shows the "describe it -> AI drafts the brief" box. */
+  draft?: (idea: string) => Promise<Omit<BriefFields, "extra">>;
+}) {
   const [tab, setTab] = useState<"form" | "markdown">("form");
   const [fields, setFields] = useState<BriefFields>(() => parseBrief(initial));
   const [raw, setRaw] = useState(initial);
   const rawDirty = useRef(false);
+  const [idea, setIdea] = useState("");
+  const [drafting, setDrafting] = useState(false);
+  const [draftError, setDraftError] = useState<string | null>(null);
+
+  const runDraft = async () => {
+    if (!draft || !idea.trim()) return;
+    setDrafting(true);
+    setDraftError(null);
+    try {
+      const drafted = await draft(idea.trim());
+      const next: BriefFields = { ...fields, ...drafted };
+      setFields(next);
+      const md = composeBrief(next);
+      setRaw(md);
+      rawDirty.current = false;
+      onChange(md);
+      setTab("form");
+    } catch (e) {
+      setDraftError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDrafting(false);
+    }
+  };
 
   const update = (patch: Partial<BriefFields>) => {
     const next = { ...fields, ...patch };
@@ -33,6 +67,30 @@ export function BriefForm({ initial, onChange }: { initial: string; onChange: (m
 
   return (
     <div className="space-y-2">
+      {draft && (
+        <div className="space-y-1.5 rounded-md border bg-muted/20 p-2.5">
+          <Label className="flex items-center gap-1.5 text-[11px]">
+            <Sparkles className="size-3" /> Describe it — the AI drafts the brief, you tweak
+          </Label>
+          <textarea
+            className="min-h-14 w-full rounded-md border bg-transparent px-2.5 py-2 text-xs leading-relaxed outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            value={idea}
+            placeholder={'e.g. "one-pager selling the eISF feature to clinical site coordinators, launching at SCOPE"'}
+            onChange={(e) => setIdea(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void runDraft();
+            }}
+          />
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="secondary" className="h-7 text-xs" disabled={drafting || !idea.trim()} onClick={() => void runDraft()}>
+              {drafting ? <Loader2 className="animate-spin" data-slot="icon" /> : <Sparkles data-slot="icon" />}
+              {drafting ? "Drafting…" : "Draft the brief"}
+            </Button>
+            {fields.title && !drafting && <span className="text-[10px] text-muted-foreground">re-drafting replaces the fields below</span>}
+          </div>
+          {draftError && <p className="text-xs text-destructive">{draftError}</p>}
+        </div>
+      )}
       <div className="flex gap-1">
         {(["form", "markdown"] as const).map((t) => (
           <button

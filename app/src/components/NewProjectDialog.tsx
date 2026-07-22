@@ -88,7 +88,7 @@ export function NewProjectDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_280px]">
-          <div className="max-h-[62vh] min-h-0 space-y-4 overflow-y-auto pr-3">
+          <div className="max-h-[62vh] min-h-0 space-y-4 overflow-y-auto p-1 pr-3">
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label>Name</Label>
@@ -184,7 +184,18 @@ export function NewProjectDialog({
             )}
             <div className="space-y-1.5">
               <Label>Brief{selected ? " — the data for this document" : " — fill what you know; edit any time"}</Label>
-              <BriefForm initial="" onChange={setBrief} />
+              <BriefForm
+                initial=""
+                onChange={setBrief}
+                draft={(idea) =>
+                  client.draftBrief(
+                    idea,
+                    selected
+                      ? `${selected.settings.pageSize} ${selected.settings.orientation}, ${selected.settings.pages} page(s) (template: ${selected.name})`
+                      : `${pageSize} ${orientation}, ${pages} page(s)`,
+                  )
+                }
+              />
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
           </div>

@@ -366,6 +366,11 @@ export function LeftPane({
             initial={project.brief}
             templateName={meta?.template}
             onSave={(brief) => client.updateBrief(brief)}
+            aiDraft={
+              meta
+                ? (idea) => client.draftBrief(idea, `${meta.settings.pageSize} ${meta.settings.orientation}, ${meta.settings.pages} page(s)`)
+                : undefined
+            }
           />
         </section>
 

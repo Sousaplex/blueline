@@ -20,12 +20,14 @@ export function BriefEditorDialog({
   initial,
   templateName,
   onSave,
+  aiDraft,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   initial: string;
   templateName?: string | null;
   onSave: (brief: string) => Promise<void>;
+  aiDraft?: (idea: string) => Promise<{ title: string; audience: string; goal: string; messages: string[]; mustInclude: string; tone: string }>;
 }) {
   const [draft, setDraft] = useState(initial);
   const [saving, setSaving] = useState(false);
@@ -60,8 +62,8 @@ export function BriefEditorDialog({
           <DialogDescription>The agent designs from this on the next run.</DialogDescription>
         </DialogHeader>
         <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_280px]">
-          <div className="max-h-[60vh] min-h-0 overflow-y-auto pr-3">
-            {open && <BriefForm initial={initial} onChange={setDraft} />}
+          <div className="max-h-[60vh] min-h-0 overflow-y-auto p-1 pr-3">
+            {open && <BriefForm initial={initial} onChange={setDraft} draft={aiDraft} />}
           </div>
           <div className="max-h-[60vh] overflow-y-auto pr-1">
             <BriefGuidance templateName={templateName} />

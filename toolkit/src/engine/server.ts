@@ -10,6 +10,7 @@ import { dirname, extname, join, normalize, resolve } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { WebSocketServer, type WebSocket } from "ws";
 import { DATA_ROOT, REPO_ROOT, loadConfig, saveApiKeys, type BluelineConfig } from "./config.ts";
+import { draftBrief } from "./brief-draft.ts";
 import { gitClone, gitConnect, gitStatus, gitSync } from "./git-sync.ts";
 import { generateImages } from "./images.ts";
 import {
@@ -782,6 +783,13 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
         return json(res, 200, { ok: true });
       }
 
+      if (req.method === "POST" && url.pathname === "/api/brief/draft") {
+        const body = await readBody(req);
+        if (typeof body.idea !== "string" || !body.idea.trim()) return json(res, 400, { error: "idea required" });
+        const fields = await draftBrief(bridge.workspace, bridge.config, String(body.idea), body.format ? String(body.format) : undefined);
+        sys("draft_brief", String(body.idea).slice(0, 80));
+        return json(res, 200, { fields });
+      }
       if (req.method === "POST" && url.pathname === "/api/brief") {
         const body = await readBody(req);
         if (typeof body.content !== "string" || !body.content.trim()) {
