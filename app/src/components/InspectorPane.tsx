@@ -84,7 +84,7 @@ export function InspectorPane({
     return (
       <div className="flex items-center gap-2 border-b px-4 py-3 text-xs text-muted-foreground">
         <MousePointerClick className="size-3.5 shrink-0" />
-        Nothing selected — click an element in Live edit to inspect it.
+        Nothing selected — in Live edit, click an element to select it; double-click text to edit it.
       </div>
     );
   }
@@ -174,7 +174,7 @@ export function InspectorPane({
             </div>
             <p className="text-muted-foreground">
               Arrow keys nudge (⇧ = 2mm) · drag to move · <strong>⌥-drag to reorder</strong> the page flow ·
-              Delete removes it.
+              Delete removes it · double-click to edit its text.
             </p>
             <Button variant="outline" size="sm" className="h-6 text-xs" disabled={busy !== null}
               onClick={() => act("reset", () => client.setElementStyle(selection.id, { translateX: 0, translateY: 0, marginTop: null }))}>

@@ -6,6 +6,7 @@ import {
   FileType,
   Folder,
   GitBranch,
+  LayoutTemplate,
   Loader2,
   Palette,
   Pencil,
@@ -16,13 +17,22 @@ import { useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import type { ContextFile, EngineClient, ProjectState, SourceKind } from "../engine-client";
-import { BriefForm } from "./BriefForm";
+import { BriefEditorDialog } from "./BriefEditorDialog";
 
 const PAGE_SIZES = ["A4", "A5", "A3", "Letter", "Legal", "Tabloid"];
 
@@ -102,10 +112,14 @@ export function LeftPane({
 }) {
   const shown = project.rounds.find((r) => r.round === viewRound);
   const [editingBrief, setEditingBrief] = useState(false);
-  const [briefDraft, setBriefDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<"context" | "style" | null>(null);
   const [branching, setBranching] = useState<number | null>(null);
+  const [templateDialog, setTemplateDialog] = useState(false);
+  const [templateName, setTemplateName] = useState("");
+  const [templateDesc, setTemplateDesc] = useState("");
+  const [savingTemplate, setSavingTemplate] = useState(false);
+  const [templateError, setTemplateError] = useState<string | null>(null);
   const contextInput = useRef<HTMLInputElement>(null);
   const styleInput = useRef<HTMLInputElement>(null);
   const meta = project.meta;
@@ -115,11 +129,20 @@ export function LeftPane({
     void fn().catch((e) => setError(e instanceof Error ? e.message : String(e)));
   };
 
-  const saveBrief = () =>
-    act(async () => {
-      await client.updateBrief(briefDraft);
-      setEditingBrief(false);
-    });
+  const saveAsTemplate = async () => {
+    setSavingTemplate(true);
+    setTemplateError(null);
+    try {
+      await client.saveTemplate(project.slug!, templateName, templateDesc || undefined);
+      setTemplateDialog(false);
+      setTemplateName("");
+      setTemplateDesc("");
+    } catch (e) {
+      setTemplateError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingTemplate(false);
+    }
+  };
 
   const toggleSource = (path: string, selected: boolean) => {
     const next = project.contextFiles.filter((f) => (f.path === path ? selected : f.selected)).map((f) => f.path);
@@ -287,6 +310,26 @@ export function LeftPane({
                   {meta.forkedFromRound != null && ` @ round ${meta.forkedFromRound}`}
                 </p>
               )}
+              {meta.template && (
+                <p className="flex items-center gap-1 text-xs text-muted-foreground" title="Layout is locked to the template — the agent only fills in data">
+                  <LayoutTemplate className="size-3" /> from template “{meta.template}”
+                </p>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 w-full text-xs"
+                disabled={!project.hasPage}
+                title={project.hasPage ? "Freeze this design as a reusable workspace template" : "Needs a finished page.html first"}
+                onClick={() => {
+                  setTemplateName(meta.displayName);
+                  setTemplateDesc("");
+                  setTemplateError(null);
+                  setTemplateDialog(true);
+                }}
+              >
+                <LayoutTemplate data-slot="icon" /> Save as template
+              </Button>
             </div>
           </section>
         )}
@@ -294,38 +337,30 @@ export function LeftPane({
         <section>
           <div className="mb-2 flex items-center justify-between">
             <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Brief</h3>
-            {!editingBrief && (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="size-6"
-                aria-label="Edit brief"
-                onClick={() => {
-                  setBriefDraft(project.brief);
-                  setEditingBrief(true);
-                }}
-              >
-                <Pencil className="size-3.5" />
-              </Button>
-            )}
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="size-6"
+              aria-label="Edit brief"
+              onClick={() => setEditingBrief(true)}
+            >
+              <Pencil className="size-3.5" />
+            </Button>
           </div>
-          {editingBrief ? (
-            <div className="space-y-2">
-              <BriefForm initial={project.brief} onChange={setBriefDraft} />
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" size="sm" onClick={() => setEditingBrief(false)}>
-                  Cancel
-                </Button>
-                <Button size="sm" onClick={saveBrief} disabled={!briefDraft.trim()}>
-                  Save
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <pre className="max-h-56 overflow-y-auto whitespace-pre-wrap rounded-md border bg-muted/40 p-2.5 font-mono text-[11px] leading-relaxed">
-              {project.brief || "(no brief.md)"}
-            </pre>
-          )}
+          <pre
+            className="max-h-56 cursor-pointer overflow-y-auto whitespace-pre-wrap rounded-md border bg-muted/40 p-2.5 font-mono text-[11px] leading-relaxed transition-colors hover:bg-muted/70"
+            title="Click to edit the brief"
+            onClick={() => setEditingBrief(true)}
+          >
+            {project.brief || "(no brief.md — click to write one)"}
+          </pre>
+          <BriefEditorDialog
+            open={editingBrief}
+            onOpenChange={setEditingBrief}
+            initial={project.brief}
+            templateName={meta?.template}
+            onSave={(brief) => client.updateBrief(brief)}
+          />
         </section>
 
         <section
@@ -471,6 +506,44 @@ export function LeftPane({
           )}
         </section>
       </div>
+
+      <Dialog open={templateDialog} onOpenChange={setTemplateDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Save as template</DialogTitle>
+            <DialogDescription>
+              Freezes the current page design as a workspace template. New projects started from it keep this
+              structure exactly — the agent only fills in their data.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label>Template name</Label>
+              <Input
+                value={templateName}
+                autoFocus
+                placeholder="Invoice"
+                onChange={(e) => setTemplateName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Description (optional)</Label>
+              <Input
+                value={templateDesc}
+                placeholder="Standard client invoice, Letter portrait"
+                onChange={(e) => setTemplateDesc(e.target.value)}
+              />
+            </div>
+            {templateError && <p className="text-sm text-destructive">{templateError}</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTemplateDialog(false)}>Cancel</Button>
+            <Button onClick={() => void saveAsTemplate()} disabled={savingTemplate || !templateName.trim()}>
+              {savingTemplate ? "Saving…" : "Save template"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </ScrollArea>
   );
 }

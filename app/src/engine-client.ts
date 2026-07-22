@@ -30,7 +30,17 @@ export interface ProjectMeta {
   kind: "document" | "variant";
   parent: string | null;
   forkedFromRound: number | null;
+  template: string | null;
   settings: PageSettings;
+}
+
+export interface TemplateInfo {
+  slug: string;
+  name: string;
+  description: string;
+  settings: PageSettings;
+  sourceProject: string | null;
+  createdAt: string;
 }
 
 export type SourceKind = "text" | "image" | "pdf" | "other";
@@ -164,7 +174,11 @@ export interface EngineClient {
   getProject(): Promise<ProjectState>;
   listProjects(): Promise<ProjectListing[]>;
   openProject(projectDir: string): Promise<void>;
-  createProject(name: string, brief?: string): Promise<void>;
+  createProject(name: string, brief?: string, template?: string): Promise<void>;
+  listTemplates(): Promise<TemplateInfo[]>;
+  /** Freeze a project's current design as a workspace template. */
+  saveTemplate(slug: string, name: string, description?: string): Promise<void>;
+  deleteTemplate(slug: string): Promise<void>;
   closeProject(): Promise<void>;
   deleteProject(slug: string): Promise<void>;
   updateBrief(content: string): Promise<void>;
@@ -280,7 +294,13 @@ export class BrowserEngineClient implements EngineClient {
 
   openProject(projectDir: string) { return post("/api/open", { projectDir }); }
 
-  createProject(name: string, brief?: string) { return post("/api/project/new", { name, brief }); }
+  createProject(name: string, brief?: string, template?: string) { return post("/api/project/new", { name, brief, template }); }
+  async listTemplates(): Promise<TemplateInfo[]> {
+    const res = await fetch("/api/templates");
+    return (await res.json()).templates ?? [];
+  }
+  saveTemplate(slug: string, name: string, description?: string) { return post("/api/templates", { slug, name, description }); }
+  deleteTemplate(slug: string) { return post("/api/templates/delete", { slug }); }
   closeProject() { return post("/api/project/close"); }
   deleteProject(slug: string) { return post("/api/project/delete", { slug }); }
   updateBrief(content: string) { return post("/api/brief", { content }); }

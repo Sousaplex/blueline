@@ -266,7 +266,7 @@ export function App() {
         <SettingsDialog client={client} />
         <NewProjectDialog client={client} open={newProjectOpen} onOpenChange={setNewProjectOpen} />
       </header>
-      <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)_340px] grid-rows-1 overflow-hidden">
+      <div className="grid min-h-0 flex-1 grid-cols-[300px_minmax(0,1fr)_340px] grid-rows-1 overflow-hidden">
         <LeftPane project={project} client={client} cacheKey={cacheKey} viewRound={viewRound} onViewRound={setViewRound} />
         <PreviewPane
           project={project}

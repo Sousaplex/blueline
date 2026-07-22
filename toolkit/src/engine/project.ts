@@ -15,6 +15,7 @@ export interface ProjectMeta {
   kind: "document" | "variant";
   parent: string | null; // slug this project was created from
   forkedFromRound: number | null; // set when branched from a specific review round
+  template: string | null; // workspace template slug — locks the agent into fill-in-the-data mode
   settings: PageSettings;
 }
 
@@ -114,6 +115,7 @@ export class Project {
       kind: stored.kind === "variant" ? "variant" : "document",
       parent: stored.parent ?? null,
       forkedFromRound: stored.forkedFromRound ?? null,
+      template: stored.template ?? null,
       settings: {
         pageSize: stored.settings?.pageSize?.trim() || DEFAULT_SETTINGS.pageSize,
         orientation: stored.settings?.orientation === "landscape" ? "landscape" : "portrait",

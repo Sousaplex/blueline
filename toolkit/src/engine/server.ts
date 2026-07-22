@@ -31,6 +31,7 @@ import { PlaywrightBackend } from "./render.ts";
 import { markRunStart } from "./review.ts";
 import { resetSearchBudget } from "./search.ts";
 import { createPresscheckSession, type PresscheckSession } from "./session.ts";
+import { deleteTemplate, instantiateTemplate, listTemplates, saveTemplate, templateBrief } from "./templates.ts";
 import { suggestDirections, variantBrief, type Direction } from "./variants.ts";
 import { resetFetchBudget } from "./web-fetch.ts";
 import { BRIEF_TEMPLATE, Workspace } from "./workspace.ts";
@@ -371,9 +372,15 @@ class Bridge {
     this.broadcast({ type: "project_changed", slug: next.slug });
   }
 
-  async createProject(name: string, brief?: string, meta?: Partial<ProjectMeta>): Promise<void> {
-    const { dir } = this.workspace.createProject(name, brief?.trim() || BRIEF_TEMPLATE);
-    new Project(dir, this.workspace).updateMeta({ displayName: name.trim(), ...meta });
+  async createProject(name: string, brief?: string, meta?: Partial<ProjectMeta>, template?: string): Promise<void> {
+    const initialBrief = brief?.trim() || (template ? templateBrief(this.workspace, template)?.trim() : undefined) || BRIEF_TEMPLATE;
+    const { dir } = this.workspace.createProject(name, initialBrief);
+    const project = new Project(dir, this.workspace);
+    if (template) {
+      const info = instantiateTemplate(this.workspace, template, dir);
+      project.updateMeta({ template: info.slug, settings: info.settings });
+    }
+    project.updateMeta({ displayName: name.trim(), ...meta });
     this.broadcast({ type: "projects_changed" });
     await this.openProject(dir);
   }
@@ -419,6 +426,7 @@ class Bridge {
       kind: "document",
       parent: baseSlug,
       forkedFromRound: opts.round ?? null,
+      template: baseMeta.template,
       settings: baseMeta.settings,
     });
     this.broadcast({ type: "projects_changed" });
@@ -461,6 +469,7 @@ imagery to this subject.
         series,
         kind: "document",
         parent: templateSlug,
+        template: templateMeta.template,
         settings: templateMeta.settings,
       });
       created.push({ slug, state: "idle" });
@@ -699,8 +708,25 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
       if (req.method === "POST" && url.pathname === "/api/project/new") {
         const body = await readBody(req);
         if (!body.name) return json(res, 400, { error: "name required" });
-        await bridge.createProject(body.name, body.brief, body.meta);
-        sys("create_project", String(body.name));
+        await bridge.createProject(body.name, body.brief, body.meta, body.template ? String(body.template) : undefined);
+        sys("create_project", `${body.name}${body.template ? ` (template: ${body.template})` : ""}`);
+        return json(res, 200, { ok: true });
+      }
+      if (url.pathname === "/api/templates") {
+        if (req.method === "POST") {
+          const body = await readBody(req);
+          if (!body.slug || !body.name) return json(res, 400, { error: "slug and name required" });
+          const info = saveTemplate(new Project(String(body.slug), bridge.workspace), String(body.name), body.description ? String(body.description) : "");
+          sys("save_template", `${body.slug} -> ${info.slug}`);
+          return json(res, 200, { ok: true, template: info });
+        }
+        return json(res, 200, { templates: listTemplates(bridge.workspace) });
+      }
+      if (req.method === "POST" && url.pathname === "/api/templates/delete") {
+        const body = await readBody(req);
+        if (!body.slug) return json(res, 400, { error: "slug required" });
+        deleteTemplate(bridge.workspace, String(body.slug));
+        sys("delete_template", String(body.slug));
         return json(res, 200, { ok: true });
       }
       if (req.method === "POST" && url.pathname === "/api/project/close") {

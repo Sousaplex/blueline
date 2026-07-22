@@ -168,6 +168,43 @@ test("element delete/move/source operations", () => {
   assert.equal(pageSource(p), src);
 });
 
+const { Workspace } = await import("./workspace.ts");
+const { saveTemplate, listTemplates, instantiateTemplate, templateBrief, deleteTemplate } = await import("./templates.ts");
+const { buildSystemPrompt } = await import("./prompt.ts");
+
+test("templates: save from project, list, instantiate into a new project", () => {
+  const ws = new Workspace(mkdtempSync(join(tmpdir(), "pc-ws-"))).ensure();
+  const { dir } = ws.createProject("invoice-master", "# Brief: monthly invoice");
+  const base = new Project(dir, ws);
+  writeFileSync(base.pageHtml, `<html><body><table data-pc-id="line-items"><tr><td>item</td></tr></table></body></html>`);
+  base.updateMeta({ settings: { pageSize: "Letter", orientation: "portrait", pages: 2 } });
+
+  const info = saveTemplate(base, "Invoice", "Standard client invoice");
+  assert.equal(info.slug, "invoice");
+  assert.equal(info.settings.pageSize, "Letter");
+  assert.throws(() => saveTemplate(base, "Invoice"), /already exists/);
+  assert.equal(listTemplates(ws).length, 1);
+  assert.equal(templateBrief(ws, "invoice"), "# Brief: monthly invoice\n");
+
+  const { dir: dir2 } = ws.createProject("acme-march", "# Brief: March invoice for Acme");
+  const inst = instantiateTemplate(ws, "invoice", dir2);
+  assert.equal(inst.slug, "invoice");
+  const p2 = new Project(dir2, ws);
+  assert.ok(readFileSync(p2.pageHtml, "utf8").includes('data-pc-id="line-items"'));
+  p2.updateMeta({ template: inst.slug, settings: inst.settings });
+  assert.equal(p2.meta().template, "invoice");
+  assert.equal(p2.meta().settings.pages, 2);
+
+  // The system prompt flips into strict fill-in-the-data mode for templated projects.
+  const prompt = buildSystemPrompt(p2, config);
+  assert.ok(prompt.includes("Template contract") && prompt.includes('"invoice" template'));
+  assert.ok(!buildSystemPrompt(base, config).includes("Template contract"));
+
+  deleteTemplate(ws, "invoice");
+  assert.equal(listTemplates(ws).length, 0);
+  assert.throws(() => instantiateTemplate(ws, "invoice", dir2), /No such template/);
+});
+
 test("element nudge clamps offsets and round-trips through page.html", () => {
   const p = tempProject();
   writeFileSync(p.pageHtml, `<html><body><section data-pc-id="stats" style="color: red">x</section></body></html>`);

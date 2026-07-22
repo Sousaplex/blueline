@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Code2, Grid3x3, History, Loader2, Move, RefreshCw, Save, Type } from "lucide-react";
+import { ChevronLeft, ChevronRight, Code2, Grid3x3, History, Loader2, MousePointerClick, RefreshCw, Save } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -6,7 +6,6 @@ import type { EngineClient, ProjectState } from "../engine-client";
 import type { SelectionInfo } from "../selection";
 
 type Mode = "proof" | "live" | "code";
-type EditTool = "text" | "nudge";
 
 const PX_TO_MM = 25.4 / 96;
 
@@ -49,13 +48,12 @@ export function PreviewPane({
   onSelect: (selection: SelectionInfo | null) => void;
   onRequestDelete: (pcId: string) => void;
 }) {
-  // Deep-linkable initial view (?mode=live|code&tool=nudge) — also used by automated tests.
+  // Deep-linkable initial view (?mode=live|code&grid=1) — also used by automated tests.
   const initialParams = useRef(new URLSearchParams(window.location.search));
   const [mode, setMode] = useState<Mode>(() => {
     const m = initialParams.current.get("mode");
     return m === "live" || m === "code" ? m : "proof";
   });
-  const [editTool, setEditTool] = useState<EditTool>(() => (initialParams.current.get("tool") === "nudge" ? "nudge" : "text"));
   const [showGrid, setShowGrid] = useState(() => initialParams.current.get("grid") === "1");
   const showGridRef = useRef(showGrid);
   showGridRef.current = showGrid;
@@ -70,8 +68,6 @@ export function PreviewPane({
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const activeImageRef = useRef<string | null>(null);
   activeImageRef.current = activeImage;
-  const editToolRef = useRef<EditTool>(editTool);
-  editToolRef.current = editTool;
   const nudgeRef = useRef<NudgeState | null>(nudge);
   nudgeRef.current = nudge;
   const persistTimer = useRef<number | undefined>(undefined);
@@ -158,14 +154,6 @@ export function PreviewPane({
     if (viewRound != null) setMode("proof");
   }, [viewRound]);
 
-  // Switching edit tools clears selections and flips the iframe's cursor affordance.
-  useEffect(() => {
-    const doc = iframeRef.current?.contentDocument;
-    if (doc?.body) doc.body.classList.toggle("pc-nudge-mode", editTool === "nudge");
-    clearSelectionsRef.current();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editTool]);
-
   // Leaving live mode drops the selection; entering code mode loads the source.
   useEffect(() => {
     if (mode !== "live") clearSelectionsRef.current();
@@ -194,10 +182,9 @@ export function PreviewPane({
     syncGrid(); // iframe reloads drop injected overlays — restore the grid if it's on
     const style = doc.createElement("style");
     style.textContent = `
-      [data-pc-id]:hover { outline: 2px dashed rgba(120,120,255,.7); outline-offset: 2px; cursor: text; }
-      [data-pc-id]:focus { outline: 2px solid rgba(120,120,255,.95); outline-offset: 2px; }
-      body.pc-nudge-mode [data-pc-id]:hover { outline: 2px dashed rgba(245,158,11,.8); cursor: move; }
+      [data-pc-id]:hover { outline: 2px dashed rgba(245,158,11,.7); outline-offset: 2px; cursor: move; }
       .pc-nudge-active { outline: 2px solid rgba(245,158,11,1) !important; outline-offset: 2px; cursor: move !important; }
+      [data-pc-id][contenteditable] { outline: 2px solid rgba(120,120,255,.95) !important; outline-offset: 2px; cursor: text !important; }
       .pc-drop-before { box-shadow: inset 0 4px 0 0 rgba(59,130,246,.9) !important; }
       .pc-drop-after { box-shadow: inset 0 -4px 0 0 rgba(59,130,246,.9) !important; }
       .pc-dragging { opacity: .6; }
@@ -205,7 +192,6 @@ export function PreviewPane({
       img[data-image-id].pc-active { outline: 2px solid rgba(52,199,89,1); outline-offset: 2px; cursor: grab; }
     `;
     doc.head.appendChild(style);
-    doc.body.classList.toggle("pc-nudge-mode", editToolRef.current === "nudge");
 
     // An element holding other blocks must never become contenteditable: blurring it
     // would replace ALL of its children with flat text. Rule: ANY non-inline child.
@@ -299,8 +285,28 @@ export function PreviewPane({
     const GRID_MM = 5;
     const GRID_SNAP_MM = 1.2; // grid capture distance (only when the grid is shown)
 
+    /** Collapse source-formatting whitespace (newlines + indentation) in the element's
+     *  text nodes. Rendering already collapses it visually, but contenteditable exposes
+     *  it as a phantom leading space/indent — and a committed edit would save it. */
+    const normalizeWhitespace = (elm: HTMLElement) => {
+      const walker = doc.createTreeWalker(elm, 4 /* NodeFilter.SHOW_TEXT — realm-safe constant */);
+      const nodes: Text[] = [];
+      while (walker.nextNode()) nodes.push(walker.currentNode as Text);
+      nodes.forEach((n, i) => {
+        let s = n.data.replace(/\s+/g, " ");
+        if (i === 0) s = s.replace(/^ /, "");
+        if (i === nodes.length - 1) s = s.replace(/ $/, "");
+        if (s !== n.data) n.data = s;
+      });
+    };
+
     /** Begin an inline text edit with a one-shot blur commit (change-detected). */
     const beginTextEdit = (elm: HTMLElement) => {
+      // Text editing and drag-selection are mutually exclusive — drop any block selection.
+      doc.querySelectorAll(".pc-nudge-active").forEach((other) => other.classList.remove("pc-nudge-active"));
+      nudgeRef.current = null;
+      setNudge(null);
+      normalizeWhitespace(elm);
       const cs = doc.defaultView!.getComputedStyle(elm);
       onSelect({
         kind: "text",
@@ -324,9 +330,18 @@ export function PreviewPane({
       );
     };
 
+    /** True while an inline text edit is open and the event landed inside it. */
+    const insideOpenEdit = (ev: Event): boolean => {
+      const editing = doc.querySelector<HTMLElement>("[contenteditable]");
+      const t = ev.target && (ev.target as Node).nodeType === 1 ? (ev.target as Element) : null; // realm-safe
+      return Boolean(editing && t && (editing === t || editing.contains(t)));
+    };
+
+    // Single click = select (drag / arrows / Inspector). Double click = edit text.
     doc.querySelectorAll<HTMLElement>("[data-pc-id]").forEach((el) => {
       el.addEventListener("click", (ev) => {
         ev.stopPropagation(); // innermost tagged block wins — never bubble to containers
+        if (insideOpenEdit(ev)) return; // caret placement inside an open edit — leave it alone
         ev.preventDefault();
         void (async () => {
           // Drill to the exact element under the cursor; tag it if it's untagged.
@@ -335,14 +350,18 @@ export function PreviewPane({
             const id = await autoTag(target);
             if (!id) target = el;
           }
-          if (editToolRef.current === "nudge" || isStructural(target)) {
-            // Nudge tool, or a structural block in text tool: select it so the
-            // Inspector shows context (text editing stays leaf-only).
-            selectForNudge(target);
-            return;
-          }
-          beginTextEdit(target);
+          selectForNudge(target);
         })();
+      });
+      el.addEventListener("dblclick", (ev) => {
+        ev.stopPropagation();
+        if (insideOpenEdit(ev)) return;
+        // The single-click leg already drilled and tagged; resolve the same target.
+        const target = drillTarget(ev, el);
+        const editable = target.hasAttribute("data-pc-id") ? target : el;
+        if (isStructural(editable)) return; // containers stay selected — text editing is leaf-only
+        ev.preventDefault();
+        beginTextEdit(editable);
       });
     });
 
@@ -357,7 +376,7 @@ export function PreviewPane({
     } | null = null;
     doc.addEventListener("mousedown", (ev) => {
       const n = nudgeRef.current;
-      if (editToolRef.current !== "nudge" || !n) return;
+      if (!n) return;
       const elm = doc.querySelector<HTMLElement>(`[data-pc-id="${n.pcId}"]`);
       const t = ev.target && (ev.target as Node).nodeType === 1 ? (ev.target as Element) : null; // realm-safe
       if (!elm || !t || (elm !== t && !elm.contains(t))) return; // drag starts on the selection
@@ -445,14 +464,16 @@ export function PreviewPane({
       }
     });
 
-    // Keyboard: arrows nudge, Escape deselects, Delete asks to remove the element.
+    // Keyboard: arrows nudge, Escape ends an edit or deselects, Delete asks to remove.
     doc.addEventListener("keydown", (ev) => {
       if (ev.key === "Escape") {
+        const editing = doc.querySelector<HTMLElement>("[contenteditable]");
+        if (editing) return editing.blur(); // commit-on-blur ends the text edit
         clearSelectionsRef.current();
         return;
       }
       const n = nudgeRef.current;
-      if (!n || editToolRef.current !== "nudge") return;
+      if (!n) return; // text edits keep their keystrokes — selection is null while editing
       if (ev.key === "Delete" || ev.key === "Backspace") {
         ev.preventDefault();
         onRequestDelete(n.pcId);
@@ -563,16 +584,10 @@ export function PreviewPane({
         </Tabs>
 
         {mode === "live" && (
-          <Tabs value={editTool} onValueChange={(v) => setEditTool(v as EditTool)}>
-            <TabsList className="h-8">
-              <TabsTrigger value="text" className="gap-1 text-xs" title="Click text to edit copy">
-                <Type className="size-3" /> Text
-              </TabsTrigger>
-              <TabsTrigger value="nudge" className="gap-1 text-xs" title="Click a block, then arrow keys / drag to nudge; ⌥-drag to reorder">
-                <Move className="size-3" /> Nudge
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
+          <span className="hidden items-center gap-1.5 whitespace-nowrap text-[11px] text-muted-foreground xl:flex">
+            <MousePointerClick className="size-3.5 shrink-0" />
+            click to select &amp; drag · double-click to edit text
+          </span>
         )}
 
         {mode === "live" && (

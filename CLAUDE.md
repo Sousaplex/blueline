@@ -49,5 +49,12 @@ confirms they're running the latest build. A stale version number silently
 breaks that trust.
 
 Release checklist: bump version → `cd app && npm run package` → smoke the
-packaged .app (`PRESSCHECK_SMOKE=1`, expect exit 0) → commit with the version
-in the message → push.
+packaged .app (`PRESSCHECK_SMOKE=1`, expect exit 0) → verify the smoke capture
+shows the NEW version badge → commit with the version in the message → push.
+
+Smoke isolation trap: if a blueline instance is already running, it holds
+port 7717 and the smoke instance silently attaches to the OLD app's bridge —
+the capture then shows the old version/UI and proves nothing. Always smoke with
+`PRESSCHECK_PORT=<free port>` (and ideally `PRESSCHECK_HOME=<scratch dir>` whose
+workspace has a project with a page open) so the packaged app boots its own
+bridge and serves its own bundled dist.

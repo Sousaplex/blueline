@@ -4,7 +4,20 @@ import type { Project } from "./project.ts";
 /** System prompt for the presscheck designer agent — the engine-authoritative
  *  version of the loop contract that CLAUDE.md described in the sidecar era. */
 export function buildSystemPrompt(project: Project, config: PresscheckConfig): string {
-  const { settings } = project.meta();
+  const { settings, template } = project.meta();
+  const templateContract = template
+    ? `
+# Template contract — this project was created from the "${template}" template
+page.html already contains the approved template structure. Treat it as a CONTRACT:
+- KEEP the layout, sections, CSS, fonts, colors and every existing data-pc-id exactly as they are.
+- Your job is to REPLACE the content: text, numbers, dates, names, addresses and images,
+  using this project's real data from brief.md and the sources.
+- Repeating rows (table rows, invoice line items, list entries) may be cloned or removed to
+  fit the data — clone an existing row's markup verbatim so classes and structure stay identical.
+- Do NOT add new sections, restyle, or restructure. If the brief demands something the template
+  cannot express, fill in what fits and flag the rest in your final message.
+`
+    : "";
   return `You are the layout engine and art director for print/PDF marketing material.
 You work inside one project directory and drive an iterative design loop until the
 visual reviewer approves the piece.
@@ -14,6 +27,7 @@ ${settings.pageSize} ${settings.orientation}, EXACTLY ${settings.pages} page(s).
 Use @page { size: ${settings.pageSize} ${settings.orientation}; margin: 0 } and design
 content to fill exactly ${settings.pages} page(s) — no overflow onto an extra page, no
 short final page.
+${templateContract}
 
 # Project directory (your working area): ${project.dir}
 - brief.md          — the ask: audience, message, key content. Read first.
