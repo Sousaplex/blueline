@@ -2,6 +2,8 @@ import {
   ChevronRight,
   CircleX,
   Download,
+  FileCheck2,
+  FolderOpen,
   Hammer,
   Image as ImageIcon,
   Loader2,
@@ -78,6 +80,7 @@ function EditDiff({ oldText, newText }: { oldText: string; newText: string }) {
 export type FeedItem =
   | { kind: "text"; text: string; at: number }
   | { kind: "user"; text: string; at: number }
+  | { kind: "export"; path: string; at: number }
   | { kind: "tool"; tool: string; args: Record<string, unknown>; summary?: string; done: boolean; at: number }
   | { kind: "error"; message: string; at: number };
 
@@ -301,6 +304,30 @@ export function AgentPane({
       >
         {feed.map((item, i) => {
           switch (item.kind) {
+            case "export":
+              return (
+                <div key={i} className="flex items-center gap-2 rounded-md border bg-emerald-500/5 px-2.5 py-2">
+                  <FileCheck2 className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-xs font-medium" title={item.path}>
+                      Exported {item.path.split("/").pop()}
+                    </p>
+                    <p className="truncate text-[10px] text-muted-foreground">{item.path}</p>
+                  </div>
+                  {window.blueline && (
+                    <>
+                      <Button variant="outline" size="sm" className="h-6 shrink-0 px-2 text-[11px]"
+                        onClick={() => void window.blueline!.revealInFinder(item.path)}>
+                        <FolderOpen data-slot="icon" /> Show in Finder
+                      </Button>
+                      <Button variant="ghost" size="sm" className="h-6 shrink-0 px-2 text-[11px]"
+                        onClick={() => void window.blueline!.openPath(item.path)}>
+                        Open
+                      </Button>
+                    </>
+                  )}
+                </div>
+              );
             case "user":
               return (
                 <div key={i} className="flex justify-end">

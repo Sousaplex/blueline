@@ -204,6 +204,8 @@ app.whenReady().then(async () => {
 });
 
 ipcMain.handle("export-pdf", async () => exportPdf());
+ipcMain.handle("reveal-in-finder", (_e, path: string) => shell.showItemInFolder(path));
+ipcMain.handle("open-path", (_e, path: string) => shell.openPath(path));
 
 ipcMain.handle("choose-directory", async () => {
   const picked = await dialog.showOpenDialog(mainWindow!, {

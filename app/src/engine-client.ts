@@ -171,6 +171,8 @@ declare global {
     blueline?: {
       exportPdf(): Promise<string | null>;
       chooseDirectory(): Promise<string | null>;
+      revealInFinder(path: string): Promise<void>;
+      openPath(path: string): Promise<void>;
       isElectron: true;
     };
   }

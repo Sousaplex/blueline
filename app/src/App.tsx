@@ -14,7 +14,7 @@ import { PreviewPane } from "./components/PreviewPane";
 import { SeriesDialog } from "./components/SeriesDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { VariantsDialog } from "./components/VariantsDialog";
-import { Toaster } from "sonner";
+import { Toaster, toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { currentTheme } from "@/lib/theme";
@@ -263,7 +263,12 @@ export function App() {
           disabled={!project.hasProof}
           onClick={() =>
             void client.exportPdf().then((path) => {
-              if (path) setFeed((f) => [...f, { kind: "text", text: `Exported: ${path}`, at: Date.now() }]);
+              if (!path) return;
+              setFeed((f) => [...f, { kind: "export", path, at: Date.now() }]);
+              toast("PDF exported", {
+                description: path.split("/").pop(),
+                action: window.blueline ? { label: "Show in Finder", onClick: () => void window.blueline!.revealInFinder(path) } : undefined,
+              });
             })
           }
         >
