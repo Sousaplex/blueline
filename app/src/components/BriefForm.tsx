@@ -50,7 +50,7 @@ export function BriefForm({ initial, onChange }: { initial: string; onChange: (m
 
       {tab === "markdown" ? (
         <textarea
-          className="min-h-64 w-full rounded-md border bg-transparent p-2.5 font-mono text-[11px] leading-relaxed outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="min-h-64 w-full rounded-md border bg-transparent px-3 py-2.5 font-mono text-[11px] leading-relaxed outline-none focus-visible:ring-2 focus-visible:ring-ring"
           value={raw}
           onChange={(e) => {
             setRaw(e.target.value);
@@ -59,26 +59,26 @@ export function BriefForm({ initial, onChange }: { initial: string; onChange: (m
           }}
         />
       ) : (
-        <div className="space-y-2.5">
+        <div className="space-y-3">
           <div className="space-y-1">
             <Label className="text-[11px]">What is this piece?</Label>
-            <Input className="h-7 text-xs" value={fields.title} placeholder="Trade-show one-pager for …"
+            <Input className="h-8 px-2.5 text-xs" value={fields.title} placeholder="Trade-show one-pager for …"
               onChange={(e) => update({ title: e.target.value })} />
           </div>
           <div className="space-y-1">
             <Label className="text-[11px]">Audience — who holds this in their hands?</Label>
-            <Input className="h-7 text-xs" value={fields.audience} placeholder="Clinic ops leads evaluating vendors"
+            <Input className="h-8 px-2.5 text-xs" value={fields.audience} placeholder="Clinic ops leads evaluating vendors"
               onChange={(e) => update({ audience: e.target.value })} />
           </div>
           <div className="space-y-1">
             <Label className="text-[11px]">Goal — what should they do after reading?</Label>
-            <Input className="h-7 text-xs" value={fields.goal} placeholder="Book a demo"
+            <Input className="h-8 px-2.5 text-xs" value={fields.goal} placeholder="Book a demo"
               onChange={(e) => update({ goal: e.target.value })} />
           </div>
           <div className="space-y-1">
             <Label className="text-[11px]">Key messages — one per line, most important first</Label>
             <textarea
-              className="min-h-16 w-full rounded-md border bg-transparent p-2 text-xs leading-relaxed outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="min-h-16 w-full rounded-md border bg-transparent px-2.5 py-2 text-xs leading-relaxed outline-none focus-visible:ring-2 focus-visible:ring-ring"
               value={messagesText}
               placeholder={"The one thing they must remember\nSupporting point\nSupporting point"}
               onChange={(e) => update({ messages: e.target.value.split("\n") })}
@@ -87,7 +87,7 @@ export function BriefForm({ initial, onChange }: { initial: string; onChange: (m
           <div className="space-y-1">
             <Label className="text-[11px]">Must include — one per line</Label>
             <textarea
-              className="min-h-12 w-full rounded-md border bg-transparent p-2 text-xs leading-relaxed outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="min-h-12 w-full rounded-md border bg-transparent px-2.5 py-2 text-xs leading-relaxed outline-none focus-visible:ring-2 focus-visible:ring-ring"
               value={fields.mustInclude}
               placeholder={"Logo\nCTA with contact info"}
               onChange={(e) => update({ mustInclude: e.target.value })}
@@ -95,7 +95,7 @@ export function BriefForm({ initial, onChange }: { initial: string; onChange: (m
           </div>
           <div className="space-y-1">
             <Label className="text-[11px]">Tone</Label>
-            <Input className="h-7 text-xs" value={fields.tone} placeholder="confident / playful / clinical / warm"
+            <Input className="h-8 px-2.5 text-xs" value={fields.tone} placeholder="confident / playful / clinical / warm"
               onChange={(e) => update({ tone: e.target.value })} />
           </div>
           {fields.extra && (

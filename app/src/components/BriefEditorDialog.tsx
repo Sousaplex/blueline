@@ -60,10 +60,10 @@ export function BriefEditorDialog({
           <DialogDescription>The agent designs from this on the next run.</DialogDescription>
         </DialogHeader>
         <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_280px]">
-          <div className="max-h-[60vh] min-h-0 overflow-y-auto pr-1">
+          <div className="max-h-[60vh] min-h-0 overflow-y-auto pr-3">
             {open && <BriefForm initial={initial} onChange={setDraft} />}
           </div>
-          <div className="max-h-[60vh] overflow-y-auto">
+          <div className="max-h-[60vh] overflow-y-auto pr-1">
             <BriefGuidance templateName={templateName} />
           </div>
         </div>

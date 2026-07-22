@@ -69,7 +69,7 @@ export function NewProjectDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_280px]">
-          <div className="max-h-[62vh] min-h-0 space-y-4 overflow-y-auto pr-1">
+          <div className="max-h-[62vh] min-h-0 space-y-4 overflow-y-auto pr-3">
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label>Name</Label>
@@ -117,7 +117,7 @@ export function NewProjectDialog({
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
           </div>
-          <div className="max-h-[62vh] overflow-y-auto">
+          <div className="max-h-[62vh] overflow-y-auto pr-1">
             <BriefGuidance templateName={selected?.name ?? null} />
           </div>
         </div>

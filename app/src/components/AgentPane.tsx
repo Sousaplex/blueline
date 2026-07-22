@@ -68,7 +68,7 @@ function ToolRow({ item }: { item: Extract<FeedItem, { kind: "tool" }> }) {
   return (
     <div className="rounded-md border bg-muted/30">
       <button
-        className="flex w-full items-center gap-2 px-2 py-1.5 text-left font-mono text-xs"
+        className="flex w-full items-center gap-2 px-2 py-1 text-left font-mono text-xs"
         onClick={() => hasDetail && setExpanded(!expanded)}
       >
         {hasDetail ? (
@@ -214,7 +214,7 @@ export function AgentPane({
       ) : (
       <div
         ref={scroller}
-        className="flex-1 space-y-1.5 overflow-y-auto p-3 text-sm"
+        className="flex-1 space-y-1 overflow-y-auto p-3 text-sm"
         onScroll={(e) => {
           const el = e.currentTarget;
           pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
@@ -240,9 +240,16 @@ export function AgentPane({
               return <ToolRow key={i} item={item} />;
             case "error":
               return (
-                <p key={i} className="flex items-start gap-1.5 px-1 text-xs text-destructive">
-                  <CircleX className="mt-0.5 size-3.5 shrink-0" /> <span className="break-words">{item.message}</span>
-                </p>
+                <div key={i} className="space-y-0.5 px-1">
+                  <p className="flex items-start gap-1.5 text-xs text-destructive">
+                    <CircleX className="mt-0.5 size-3.5 shrink-0" /> <span className="break-words">{item.message}</span>
+                  </p>
+                  {/quota|rate.?limit|429|insufficient|exceed|billing|credit/i.test(item.message) && (
+                    <p className="pl-5 text-[11px] text-muted-foreground">
+                      The designer model looks out of quota — switch models in Settings (gear, top right) or top up the provider.
+                    </p>
+                  )}
+                </div>
               );
           }
         })}

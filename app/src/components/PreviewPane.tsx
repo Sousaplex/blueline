@@ -1,7 +1,11 @@
+import { html } from "@codemirror/lang-html";
+import { oneDark } from "@codemirror/theme-one-dark";
+import CodeMirror from "@uiw/react-codemirror";
 import { ChevronLeft, ChevronRight, Code2, Grid3x3, History, Loader2, MousePointerClick, Redo2, RefreshCw, Save, Undo2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { currentTheme } from "@/lib/theme";
 import type { EngineClient, ProjectState } from "../engine-client";
 import type { AlignOp, SelectionInfo } from "../selection";
 
@@ -842,15 +846,19 @@ export function PreviewPane({
         source == null ? (
           <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">loading source…</div>
         ) : (
-          <textarea
-            spellCheck={false}
-            className="min-h-0 flex-1 resize-none bg-muted/20 p-4 font-mono text-xs leading-relaxed outline-none"
-            value={source}
-            onChange={(e) => {
-              setSource(e.target.value);
-              setSourceDirty(true);
-            }}
-          />
+          <div className="min-h-0 flex-1 overflow-hidden [&_.cm-editor]:h-full [&_.cm-editor]:text-xs [&_.cm-scroller]:font-mono">
+            <CodeMirror
+              value={source}
+              height="100%"
+              theme={currentTheme() === "dark" ? oneDark : "light"}
+              extensions={[html()]}
+              onChange={(v) => {
+                setSource(v);
+                setSourceDirty(true);
+              }}
+              className="h-full"
+            />
+          </div>
         )
       ) : (
         <div className="flex flex-1 items-start justify-center overflow-auto bg-muted/30 p-6">
