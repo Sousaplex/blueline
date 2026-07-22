@@ -15,7 +15,7 @@ import { buildPresscheckTools } from "./tools.ts";
 
 /** Built-in Pi tools the designer may use. Deliberately no bash. */
 const BUILTIN_TOOLS = ["read", "write", "edit", "grep", "find", "ls"];
-const CUSTOM_TOOL_NAMES = ["render", "review", "gen_images", "web_fetch", "web_search"];
+const CUSTOM_TOOL_NAMES = ["render", "review", "gen_images", "web_fetch", "web_search", "set_format"];
 
 export interface BluelineSession {
   session: AgentSession;

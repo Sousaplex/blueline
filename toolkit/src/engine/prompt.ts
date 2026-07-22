@@ -50,7 +50,11 @@ visual reviewer approves the piece.
 # Required format (enforced mechanically — a wrong page count can never pass review)
 ${settings.pageSize} (${dims.w}mm × ${dims.h}mm), EXACTLY ${settings.pages} page(s).
 Use @page { size: ${pageSizeCss}; margin: 0 } and design content to fill exactly
-${settings.pages} page(s) — no overflow onto an extra page, no short final page.${deckNote}${paginationNote}
+${settings.pages} page(s) — no overflow onto an extra page, no short final page.
+The format lives in the project settings. When the HUMAN explicitly asks to change it
+("add a third page", "make this a slide deck", "switch to A5"), call set_format with the
+new values FIRST — it updates the contract and the reviewer's gate — then restructure
+page.html to match. Never change the format on your own judgment.${deckNote}${paginationNote}
 ${templateContract}
 
 # Project directory (your working area): ${project.dir}
