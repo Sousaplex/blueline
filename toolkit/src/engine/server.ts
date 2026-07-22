@@ -218,6 +218,8 @@ class Bridge {
       const prompt =
         kickoff ??
         "Produce the deliverable for this project. Start by reading brief.md, then follow your loop until the reviewer passes the piece or the round limit is hit.";
+      // Every prompt the agent receives is visible in the feed — runs included.
+      this.broadcast({ type: "chat", project: slug, text: prompt });
       void pc.session.prompt(prompt).catch((err) => {
         this.runStates.delete(slug);
         this.broadcast({ type: "error", project: slug, message: err instanceof Error ? err.message : String(err) });

@@ -11,12 +11,69 @@ import {
   ScanEye,
   SendHorizontal,
 } from "lucide-react";
+import { diffLines } from "diff";
 import { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { SystemEvent } from "../engine-client";
+
+/** Compact markdown for agent messages — chat-sized type, no giant headings. */
+function Md({ text }: { text: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        p: (props) => <p className="mb-1.5 leading-relaxed last:mb-0" {...props} />,
+        ul: (props) => <ul className="mb-1.5 list-disc space-y-0.5 pl-4 last:mb-0" {...props} />,
+        ol: (props) => <ol className="mb-1.5 list-decimal space-y-0.5 pl-4 last:mb-0" {...props} />,
+        h1: ({ children }) => <p className="mb-1 mt-2 font-semibold first:mt-0">{children}</p>,
+        h2: ({ children }) => <p className="mb-1 mt-2 font-semibold first:mt-0">{children}</p>,
+        h3: ({ children }) => <p className="mb-1 mt-1.5 font-medium first:mt-0">{children}</p>,
+        a: (props) => <a className="underline underline-offset-2" target="_blank" rel="noreferrer" {...props} />,
+        code: (props) => <code className="rounded bg-muted/60 px-1 py-0.5 font-mono text-[11px]" {...props} />,
+        pre: (props) => <pre className="mb-1.5 overflow-x-auto rounded bg-muted/50 p-2 [&_code]:bg-transparent [&_code]:p-0" {...props} />,
+        blockquote: (props) => <blockquote className="mb-1.5 border-l-2 pl-2 text-muted-foreground" {...props} />,
+        hr: () => <hr className="my-2" />,
+        table: (props) => <table className="mb-1.5 text-xs" {...props} />,
+        th: (props) => <th className="border px-1.5 py-0.5 text-left font-medium" {...props} />,
+        td: (props) => <td className="border px-1.5 py-0.5" {...props} />,
+      }}
+    >
+      {text}
+    </ReactMarkdown>
+  );
+}
+
+/** Red/green line diff for edit tool calls (jsdiff over the old/new snippets). */
+function EditDiff({ oldText, newText }: { oldText: string; newText: string }) {
+  const norm = (s: string) => (s.endsWith("\n") ? s : s + "\n");
+  const parts = diffLines(norm(oldText), norm(newText));
+  return (
+    <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded bg-muted/50 p-2 font-mono text-[10.5px] leading-relaxed">
+      {parts.map((part, i) => {
+        const prefix = part.added ? "+ " : part.removed ? "- " : "  ";
+        const lines = part.value.replace(/\n$/, "").split("\n");
+        return (
+          <span
+            key={i}
+            className={cn(
+              "block",
+              part.added && "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+              part.removed && "bg-red-500/15 text-red-700 dark:text-red-400",
+              !part.added && !part.removed && "text-muted-foreground",
+            )}
+          >
+            {lines.map((l) => prefix + l).join("\n")}
+          </span>
+        );
+      })}
+    </pre>
+  );
+}
 
 export type FeedItem =
   | { kind: "text"; text: string; at: number }
@@ -59,11 +116,27 @@ function reviewBadge(summary: string): { label: string; pass: boolean } | null {
   };
 }
 
+/** Old/new snippet pairs from an edit call — Pi sends {edits: [{oldText, newText}…]}. */
+function editPairs(item: Extract<FeedItem, { kind: "tool" }>): { oldText: string; newText: string }[] {
+  if (item.tool !== "edit") return [];
+  const args = item.args ?? {};
+  if (Array.isArray(args.edits)) {
+    return (args.edits as { oldText?: unknown; newText?: unknown }[]).filter(
+      (e): e is { oldText: string; newText: string } => typeof e?.oldText === "string" && typeof e?.newText === "string",
+    );
+  }
+  if (typeof args.oldText === "string" && typeof args.newText === "string") {
+    return [{ oldText: args.oldText, newText: args.newText }];
+  }
+  return [];
+}
+
 function ToolRow({ item }: { item: Extract<FeedItem, { kind: "tool" }> }) {
   const [expanded, setExpanded] = useState(false);
   const argsJson = JSON.stringify(item.args ?? {}, null, 2);
   const hasDetail = argsJson !== "{}" || !!item.summary;
   const badge = item.tool === "review" && item.summary ? reviewBadge(item.summary) : null;
+  const diffs = editPairs(item);
 
   return (
     <div className="rounded-md border bg-muted/30">
@@ -97,11 +170,17 @@ function ToolRow({ item }: { item: Extract<FeedItem, { kind: "tool" }> }) {
       </button>
       {expanded && (
         <div className="space-y-2 border-t px-2 py-2">
-          {argsJson !== "{}" && (
+          {diffs.length > 0 ? (
+            diffs.map((d, i) => <EditDiff key={i} oldText={d.oldText} newText={d.newText} />)
+          ) : item.tool === "write" && typeof item.args?.content === "string" ? (
+            <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded bg-emerald-500/10 p-2 font-mono text-[10.5px] leading-relaxed text-emerald-700 dark:text-emerald-300">
+              {item.args.content as string}
+            </pre>
+          ) : argsJson !== "{}" ? (
             <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap break-all rounded bg-muted/50 p-2 font-mono text-[10.5px] leading-relaxed">
               {argsJson}
             </pre>
-          )}
+          ) : null}
           {item.summary && (
             <pre className="max-h-56 overflow-y-auto whitespace-pre-wrap break-words rounded bg-muted/50 p-2 font-mono text-[10.5px] leading-relaxed">
               {item.summary}
@@ -225,16 +304,16 @@ export function AgentPane({
             case "user":
               return (
                 <div key={i} className="flex justify-end">
-                  <p className="max-w-[85%] whitespace-pre-wrap rounded-lg bg-primary/10 px-2.5 py-1.5 text-[13px] leading-relaxed">
-                    {item.text}
-                  </p>
+                  <div className="max-w-[85%] rounded-lg bg-primary/10 px-2.5 py-1.5 text-[13px]">
+                    <Md text={item.text} />
+                  </div>
                 </div>
               );
             case "text":
               return (
-                <p key={i} className="whitespace-pre-wrap px-1 py-0.5 leading-relaxed">
-                  {item.text}
-                </p>
+                <div key={i} className="px-1 py-0.5 text-sm">
+                  <Md text={item.text} />
+                </div>
               );
             case "tool":
               return <ToolRow key={i} item={item} />;
