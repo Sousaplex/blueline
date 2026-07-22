@@ -51,10 +51,27 @@ print-ready PDF that is pixel-identical to the preview.
 
 ### Desktop app
 
-Grab `Blueline-<version>-arm64.dmg` from `app/release/` (unsigned for now — right-click →
-Open on first launch). First run walks you through picking a workspace folder and pasting a
-`GEMINI_API_KEY` (one free key powers design, imagery, review, and research; get one at
-aistudio.google.com). Keys are stored locally in the app's own `.env` and applied live.
+Grab `Blueline-<version>-arm64.dmg` from `app/release/`, open it, and drag **Blueline** to
+Applications. Apple-silicon Macs only.
+
+**First launch (the app is unsigned, so macOS will block it once).** The app isn't code-signed
+or notarized yet, so Gatekeeper stops the first open with *"Blueline can't be opened"* — it is
+**not** actually damaged. Get past it once and it opens normally forever after:
+
+- **macOS 15 Sequoia / 14 Sonoma:** double-click Blueline (it gets blocked), then go to
+  **System Settings → Privacy & Security**, scroll to the bottom, and click **Open Anyway**.
+  Confirm with Touch ID / your password. *(The old right-click → Open trick no longer works on
+  Sequoia.)*
+- **Any macOS, one command:** `xattr -dr com.apple.quarantine /Applications/Blueline.app`, then
+  open normally.
+
+First run then walks you through picking a workspace folder and pasting a `GEMINI_API_KEY` (one
+free key powers design, imagery, review, and research; get one at aistudio.google.com). Keys are
+stored locally in the app's own `.env` and applied live.
+
+> Distributing to teammates? Hand them the `.dmg` plus the note above — no GitHub account or any
+> other setup needed on their side. To skip the Gatekeeper step entirely you'd sign + notarize
+> the build, which requires an Apple Developer account ($99/yr); see **Status** below.
 
 ### Development
 
