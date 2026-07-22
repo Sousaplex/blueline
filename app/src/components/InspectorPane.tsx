@@ -319,8 +319,18 @@ export function InspectorPane({
                 setConfirmDelete(null);
                 onDeleteHandled();
                 act("delete", async () => {
-                  for (const id of ids) await client.deleteElement(id);
+                  // Deleting a parent removes nested selections with it — tolerate
+                  // per-id misses instead of aborting the rest of the set.
+                  let failed = 0;
+                  for (const id of ids) {
+                    try {
+                      await client.deleteElement(id);
+                    } catch {
+                      failed++;
+                    }
+                  }
                   onDeselect();
+                  if (failed === ids.length) throw new Error("Nothing was deleted — the elements may already be gone.");
                 });
               }}
             >

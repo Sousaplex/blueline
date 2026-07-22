@@ -1,7 +1,7 @@
 import { html } from "@codemirror/lang-html";
 import { oneDark } from "@codemirror/theme-one-dark";
 import CodeMirror from "@uiw/react-codemirror";
-import { ChevronLeft, ChevronRight, Code2, Grid3x3, History, Loader2, MousePointerClick, Redo2, RefreshCw, Save, Undo2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Code2, Grid3x3, History, Loader2, Maximize, MousePointerClick, Redo2, RefreshCw, Save, Undo2, ZoomIn, ZoomOut } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,8 @@ import type { AlignOp, SelectionInfo } from "../selection";
 type Mode = "proof" | "live" | "code";
 
 const PX_TO_MM = 25.4 / 96;
+const MM_TO_PX = 96 / 25.4;
+const ZOOM_STEPS = [0.25, 0.33, 0.5, 0.67, 0.8, 1, 1.25, 1.5, 2, 3];
 
 interface NudgeState {
   pcId: string;
@@ -44,6 +46,7 @@ export function PreviewPane({
   onSelect,
   onRequestDelete,
   registerAlign,
+  registerClearSelection,
 }: {
   project: ProjectState;
   client: EngineClient;
@@ -55,6 +58,8 @@ export function PreviewPane({
   onRequestDelete: (pcIds: string[]) => void;
   /** Hands the Inspector a way to trigger alignment on the current selection. */
   registerAlign: (fn: ((op: AlignOp) => void) | null) => void;
+  /** Lets the app drop the canvas selection (e.g. after a delete) so the frozen iframe reloads. */
+  registerClearSelection: (fn: (() => void) | null) => void;
 }) {
   // Deep-linkable initial view (?mode=live|code&grid=1) — also used by automated tests.
   const initialParams = useRef(new URLSearchParams(window.location.search));
@@ -166,6 +171,73 @@ export function PreviewPane({
   };
   const clearSelectionsRef = useRef(clearSelections);
   clearSelectionsRef.current = clearSelections;
+  // The delete flow lives in the Inspector — it needs to drop OUR selection when it
+  // finishes, or the freeze above keeps showing the deleted element forever.
+  useEffect(() => {
+    registerClearSelection(() => clearSelectionsRef.current());
+    return () => registerClearSelection(null);
+  }, [registerClearSelection]);
+
+  // ---- Canvas zoom: fit-to-width by default, explicit steps via palette/keys/wheel. ----
+  const art = project.artboard ?? { w: 210, h: 297 };
+  const [zoom, setZoom] = useState<number | "fit">("fit");
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const [containerW, setContainerW] = useState(0);
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setContainerW(el.clientWidth));
+    ro.observe(el);
+    setContainerW(el.clientWidth);
+    return () => ro.disconnect();
+  }, [mode]);
+  const fitZoom = Math.min(1, Math.max(0.15, (containerW - 64) / (art.w * MM_TO_PX)));
+  const zoomVal = zoom === "fit" ? (containerW ? fitZoom : 1) : zoom;
+  const zoomValRef = useRef(zoomVal);
+  zoomValRef.current = zoomVal;
+  const stepZoom = (dir: 1 | -1) => {
+    const cur = zoomValRef.current;
+    const next =
+      dir === 1
+        ? (ZOOM_STEPS.find((s) => s > cur + 0.01) ?? ZOOM_STEPS[ZOOM_STEPS.length - 1])
+        : ([...ZOOM_STEPS].reverse().find((s) => s < cur - 0.01) ?? ZOOM_STEPS[0]);
+    setZoom(next);
+  };
+  const stepZoomRef = useRef(stepZoom);
+  stepZoomRef.current = stepZoom;
+  const setZoomRef = useRef(setZoom);
+  setZoomRef.current = setZoom;
+
+  /** Shared zoom shortcuts: ⌘/Ctrl +, -, 0 (fit), 1 (100%). Returns true when handled. */
+  const handleZoomKey = (ev: KeyboardEvent): boolean => {
+    if (!(ev.metaKey || ev.ctrlKey)) return false;
+    if (ev.key === "=" || ev.key === "+") stepZoomRef.current(1);
+    else if (ev.key === "-") stepZoomRef.current(-1);
+    else if (ev.key === "0") setZoomRef.current("fit");
+    else if (ev.key === "1") setZoomRef.current(1);
+    else return false;
+    ev.preventDefault();
+    return true;
+  };
+  const handleZoomKeyRef = useRef(handleZoomKey);
+  handleZoomKeyRef.current = handleZoomKey;
+
+  useEffect(() => {
+    if (mode === "code") return;
+    const onKey = (ev: KeyboardEvent) => void handleZoomKeyRef.current(ev);
+    window.addEventListener("keydown", onKey);
+    const canvas = canvasRef.current;
+    const onWheel = (ev: WheelEvent) => {
+      if (!(ev.metaKey || ev.ctrlKey)) return; // plain wheel = pan/scroll
+      ev.preventDefault();
+      stepZoomRef.current(ev.deltaY < 0 ? 1 : -1);
+    };
+    canvas?.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      canvas?.removeEventListener("wheel", onWheel);
+    };
+  }, [mode]);
 
   /** Figma-style alignment: 1 element aligns to the page body, 2+ align within the selection box. */
   const alignSelection = (op: AlignOp) => {
@@ -677,6 +749,7 @@ export function PreviewPane({
     // Keyboard: arrows nudge the whole selection, Escape ends an edit or deselects,
     // Delete asks to remove the selection, ⌘Z/⇧⌘Z undo/redo.
     doc.addEventListener("keydown", (ev) => {
+      if (handleZoomKeyRef.current(ev)) return;
       if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "z") {
         if (doc.querySelector("[contenteditable]")) return; // let the browser handle in-edit undo
         ev.preventDefault();
@@ -787,8 +860,6 @@ export function PreviewPane({
     );
   }
 
-  const art = project.artboard ?? { w: 210, h: 297 };
-
   return (
     <main className="relative flex min-h-0 min-w-0 flex-col">
       <div className="flex h-11 shrink-0 items-center gap-3 border-b px-3">
@@ -848,23 +919,45 @@ export function PreviewPane({
         )}
       </div>
 
-      {mode === "live" && (
+      {mode !== "code" && (
         <div className="absolute left-3 top-1/2 z-10 flex -translate-y-1/2 flex-col items-center gap-0.5 rounded-lg border bg-background/95 p-1 shadow-md backdrop-blur">
-          <Button variant="ghost" size="icon-sm" title="Undo (⌘Z)" aria-label="Undo" disabled={project.history.undo === 0} onClick={doUndo}>
-            <Undo2 />
+          {mode === "live" && (
+            <>
+              <Button variant="ghost" size="icon-sm" title="Undo (⌘Z)" aria-label="Undo" disabled={project.history.undo === 0} onClick={doUndo}>
+                <Undo2 />
+              </Button>
+              <Button variant="ghost" size="icon-sm" title="Redo (⇧⌘Z)" aria-label="Redo" disabled={project.history.redo === 0} onClick={doRedo}>
+                <Redo2 />
+              </Button>
+              <div className="my-0.5 h-px w-5 bg-border" />
+              <Button
+                variant={showGrid ? "secondary" : "ghost"}
+                size="icon-sm"
+                title="5mm grid — drags snap to it (smart-align to neighbors always on)"
+                aria-label="Toggle grid"
+                onClick={() => setShowGrid(!showGrid)}
+              >
+                <Grid3x3 />
+              </Button>
+              <div className="my-0.5 h-px w-5 bg-border" />
+            </>
+          )}
+          <Button variant="ghost" size="icon-sm" title="Zoom in (⌘+)" aria-label="Zoom in" onClick={() => stepZoom(1)}>
+            <ZoomIn />
           </Button>
-          <Button variant="ghost" size="icon-sm" title="Redo (⇧⌘Z)" aria-label="Redo" disabled={project.history.redo === 0} onClick={doRedo}>
-            <Redo2 />
+          <Button variant="ghost" size="icon-sm" title="Zoom out (⌘-)" aria-label="Zoom out" onClick={() => stepZoom(-1)}>
+            <ZoomOut />
           </Button>
-          <div className="my-0.5 h-px w-5 bg-border" />
-          <Button
-            variant={showGrid ? "secondary" : "ghost"}
-            size="icon-sm"
-            title="5mm grid — drags snap to it (smart-align to neighbors always on)"
-            aria-label="Toggle grid"
-            onClick={() => setShowGrid(!showGrid)}
+          <button
+            className="w-full rounded px-0.5 py-0.5 text-center font-mono text-[9px] tabular-nums text-muted-foreground hover:bg-accent"
+            title="Click: 100% (⌘1) · double-click: fit (⌘0)"
+            onClick={() => setZoom(1)}
+            onDoubleClick={() => setZoom("fit")}
           >
-            <Grid3x3 />
+            {Math.round(zoomVal * 100)}%
+          </button>
+          <Button variant={zoom === "fit" ? "secondary" : "ghost"} size="icon-sm" title="Fit to width (⌘0)" aria-label="Fit to width" onClick={() => setZoom("fit")}>
+            <Maximize />
           </Button>
         </div>
       )}
@@ -888,33 +981,36 @@ export function PreviewPane({
           </div>
         )
       ) : (
-        <div className="flex flex-1 items-start justify-center overflow-auto bg-muted/30 p-6">
-          {mode === "proof" ? (
-            viewRound != null && !roundHasProof ? (
-              <p className="text-sm text-muted-foreground">
-                {roundInfo?.verdict === "edit"
-                  ? `Round ${viewRound} is a chat edit — its page state is archived (and branchable), but no proof was rendered.`
-                  : `No archived proof for round ${viewRound} (older run) — its issues are listed on the left.`}
-              </p>
-            ) : pageCount > 0 ? (
-              <img
-                className="h-auto max-w-full rounded-sm bg-white shadow-lg ring-1 ring-black/10"
-                src={client.proofPageUrl(page, cacheKey, proofRound)}
-                alt={`proof page ${page + 1}`}
-              />
+        <div ref={canvasRef} className="flex-1 overflow-auto bg-muted/30">
+          <div className="mx-auto w-fit p-6">
+            {mode === "proof" ? (
+              viewRound != null && !roundHasProof ? (
+                <p className="text-sm text-muted-foreground">
+                  {roundInfo?.verdict === "edit"
+                    ? `Round ${viewRound} is a chat edit — its page state is archived (and branchable), but no proof was rendered.`
+                    : `No archived proof for round ${viewRound} (older run) — its issues are listed on the left.`}
+                </p>
+              ) : pageCount > 0 ? (
+                <img
+                  className="h-auto rounded-sm bg-white shadow-lg ring-1 ring-black/10"
+                  style={{ width: `${art.w}mm`, zoom: zoomVal }}
+                  src={client.proofPageUrl(page, cacheKey, proofRound)}
+                  alt={`proof page ${page + 1}`}
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">No proof yet — re-render or run.</p>
+              )
             ) : (
-              <p className="text-sm text-muted-foreground">No proof yet — re-render or run.</p>
-            )
-          ) : (
-            <iframe
-              ref={iframeRef}
-              title="live preview"
-              className="shrink-0 rounded-sm border-0 bg-white shadow-lg ring-1 ring-black/10"
-              style={{ width: `${art.w}mm`, minHeight: `${art.h}mm` }}
-              src={client.fileUrl("page.html", liveKey)}
-              onLoad={armLiveEditing}
-            />
-          )}
+              <iframe
+                ref={iframeRef}
+                title="live preview"
+                className="shrink-0 rounded-sm border-0 bg-white shadow-lg ring-1 ring-black/10"
+                style={{ width: `${art.w}mm`, minHeight: `${art.h}mm`, zoom: zoomVal }}
+                src={client.fileUrl("page.html", liveKey)}
+                onLoad={armLiveEditing}
+              />
+            )}
+          </div>
         </div>
       )}
 

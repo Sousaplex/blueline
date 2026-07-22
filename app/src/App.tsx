@@ -76,6 +76,7 @@ export function App() {
   const [variantsOpen, setVariantsOpen] = useState(false);
   const [seriesOpen, setSeriesOpen] = useState(false);
   const alignFn = useRef<((op: AlignOp) => void) | null>(null);
+  const clearSelectionFn = useRef<(() => void) | null>(null);
   const refreshTimer = useRef<number | undefined>(undefined);
   const currentSlug = useRef<string | null>(null);
 
@@ -302,6 +303,7 @@ export function App() {
           onSelect={setSelection}
           onRequestDelete={setDeleteRequestIds}
           registerAlign={(fn) => (alignFn.current = fn)}
+          registerClearSelection={(fn) => (clearSelectionFn.current = fn)}
         />
         <div className="flex h-full min-h-0 flex-col overflow-hidden border-l">
           <InspectorPane
@@ -310,7 +312,12 @@ export function App() {
             client={client}
             deleteRequestIds={deleteRequestIds}
             onDeleteHandled={() => setDeleteRequestIds(null)}
-            onDeselect={() => setSelection(null)}
+            onDeselect={() => {
+              // Drop the canvas selection too — it freezes the live iframe, and a
+              // stale freeze after a delete makes the removed element look immortal.
+              clearSelectionFn.current?.();
+              setSelection(null);
+            }}
             onAlign={(op) => alignFn.current?.(op)}
           />
           <div className="min-h-0 flex-1">
