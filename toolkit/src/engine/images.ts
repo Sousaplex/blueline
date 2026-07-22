@@ -12,6 +12,31 @@ export interface GeneratedImageSummary {
   errors: string[];
 }
 
+/** Real generateContent-capable image model ids (verified against ListModels 2026-07-22). */
+export const KNOWN_IMAGE_MODELS = [
+  "gemini-3.1-flash-image",
+  "gemini-3.1-flash-lite-image",
+  "gemini-3-pro-image",
+  "gemini-2.5-flash-image",
+];
+
+// Marketing nicknames people naturally type into Settings — the API only knows
+// the gemini-* ids, so "nano-banana-2" 404s verbatim. Map them to the real thing.
+const MODEL_ALIASES: Record<string, string> = {
+  "nano-banana-2": "gemini-3.1-flash-image",
+  "nano banana 2": "gemini-3.1-flash-image",
+  "nanobanana2": "gemini-3.1-flash-image",
+  "nano-banana-pro": "gemini-3-pro-image",
+  "nano banana pro": "gemini-3-pro-image",
+  "nano-banana": "gemini-2.5-flash-image",
+  "nano banana": "gemini-2.5-flash-image",
+};
+
+/** Translate friendly names to API model ids; real ids pass through untouched. */
+export function resolveImageModel(model: string): string {
+  return MODEL_ALIASES[model.trim().toLowerCase()] ?? model;
+}
+
 /** Next free variant number so re-generation never overwrites existing variants. */
 function nextVariant(dir: string): number {
   if (!existsSync(dir)) return 1;
@@ -36,6 +61,7 @@ export async function generateImages(
 
   const apiKey = requireApiKey(config.images.apiKeyEnv ?? "GEMINI_API_KEY", "image generation");
   const ai = new GoogleGenAI({ apiKey });
+  const model = resolveImageModel(config.images.model);
   const styleNotes = project.brandGuide();
 
   const summaries: GeneratedImageSummary[] = [];
@@ -48,7 +74,7 @@ export async function generateImages(
     for (let i = 0; i < variants; i++) {
       try {
         const response = await ai.models.generateContent({
-          model: config.images.model,
+          model,
           contents: [
             {
               role: "user",
@@ -73,7 +99,11 @@ export async function generateImages(
         writeFileSync(file, Buffer.from(image.inlineData.data, "base64"));
         summary.files.push(file);
       } catch (err) {
-        summary.errors.push(`variant ${i + 1}: ${err instanceof Error ? err.message : String(err)}`);
+        let msg = err instanceof Error ? err.message : String(err);
+        if (/NOT_FOUND|is not found/i.test(msg)) {
+          msg += ` — "${model}" is not a valid model id. Known image models: ${KNOWN_IMAGE_MODELS.join(", ")}.`;
+        }
+        summary.errors.push(`variant ${i + 1}: ${msg}`);
       }
     }
     summaries.push(summary);

@@ -226,6 +226,17 @@ test("element delete/move/source operations", () => {
   assert.equal(pageSource(p), src);
 });
 
+const { resolveImageModel, KNOWN_IMAGE_MODELS } = await import("./images.ts");
+
+test("image model nicknames resolve to real API ids", () => {
+  assert.equal(resolveImageModel("nano-banana-2"), "gemini-3.1-flash-image");
+  assert.equal(resolveImageModel("Nano Banana 2"), "gemini-3.1-flash-image");
+  assert.equal(resolveImageModel("nano-banana"), "gemini-2.5-flash-image");
+  assert.equal(resolveImageModel("gemini-3.1-flash-image"), "gemini-3.1-flash-image"); // real ids untouched
+  assert.equal(resolveImageModel("imagen-4.0-generate-001"), "imagen-4.0-generate-001");
+  assert.ok(KNOWN_IMAGE_MODELS.includes("gemini-3.1-flash-image"));
+});
+
 const { Workspace } = await import("./workspace.ts");
 const { saveTemplate, listTemplates, instantiateTemplate, templateBrief, deleteTemplate } = await import("./templates.ts");
 const { buildSystemPrompt } = await import("./prompt.ts");
