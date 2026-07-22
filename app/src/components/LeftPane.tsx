@@ -33,11 +33,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import type { ContextFile, EngineClient, ProjectState, SourceKind } from "../engine-client";
+import { PAGE_SIZES } from "@/lib/formats";
 import { readBase64, resolveDrop } from "@/lib/upload";
 import { AssetsDialog, type AssetTab } from "./AssetsDialog";
 import { BriefEditorDialog } from "./BriefEditorDialog";
-
-const PAGE_SIZES = ["A4", "A5", "A3", "Letter", "Legal", "Tabloid", "Slide 16:9", "Slide 4:3", "Square", "Custom"];
 
 function KindIcon({ kind }: { kind: SourceKind }) {
   if (kind === "text") return <FileText className="size-3.5 shrink-0 text-muted-foreground" />;

@@ -180,7 +180,7 @@ export interface EngineClient {
   getProject(): Promise<ProjectState>;
   listProjects(): Promise<ProjectListing[]>;
   openProject(projectDir: string): Promise<void>;
-  createProject(name: string, brief?: string, template?: string): Promise<void>;
+  createProject(name: string, brief?: string, template?: string, settings?: Partial<PageSettings>): Promise<void>;
   listTemplates(): Promise<TemplateInfo[]>;
   /** Freeze a project's current design as a workspace template. */
   saveTemplate(slug: string, name: string, description?: string): Promise<void>;
@@ -304,7 +304,9 @@ export class BrowserEngineClient implements EngineClient {
 
   openProject(projectDir: string) { return post("/api/open", { projectDir }); }
 
-  createProject(name: string, brief?: string, template?: string) { return post("/api/project/new", { name, brief, template }); }
+  createProject(name: string, brief?: string, template?: string, settings?: Partial<PageSettings>) {
+    return post("/api/project/new", { name, brief, template, meta: settings ? { settings } : undefined });
+  }
   async listTemplates(): Promise<TemplateInfo[]> {
     const res = await fetch("/api/templates");
     return (await res.json()).templates ?? [];
