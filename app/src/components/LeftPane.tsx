@@ -488,13 +488,15 @@ export function LeftPane({
                 >
                   {r.verdict === "pass" ? (
                     <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400" />
+                  ) : r.verdict === "edit" ? (
+                    <Pencil className="size-4 text-blue-600 dark:text-blue-400" />
                   ) : (
                     <CircleAlert className="size-4 text-amber-600 dark:text-amber-400" />
                   )}
                   Round {r.round}
                   <span className="flex-1" />
                   <Badge variant={r.verdict === "pass" ? "secondary" : "outline"} className="text-[10px]">
-                    {r.verdict === "pass" ? "pass" : `${r.issues.length} issue${r.issues.length === 1 ? "" : "s"}`}
+                    {r.verdict === "pass" ? "pass" : r.verdict === "edit" ? "edit" : `${r.issues.length} issue${r.issues.length === 1 ? "" : "s"}`}
                   </Badge>
                 </button>
                 {r.hasHtml && (
@@ -521,8 +523,11 @@ export function LeftPane({
           {shown && (
             <div className="mt-3 rounded-md border bg-muted/40 p-2.5 text-xs leading-relaxed">
               <p className="mb-1 font-medium">
-                Round {shown.round} — {shown.verdict}
+                Round {shown.round} — {shown.verdict === "edit" ? "chat edit" : shown.verdict}
               </p>
+              {shown.verdict === "edit" && shown.notes && (
+                <p className="mb-1.5 text-muted-foreground">Prompt: “{shown.notes}”</p>
+              )}
               <ul className="space-y-1.5">
                 {shown.issues.map((issue, i) => (
                   <li key={i}>

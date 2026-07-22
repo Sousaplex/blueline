@@ -11,7 +11,7 @@ export interface ReviewIssue {
 
 export interface RoundInfo {
   round: number;
-  verdict: "pass" | "revise";
+  verdict: "pass" | "revise" | "edit";
   issues: ReviewIssue[];
   notes?: string;
   hasProof: boolean;
@@ -159,7 +159,7 @@ export interface ProjectListing {
   hasBrief: boolean;
   current: boolean;
   rounds: number;
-  lastVerdict: "pass" | "revise" | null;
+  lastVerdict: "pass" | "revise" | "edit" | null;
   hasProof: boolean;
   runState: RunState;
   meta: ProjectMeta;
@@ -210,8 +210,8 @@ export interface EngineClient {
   moveElementBefore(pcId: string, beforePcId: string, after?: boolean): Promise<void>;
   getPageSource(): Promise<string>;
   savePageSource(content: string): Promise<void>;
-  undoPage(): Promise<void>;
-  redoPage(): Promise<void>;
+  undoPage(): Promise<{ changed: string[] }>;
+  redoPage(): Promise<{ changed: string[] }>;
   /** System-tab replay: recent API/MCP-triggered actions. */
   getSystemEvents(): Promise<SystemEvent[]>;
   gitStatus(): Promise<GitStatus>;
@@ -429,8 +429,18 @@ export class BrowserEngineClient implements EngineClient {
     return res.text();
   }
   savePageSource(content: string) { return post("/api/page/source", { content }); }
-  undoPage() { return post("/api/page/undo"); }
-  redoPage() { return post("/api/page/redo"); }
+  async undoPage(): Promise<{ changed: string[] }> {
+    const res = await fetch("/api/page/undo", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    const payload = await res.json();
+    if (!res.ok) throw new Error(payload.error ?? "undo failed");
+    return { changed: payload.changed ?? [] };
+  }
+  async redoPage(): Promise<{ changed: string[] }> {
+    const res = await fetch("/api/page/redo", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    const payload = await res.json();
+    if (!res.ok) throw new Error(payload.error ?? "redo failed");
+    return { changed: payload.changed ?? [] };
+  }
 
   async getSystemEvents(): Promise<SystemEvent[]> {
     const res = await fetch("/api/system");

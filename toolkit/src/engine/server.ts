@@ -3,6 +3,7 @@
 // event buffer, up to MAX_CONCURRENT_RUNS execute in parallel, extras queue FIFO.
 //
 // Usage: npm run serve -- [projects/<slug>] [--port 7717]
+import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, extname, join, normalize, resolve } from "node:path";
@@ -67,6 +68,9 @@ export type RunState = "idle" | "queued" | "running";
 class Bridge {
   private sessions = new Map<string, BluelineSession>(); // slug -> session
   private runStates = new Map<string, RunState>(); // slug -> queued|running
+  // Chat requests in flight: when the agent finishes one and page.html changed,
+  // the result is archived as an "edit" round — every AI edit is design history.
+  private pendingEdits = new Map<string, { prompt: string; hash: string; rounds: number }>();
   private runQueue: string[] = [];
   private buffers = new Map<string, WireEvent[]>(); // slug -> recent events
   private systemFeed: WireEvent[] = []; // API/MCP actions, for the System tab
@@ -191,6 +195,7 @@ class Bridge {
         case "agent_end":
           this.runStates.delete(slug);
           this.broadcast({ type: "run_state", project: slug, state: "idle" });
+          this.captureEditRound(slug);
           this.pumpQueue();
           break;
       }
@@ -251,12 +256,39 @@ class Bridge {
     return "running";
   }
 
+  private pageHash(project: Project): string {
+    return existsSync(project.pageHtml) ? createHash("sha1").update(readFileSync(project.pageHtml)).digest("hex") : "";
+  }
+
+  /** Archive a finished chat edit as an "edit" round (page state + the prompt that caused it).
+   *  Skipped when a review round already captured the state (full runs) or nothing changed. */
+  private captureEditRound(slug: string): void {
+    const marker = this.pendingEdits.get(slug);
+    if (!marker) return;
+    this.pendingEdits.delete(slug);
+    try {
+      const project = this.project?.slug === slug ? this.project : new Project(slug, this.workspace);
+      if (project.completedRounds() > marker.rounds) return; // a review round already archived this work
+      const hash = this.pageHash(project);
+      if (!hash || hash === marker.hash) return; // the chat didn't touch the page
+      const round = project.completedRounds() + 1;
+      project.writeReview(round, { verdict: "edit", issues: [], notes: marker.prompt.slice(0, 300) });
+      cpSync(project.pageHtml, project.roundHtml(round));
+      this.logSystem("app", "edit_round", `${slug}: round ${round}`);
+      this.broadcast({ type: "files_changed", project: slug });
+    } catch {
+      // archiving is best-effort — never let it break the run lifecycle
+    }
+  }
+
   /** Steering chat goes to the currently open project's session. */
   async chat(text: string): Promise<void> {
-    const slug = this.requireProject().slug;
+    const project = this.requireProject();
+    const slug = project.slug;
     // Echo the user's message into the project feed (buffered, so it replays too) —
     // a prompt that vanishes into the void reads as a broken app.
     this.broadcast({ type: "chat", project: slug, text });
+    this.pendingEdits.set(slug, { prompt: text, hash: this.pageHash(project), rounds: project.completedRounds() });
     const pc = await this.ensureSession(slug);
     const opts = pc.session.isStreaming ? { streamingBehavior: "steer" as const } : undefined;
     void pc.session.prompt(text, opts).catch((err) => {

@@ -3,6 +3,7 @@ import { oneDark } from "@codemirror/theme-one-dark";
 import CodeMirror from "@uiw/react-codemirror";
 import { ChevronLeft, ChevronRight, Code2, Grid3x3, History, Loader2, MousePointerClick, Redo2, RefreshCw, Save, Undo2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { currentTheme } from "@/lib/theme";
@@ -236,13 +237,24 @@ export function PreviewPane({
     return () => registerAlign(null);
   }, [registerAlign]);
 
+  // After an undo/redo the iframe reloads — then we scroll to and flash what changed.
+  const pendingFlashRef = useRef<string[] | null>(null);
+  const announceHistory = (label: "Undo" | "Redo", changed: string[]) => {
+    setDirty(true);
+    pendingFlashRef.current = changed.length ? changed : null;
+    toast(label, {
+      description: changed.length
+        ? `Changed ${changed.length === 1 ? "" : `${changed.length} elements: `}${changed.slice(0, 4).join(", ")}${changed.length > 4 ? "…" : ""}`
+        : "Page state restored",
+    });
+  };
   const doUndo = () => {
     clearSelectionsRef.current();
-    void client.undoPage().then(() => setDirty(true)).catch(() => {});
+    void client.undoPage().then(({ changed }) => announceHistory("Undo", changed)).catch(() => {});
   };
   const doRedo = () => {
     clearSelectionsRef.current();
-    void client.redoPage().then(() => setDirty(true)).catch(() => {});
+    void client.redoPage().then(({ changed }) => announceHistory("Redo", changed)).catch(() => {});
   };
   const doUndoRef = useRef(doUndo);
   doUndoRef.current = doUndo;
@@ -328,8 +340,23 @@ export function PreviewPane({
       .pc-dragging { opacity: .6; }
       img[data-image-id]:hover { outline: 2px dashed rgba(52,199,89,.8); outline-offset: 2px; cursor: pointer; }
       img[data-image-id].pc-active { outline: 2px solid rgba(52,199,89,1); outline-offset: 2px; cursor: grab; }
+      .pc-flash { outline: 3px solid rgba(59,130,246,.95) !important; outline-offset: 3px; }
     `;
     doc.head.appendChild(style);
+
+    // Undo/redo landed a moment ago: show the user WHERE the change happened.
+    const flashIds = pendingFlashRef.current;
+    if (flashIds) {
+      pendingFlashRef.current = null;
+      const targets = flashIds
+        .map((id) => doc.querySelector<HTMLElement>(`[data-pc-id="${id}"]`))
+        .filter((el): el is HTMLElement => Boolean(el));
+      if (targets.length) {
+        targets[0].scrollIntoView({ behavior: "smooth", block: "center" });
+        targets.forEach((el) => el.classList.add("pc-flash"));
+        setTimeout(() => targets.forEach((el) => el.classList.remove("pc-flash")), 1800);
+      }
+    }
 
     // An element holding other blocks must never become contenteditable: blurring it
     // would replace ALL of its children with flat text. Rule: ANY non-inline child.
@@ -865,7 +892,9 @@ export function PreviewPane({
           {mode === "proof" ? (
             viewRound != null && !roundHasProof ? (
               <p className="text-sm text-muted-foreground">
-                No archived proof for round {viewRound} (older run) — its issues are listed on the left.
+                {roundInfo?.verdict === "edit"
+                  ? `Round ${viewRound} is a chat edit — its page state is archived (and branchable), but no proof was rendered.`
+                  : `No archived proof for round ${viewRound} (older run) — its issues are listed on the left.`}
               </p>
             ) : pageCount > 0 ? (
               <img

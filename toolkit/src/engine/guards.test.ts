@@ -88,6 +88,17 @@ test("custom dimensions clamp through meta()", () => {
   assert.equal(s.heightMm, 50);
 });
 
+const { diffPages } = await import("./undo.ts");
+
+test("diffPages names the innermost changed elements only", () => {
+  const before = `<html><body><div data-pc-id="wrap"><h1 data-pc-id="title">Old</h1><p data-pc-id="sub">Same</p></div></body></html>`;
+  const afterText = before.replace(">Old<", ">New<");
+  assert.deepEqual(diffPages(before, afterText), ["title"]); // wrap changed too, but title is the leaf
+  const afterRemoved = `<html><body><div data-pc-id="wrap"><p data-pc-id="sub">Same</p></div></body></html>`;
+  assert.deepEqual(diffPages(before, afterRemoved), ["title"]); // removed element is the change
+  assert.deepEqual(diffPages(before, before), []);
+});
+
 test("undo/redo restores page.html snapshots; a fresh edit clears redo", () => {
   const p = tempProject();
   writeFileSync(p.pageHtml, "<html><body>v1</body></html>");

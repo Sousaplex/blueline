@@ -36,7 +36,7 @@ function text(value: unknown) {
   return { content: [{ type: "text" as const, text: typeof value === "string" ? value : JSON.stringify(value, null, 2) }] };
 }
 
-const server = new McpServer({ name: "blueline", version: "0.1.0" });
+const server = new McpServer({ name: "blueline", version: "0.9.0" });
 
 server.tool(
   "workspace_status",
@@ -47,12 +47,61 @@ server.tool(
 
 server.tool(
   "create_project",
-  "Create a new project in the workspace with a brief (markdown). The brief drives the whole design: format (one-pager/poster/multipage + paper size), audience, goal, key messages, must-include elements, tone.",
-  { name: z.string().describe("project name, will be slugified"), brief: z.string().describe("full brief.md content") },
-  async ({ name, brief }) => {
-    await api("/api/project/new", { name, brief });
-    return text(`Project created and opened. Run it with run_project.`);
+  "Create a new project in the workspace with a brief (markdown). The brief drives the whole design: format (one-pager/poster/multipage + paper size), audience, goal, key messages, must-include elements, tone. Pass template to start from a workspace template — the layout is then locked and the agent only fills in this project's data.",
+  {
+    name: z.string().describe("project name, will be slugified"),
+    brief: z.string().describe("full brief.md content"),
+    template: z.string().optional().describe("template slug from list_templates; locks structure to the template"),
   },
+  async ({ name, brief, template }) => {
+    await api("/api/project/new", { name, brief, template });
+    return text(`Project created and opened${template ? ` from template "${template}"` : ""}. Run it with run_project.`);
+  },
+);
+
+server.tool(
+  "chat",
+  "Send a steering message to the CURRENTLY OPEN project's design agent (same as typing in the app's chat). Use for targeted changes ('make the headline punchier', 'swap the hero image mood'). If the page changes, the result is archived as an 'edit' round. Returns immediately — poll run_status.",
+  { text: z.string().describe("the instruction for the design agent") },
+  async ({ text: message }) => {
+    await api("/api/chat", { text: message });
+    return text("Sent. The agent is working — poll run_status; the result (if the page changed) becomes an 'edit' round.");
+  },
+);
+
+server.tool(
+  "list_templates",
+  "List workspace templates (reusable document skeletons: invoices, proposals…). Use a slug with create_project's template parameter.",
+  {},
+  async () => text(await api("/api/templates")),
+);
+
+server.tool(
+  "save_template",
+  "Freeze a project's current design as a workspace template. New projects created from it keep the structure exactly; the agent only fills in data.",
+  {
+    slug: z.string().describe("project with a finished page.html"),
+    name: z.string().describe("template name, e.g. 'Invoice'"),
+    description: z.string().optional(),
+  },
+  async ({ slug, name, description }) => {
+    const { template } = await api("/api/templates", { slug, name, description });
+    return text(`Saved template "${template.slug}" (${template.settings.pageSize}, ${template.settings.pages} pg).`);
+  },
+);
+
+server.tool(
+  "page_undo",
+  "Undo the last human/agent page edit on the currently open project (snapshot history, same as ⌘Z in the app). Returns the pc-ids that changed.",
+  {},
+  async () => text(await api("/api/page/undo", {})),
+);
+
+server.tool(
+  "page_redo",
+  "Redo the last undone page edit on the currently open project.",
+  {},
+  async () => text(await api("/api/page/redo", {})),
 );
 
 server.tool(

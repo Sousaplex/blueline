@@ -14,8 +14,10 @@ import { PreviewPane } from "./components/PreviewPane";
 import { SeriesDialog } from "./components/SeriesDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { VariantsDialog } from "./components/VariantsDialog";
+import { Toaster } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { currentTheme } from "@/lib/theme";
 import {
   BrowserEngineClient,
   type EngineEvent,
@@ -214,6 +216,7 @@ export function App() {
 
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
+      <Toaster position="bottom-center" theme={currentTheme()} toastOptions={{ style: { fontSize: "13px" } }} />
       <header className="relative flex h-12 shrink-0 items-center gap-3 border-b px-4">
         <img src={logo} alt="" className="size-6" />
         <span className="text-sm font-semibold tracking-tight">Blueline</span>
