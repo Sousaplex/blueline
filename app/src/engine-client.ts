@@ -140,6 +140,7 @@ export interface SetupState {
 export type EngineEvent =
   | { type: "hello"; project: string | null; runStates: Record<string, RunState>; replay: EngineEvent[] }
   | { type: "text_delta"; project?: string; delta: string }
+  | { type: "chat"; project?: string; text: string }
   | { type: "tool_start"; project?: string; tool: string; args: Record<string, unknown> }
   | { type: "tool_end"; project?: string; tool: string; summary: string }
   | { type: "run_state"; project: string; state: RunState }

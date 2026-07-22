@@ -1,4 +1,4 @@
-import { GitBranch, Sparkles } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -8,7 +8,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import type { EngineClient } from "../engine-client";
@@ -18,8 +17,17 @@ interface Row {
   direction: string;
 }
 
-export function VariantsDialog({ client, slug }: { client: EngineClient; slug: string }) {
-  const [open, setOpen] = useState(false);
+export function VariantsDialog({
+  client,
+  slug,
+  open,
+  onOpenChange,
+}: {
+  client: EngineClient;
+  slug: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
   const [rows, setRows] = useState<Row[]>([
     { label: "", direction: "" },
     { label: "", direction: "" },
@@ -48,8 +56,7 @@ export function VariantsDialog({ client, slug }: { client: EngineClient; slug: s
     setError(null);
     try {
       await client.createVariants(slug, valid);
-      setOpen(false);
-      await client.closeProject(); // land on home to watch the variant cards run
+      onOpenChange(false); // variants appear as sibling tabs and run in the background
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -58,12 +65,7 @@ export function VariantsDialog({ client, slug }: { client: EngineClient; slug: s
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm" variant="outline">
-          <GitBranch data-slot="icon" /> Variants
-        </Button>
-      </DialogTrigger>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Design variants for “{slug}”</DialogTitle>
@@ -97,7 +99,7 @@ export function VariantsDialog({ client, slug }: { client: EngineClient; slug: s
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button onClick={() => void create()} disabled={busy !== null || valid.length === 0}>
             {busy === "create" ? "Creating…" : `Create & run ${valid.length || ""} variant${valid.length === 1 ? "" : "s"}`}
           </Button>

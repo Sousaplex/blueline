@@ -252,6 +252,9 @@ class Bridge {
   /** Steering chat goes to the currently open project's session. */
   async chat(text: string): Promise<void> {
     const slug = this.requireProject().slug;
+    // Echo the user's message into the project feed (buffered, so it replays too) —
+    // a prompt that vanishes into the void reads as a broken app.
+    this.broadcast({ type: "chat", project: slug, text });
     const pc = await this.ensureSession(slug);
     const opts = pc.session.isStreaming ? { streamingBehavior: "steer" as const } : undefined;
     void pc.session.prompt(text, opts).catch((err) => {

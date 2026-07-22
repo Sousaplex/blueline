@@ -12,7 +12,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,14 +22,15 @@ export function SeriesDialog({
   client,
   slug,
   defaultRootName,
-  hasPage,
+  open,
+  onOpenChange,
 }: {
   client: EngineClient;
   slug: string;
   defaultRootName: string;
-  hasPage: boolean;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
   const [rootName, setRootName] = useState(defaultRootName);
   const [topicsText, setTopicsText] = useState("");
   const [autoRun, setAutoRun] = useState(true);
@@ -61,7 +61,7 @@ export function SeriesDialog({
     <Dialog
       open={open}
       onOpenChange={(o) => {
-        setOpen(o);
+        onOpenChange(o);
         if (o) {
           setRootName(defaultRootName);
           setDone(null);
@@ -69,11 +69,6 @@ export function SeriesDialog({
         }
       }}
     >
-      <DialogTrigger asChild>
-        <Button size="sm" variant="outline" disabled={!hasPage} title={hasPage ? undefined : "Needs a finished page.html to use as the template"}>
-          <Layers data-slot="icon" /> Series
-        </Button>
-      </DialogTrigger>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Make more like this</DialogTitle>
@@ -105,7 +100,7 @@ export function SeriesDialog({
           {done && <p className="text-sm text-emerald-600 dark:text-emerald-400">{done}</p>}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
             {done ? "Close" : "Cancel"}
           </Button>
           <Button onClick={() => void create()} disabled={busy || !rootName.trim() || topics.length === 0}>

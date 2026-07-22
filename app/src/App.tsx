@@ -2,6 +2,7 @@ import { Download, Play, RefreshCw, Timer } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import logo from "./assets/logo.png";
 import { AgentPane, type FeedItem } from "./components/AgentPane";
+import { DocumentTabs } from "./components/DocumentTabs";
 import { HomeScreen } from "./components/HomeScreen";
 import { InspectorPane } from "./components/InspectorPane";
 import { LeftPane } from "./components/LeftPane";
@@ -29,6 +30,8 @@ import type { AlignOp, SelectionInfo } from "./selection";
 /** Fold one wire event into the feed (used for both live events and replay). */
 function applyEvent(feed: FeedItem[], event: EngineEvent): FeedItem[] {
   switch (event.type) {
+    case "chat":
+      return [...feed, { kind: "user", text: event.text, at: Date.now() }];
     case "text_delta": {
       const last = feed.at(-1);
       if (last?.kind === "text") return [...feed.slice(0, -1), { ...last, text: last.text + event.delta }];
@@ -68,6 +71,8 @@ export function App() {
   const [systemFeed, setSystemFeed] = useState<SystemEvent[]>([]);
   const [selection, setSelection] = useState<SelectionInfo | null>(null);
   const [deleteRequestIds, setDeleteRequestIds] = useState<string[] | null>(null);
+  const [variantsOpen, setVariantsOpen] = useState(false);
+  const [seriesOpen, setSeriesOpen] = useState(false);
   const alignFn = useRef<((op: AlignOp) => void) | null>(null);
   const refreshTimer = useRef<number | undefined>(undefined);
   const currentSlug = useRef<string | null>(null);
@@ -110,6 +115,7 @@ export function App() {
           void refresh();
           void client.listProjects().then(setProjects);
           break;
+        case "chat":
         case "text_delta":
         case "tool_start":
         case "tool_end":
@@ -162,7 +168,10 @@ export function App() {
     () => ({
       run: (slug?: string) =>
         client.run(slug).catch((e) => setFeed((f) => [...f, { kind: "error" as const, message: String(e), at: Date.now() }])),
-      chat: (text: string) => client.chat(text),
+      chat: (text: string) => {
+        setViewRound(null); // steering acts on the LATEST state — a historical proof would hide the result
+        return client.chat(text);
+      },
       render: () => client.render(),
       updateCopy: (pcId: string, text: string) => client.updateCopy(pcId, text),
       selectVariant: (id: string, v: number) => client.selectVariant(id, v),
@@ -241,13 +250,6 @@ export function App() {
         <Button size="sm" disabled={currentRunState !== "idle"} onClick={() => void actions.run()}>
           <Play data-slot="icon" /> Run
         </Button>
-        <VariantsDialog client={client} slug={project.slug} />
-        <SeriesDialog
-          client={client}
-          slug={project.slug}
-          defaultRootName={project.meta?.series ?? project.meta?.displayName ?? project.slug}
-          hasPage={project.hasPage}
-        />
         <Button size="sm" variant="outline" disabled={!project.hasPage} onClick={() => void actions.render()}>
           <RefreshCw data-slot="icon" /> Re-render
         </Button>
@@ -267,6 +269,24 @@ export function App() {
         <SettingsDialog client={client} />
         <NewProjectDialog client={client} open={newProjectOpen} onOpenChange={setNewProjectOpen} />
       </header>
+      <DocumentTabs
+        projects={projects}
+        currentSlug={project.slug}
+        hasPage={project.hasPage}
+        onOpen={(dir) => void client.openProject(dir).catch((e) => setFeed((f) => [...f, { kind: "error", message: String(e), at: Date.now() }]))}
+        onNewVariants={() => setVariantsOpen(true)}
+        onNewSeries={() => setSeriesOpen(true)}
+        onBranch={() => void client.forkProject(project.slug!).catch((e) => setFeed((f) => [...f, { kind: "error", message: String(e), at: Date.now() }]))}
+        onNewProject={() => setNewProjectOpen(true)}
+      />
+      <VariantsDialog client={client} slug={project.slug} open={variantsOpen} onOpenChange={setVariantsOpen} />
+      <SeriesDialog
+        client={client}
+        slug={project.slug}
+        defaultRootName={project.meta?.series ?? project.meta?.displayName ?? project.slug}
+        open={seriesOpen}
+        onOpenChange={setSeriesOpen}
+      />
       <div className="grid min-h-0 flex-1 grid-cols-[300px_minmax(0,1fr)_340px] grid-rows-1 overflow-hidden">
         <LeftPane project={project} client={client} cacheKey={cacheKey} viewRound={viewRound} onViewRound={setViewRound} />
         <PreviewPane

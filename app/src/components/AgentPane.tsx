@@ -20,6 +20,7 @@ import type { SystemEvent } from "../engine-client";
 
 export type FeedItem =
   | { kind: "text"; text: string; at: number }
+  | { kind: "user"; text: string; at: number }
   | { kind: "tool"; tool: string; args: Record<string, unknown>; summary?: string; done: boolean; at: number }
   | { kind: "error"; message: string; at: number };
 
@@ -139,6 +140,8 @@ export function AgentPane({
 
   // What is the agent doing right now? (last tool still executing)
   const activeTool = running ? [...feed].reverse().find((i) => i.kind === "tool" && !i.done) : undefined;
+  // A just-sent message with no agent output yet gets an explicit "delivered" state.
+  const awaitingReply = feed.at(-1)?.kind === "user";
 
   const send = () => {
     const text = draft.trim();
@@ -219,6 +222,14 @@ export function AgentPane({
       >
         {feed.map((item, i) => {
           switch (item.kind) {
+            case "user":
+              return (
+                <div key={i} className="flex justify-end">
+                  <p className="max-w-[85%] whitespace-pre-wrap rounded-lg bg-primary/10 px-2.5 py-1.5 text-[13px] leading-relaxed">
+                    {item.text}
+                  </p>
+                </div>
+              );
             case "text":
               return (
                 <p key={i} className="whitespace-pre-wrap px-1 py-0.5 leading-relaxed">
@@ -235,6 +246,11 @@ export function AgentPane({
               );
           }
         })}
+        {awaitingReply && (
+          <p className="flex items-center gap-1.5 px-1 text-xs text-muted-foreground">
+            <Loader2 className="size-3 animate-spin" /> sent — waking the agent…
+          </p>
+        )}
         {!feed.length && (
           <p className="text-sm text-muted-foreground">
             No activity yet. <strong>Run</strong> starts the design loop; type below to steer.
