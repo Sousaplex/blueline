@@ -2,6 +2,7 @@ import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { GoogleGenAI, Type as GType } from "@google/genai";
 import type { ReviewResult } from "../providers/types.ts";
+import { formatStyleSpec, loadStyleSpec } from "./style-spec.ts";
 import type { BluelineConfig } from "./config.ts";
 import { requireApiKey } from "./config.ts";
 import type { Project } from "./project.ts";
@@ -75,6 +76,7 @@ export async function runReview(
   const pages = await rasterizePdf(project.proofPdf);
   const whitespace = pages.map((p, i) => analyzePage(p, i + 1));
   const settings = project.meta().settings;
+  const styleSpec = loadStyleSpec(project.dir);
   const apiKey = requireApiKey(config.reviewer.apiKeyEnv ?? "GEMINI_API_KEY", "reviewer");
   const ai = new GoogleGenAI({ apiKey });
 
@@ -108,6 +110,14 @@ export async function runReview(
     `Required format: ${settings.pageSize} ${settings.orientation}, EXACTLY ${settings.pages} page(s).`,
     `The rendered proof has ${pages.length} page(s) — a wrong page count is an automatic revise.`,
     `This is review round ${thisRun + 1} of at most ${config.reviewer.maxRounds} for this run (round ${completed + 1} in the project's history).`,
+    ...(styleSpec
+      ? [
+          "",
+          "# Design-system spec (measured from the approved template — siblings must match)",
+          formatStyleSpec(styleSpec),
+          "Flag ANY text style or inter-block spacing that visibly deviates from these numbers as an issue.",
+        ]
+      : []),
     "",
     `# Brief\n${project.brief()}`,
     "",

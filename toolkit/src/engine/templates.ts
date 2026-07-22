@@ -74,6 +74,7 @@ export function saveTemplate(project: Project, name: string, description = ""): 
   cpSync(project.pageHtml, join(dir, "page.html"));
   if (existsSync(join(project.dir, "brief.md"))) cpSync(join(project.dir, "brief.md"), join(dir, "brief.md"));
   if (existsSync(project.imagesDir)) cpSync(project.imagesDir, join(dir, "images"), { recursive: true });
+  if (existsSync(join(project.dir, "style-spec.json"))) cpSync(join(project.dir, "style-spec.json"), join(dir, "style-spec.json"));
   const info: TemplateInfo = {
     slug,
     name: name.trim(),
@@ -99,6 +100,7 @@ export function instantiateTemplate(ws: Workspace, slug: string, projectDir: str
   if (!existsSync(join(dir, "page.html"))) throw new Error(`No such template: ${slug}`);
   cpSync(join(dir, "page.html"), join(projectDir, "page.html"));
   if (existsSync(join(dir, "images"))) cpSync(join(dir, "images"), join(projectDir, "images"), { recursive: true });
+  if (existsSync(join(dir, "style-spec.json"))) cpSync(join(dir, "style-spec.json"), join(projectDir, "style-spec.json"));
   return readInfo(dir, slug);
 }
 

@@ -33,6 +33,7 @@ import { clearHistory, historyDepth, redoPage, snapshotPage, undoPage } from "./
 import { PlaywrightBackend } from "./render.ts";
 import { markRunStart } from "./review.ts";
 import { resetSearchBudget } from "./search.ts";
+import { extractStyleSpec, saveStyleSpec } from "./style-spec.ts";
 import { createBluelineSession, type BluelineSession } from "./session.ts";
 import { deleteTemplate, instantiateTemplate, listTemplates, saveTemplate, templateBrief } from "./templates.ts";
 import { suggestDirections, variantBrief, type Direction } from "./variants.ts";
@@ -489,6 +490,14 @@ class Bridge {
     if (!cleanTopics.length) throw new Error("Series needs at least one subject");
     const templateMeta = template.meta();
     template.updateMeta({ series }); // the template groups with its children
+    // Measure the master's design system once — every child gets the exact numbers.
+    let seriesSpec = null as import("./style-spec.ts").StyleSpec | null;
+    try {
+      seriesSpec = await extractStyleSpec(template, this.backend);
+      saveStyleSpec(template.dir, seriesSpec);
+    } catch {
+      // best-effort: children still get the layout copy + prompt guidance
+    }
 
     const created: { slug: string; state: RunState }[] = [];
     for (const topic of cleanTopics) {
@@ -503,6 +512,7 @@ imagery to this subject.
 `;
       const { dir, slug } = this.createUniqueProject(`${series}-${topic}`, brief);
       this.copyDesignState(template, dir);
+      if (seriesSpec) saveStyleSpec(dir, seriesSpec);
       new Project(dir, this.workspace).updateMeta({
         displayName: topic,
         series,
@@ -758,7 +768,14 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
         if (req.method === "POST") {
           const body = await readBody(req);
           if (!body.slug || !body.name) return json(res, 400, { error: "slug and name required" });
-          const info = saveTemplate(new Project(String(body.slug), bridge.workspace), String(body.name), body.description ? String(body.description) : "");
+          const sourceProject = new Project(String(body.slug), bridge.workspace);
+          // Measure the design system first so the template carries it (best-effort).
+          try {
+            saveStyleSpec(sourceProject.dir, await extractStyleSpec(sourceProject, bridge.backend));
+          } catch {
+            // no rendered page or browser hiccup — the template still works without a spec
+          }
+          const info = saveTemplate(sourceProject, String(body.name), body.description ? String(body.description) : "");
           sys("save_template", `${body.slug} -> ${info.slug}`);
           return json(res, 200, { ok: true, template: info });
         }

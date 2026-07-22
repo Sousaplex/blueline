@@ -1,5 +1,6 @@
 import type { BluelineConfig } from "./config.ts";
 import { PAGE_DIMS, pageDims, type Project } from "./project.ts";
+import { formatStyleSpec, loadStyleSpec } from "./style-spec.ts";
 
 /** System prompt for the Blueline designer agent — the engine-authoritative
  *  version of the loop contract that CLAUDE.md described in the sidecar era. */
@@ -23,6 +24,15 @@ every page boundary is a deliberate design decision.`
 This is a SLIDE DECK, not a flowing document: each page is one self-contained slide composed
 like a stage — big type, one idea per slide, generous margins, consistent header/footer
 placement across slides. Design for a screen at distance, not for reading up close.`
+    : "";
+  const styleSpec = loadStyleSpec(project.dir);
+  const styleSpecSection = styleSpec
+    ? `
+# Typography & spacing spec (measured from the approved design — MUST match)
+${formatStyleSpec(styleSpec)}
+These numbers were measured from the template/series master. Sibling documents must be
+indistinguishable in type and rhythm; the reviewer flags deviations as defects.
+`
     : "";
   const brandAssets = project.brandAssets();
   const brandAssetList = brandAssets.length
@@ -55,7 +65,7 @@ The format lives in the project settings. When the HUMAN explicitly asks to chan
 ("add a third page", "make this a slide deck", "switch to A5"), call set_format with the
 new values FIRST — it updates the contract and the reviewer's gate — then restructure
 page.html to match. Never change the format on your own judgment.${deckNote}${paginationNote}
-${templateContract}
+${templateContract}${styleSpecSection}
 
 # Project directory (your working area): ${project.dir}
 - brief.md          — the ask: audience, message, key content. Read first.
