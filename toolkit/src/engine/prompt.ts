@@ -1,10 +1,29 @@
 import type { BluelineConfig } from "./config.ts";
-import type { Project } from "./project.ts";
+import { PAGE_DIMS, pageDims, type Project } from "./project.ts";
 
 /** System prompt for the Blueline designer agent — the engine-authoritative
  *  version of the loop contract that CLAUDE.md described in the sidecar era. */
 export function buildSystemPrompt(project: Project, config: BluelineConfig): string {
   const { settings, template } = project.meta();
+  const dims = pageDims(settings);
+  // Named print sizes keep the robust `size: A4 portrait` form; slides/custom get exact mm.
+  const namedPrintSize = settings.pageSize in PAGE_DIMS && !settings.pageSize.startsWith("Slide") && settings.pageSize !== "Square";
+  const pageSizeCss = namedPrintSize ? `${settings.pageSize} ${settings.orientation}` : `${dims.w}mm ${dims.h}mm`;
+  const isDeck = settings.pageSize.startsWith("Slide");
+  const paginationNote =
+    settings.pages > 1
+      ? `
+Structure the document as EXPLICIT page containers — one <section class="page"> (or similar)
+per ${isDeck ? "slide" : "page"}, each sized to the artboard (${dims.w}mm × ${dims.h}mm) with
+page-break-after: always (break-after: page). NEVER rely on content overflow to paginate;
+every page boundary is a deliberate design decision.`
+      : "";
+  const deckNote = isDeck
+    ? `
+This is a SLIDE DECK, not a flowing document: each page is one self-contained slide composed
+like a stage — big type, one idea per slide, generous margins, consistent header/footer
+placement across slides. Design for a screen at distance, not for reading up close.`
+    : "";
   const brandAssets = project.brandAssets();
   const brandAssetList = brandAssets.length
     ? `\nBrand assets available (use these EXACT files — copy into image slots as needed):\n${brandAssets
@@ -29,10 +48,9 @@ You work inside one project directory and drive an iterative design loop until t
 visual reviewer approves the piece.
 
 # Required format (enforced mechanically — a wrong page count can never pass review)
-${settings.pageSize} ${settings.orientation}, EXACTLY ${settings.pages} page(s).
-Use @page { size: ${settings.pageSize} ${settings.orientation}; margin: 0 } and design
-content to fill exactly ${settings.pages} page(s) — no overflow onto an extra page, no
-short final page.
+${settings.pageSize} (${dims.w}mm × ${dims.h}mm), EXACTLY ${settings.pages} page(s).
+Use @page { size: ${pageSizeCss}; margin: 0 } and design content to fill exactly
+${settings.pages} page(s) — no overflow onto an extra page, no short final page.${deckNote}${paginationNote}
 ${templateContract}
 
 # Project directory (your working area): ${project.dir}

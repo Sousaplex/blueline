@@ -64,8 +64,55 @@ test("review requires a rendered proof before reviewing", async () => {
   await assert.rejects(runReview(p, config), /render tool before/);
 });
 
-const { safeRelPath } = await import("./project.ts");
+const { safeRelPath, pageDims } = await import("./project.ts");
 const { setElementStyle, getElementStyle } = await import("./page-edit.ts");
+const { snapshotPage, undoPage, redoPage, historyDepth } = await import("./undo.ts");
+
+test("pageDims resolves named sizes, slide presets, orientation and custom", () => {
+  const base = { pages: 1, widthMm: null, heightMm: null };
+  assert.deepEqual(pageDims({ ...base, pageSize: "A4", orientation: "portrait" }), { w: 210, h: 297 });
+  assert.deepEqual(pageDims({ ...base, pageSize: "A4", orientation: "landscape" }), { w: 297, h: 210 });
+  // slide presets are landscape-first — landscape orientation keeps them wide
+  assert.deepEqual(pageDims({ ...base, pageSize: "Slide 16:9", orientation: "landscape" }), { w: 338.7, h: 190.5 });
+  // custom dims are literal, orientation is baked in
+  assert.deepEqual(pageDims({ ...base, pageSize: "Custom", orientation: "portrait", widthMm: 300, heightMm: 100 }), { w: 300, h: 100 });
+  // unknown size falls back to A4
+  assert.deepEqual(pageDims({ ...base, pageSize: "Nonsense", orientation: "portrait" }), { w: 210, h: 297 });
+});
+
+test("custom dimensions clamp through meta()", () => {
+  const p = tempProject();
+  p.updateMeta({ settings: { pageSize: "Custom", widthMm: 9999, heightMm: 3 } as any });
+  const s = p.meta().settings;
+  assert.equal(s.widthMm, 2000);
+  assert.equal(s.heightMm, 50);
+});
+
+test("undo/redo restores page.html snapshots; a fresh edit clears redo", () => {
+  const p = tempProject();
+  writeFileSync(p.pageHtml, "<html><body>v1</body></html>");
+  snapshotPage(p);
+  writeFileSync(p.pageHtml, "<html><body>v2</body></html>");
+  snapshotPage(p);
+  writeFileSync(p.pageHtml, "<html><body>v3</body></html>");
+  assert.deepEqual(historyDepth(p), { undo: 2, redo: 0 });
+
+  undoPage(p);
+  assert.ok(readFileSync(p.pageHtml, "utf8").includes("v2"));
+  undoPage(p);
+  assert.ok(readFileSync(p.pageHtml, "utf8").includes("v1"));
+  assert.deepEqual(historyDepth(p), { undo: 0, redo: 2 });
+  assert.throws(() => undoPage(p), /Nothing to undo/);
+
+  redoPage(p);
+  assert.ok(readFileSync(p.pageHtml, "utf8").includes("v2"));
+
+  // a new edit after undo invalidates the redo branch
+  snapshotPage(p);
+  writeFileSync(p.pageHtml, "<html><body>v2b</body></html>");
+  assert.deepEqual(historyDepth(p), { undo: 2, redo: 0 });
+  assert.throws(() => redoPage(p), /Nothing to redo/);
+});
 
 test("safeRelPath blocks traversal and absolute paths, allows subfolders", () => {
   assert.equal(safeRelPath("photos/team.jpg"), "photos/team.jpg");
@@ -81,7 +128,7 @@ test("project meta defaults are safe on legacy projects and clamp settings", () 
   const p = tempProject();
   const meta = p.meta();
   assert.equal(meta.displayName, p.slug);
-  assert.deepEqual(meta.settings, { pageSize: "A4", orientation: "portrait", pages: 1 });
+  assert.deepEqual(meta.settings, { pageSize: "A4", orientation: "portrait", pages: 1, widthMm: null, heightMm: null });
   p.updateMeta({ displayName: "Nice Name", series: "s", settings: { pages: 999 } as any });
   const updated = p.meta();
   assert.equal(updated.displayName, "Nice Name");

@@ -22,6 +22,8 @@ export interface PageSettings {
   pageSize: string;
   orientation: "portrait" | "landscape";
   pages: number;
+  widthMm: number | null;
+  heightMm: number | null;
 }
 
 export interface ProjectMeta {
@@ -75,6 +77,9 @@ export interface ProjectState {
   workspaceRoot: string;
   slug: string | null;
   meta: ProjectMeta | null;
+  /** Resolved artboard size in mm (orientation applied) — null when no project. */
+  artboard: { w: number; h: number } | null;
+  history: { undo: number; redo: number };
   brief: string;
   contextFiles: ContextFile[];
   brandFiles: BrandFile[];
@@ -194,6 +199,8 @@ export interface EngineClient {
   forkProject(slug: string, round?: number, name?: string): Promise<string>;
   createSeries(slug: string, rootName: string, topics: string[], run: boolean): Promise<{ slug: string; state: RunState }[]>;
   setElementStyle(pcId: string, style: { translateX?: number; translateY?: number; marginTop?: number | null }): Promise<void>;
+  /** One gesture, one undo step: apply several elements' styles atomically. */
+  setElementStyles(batch: { pcId: string; translateX?: number; translateY?: number; marginTop?: number | null }[]): Promise<void>;
   getElementStyle(pcId: string): Promise<ElementNudge>;
   /** Assign a data-pc-id to an untagged element (path = strict body>nth-child chain). */
   tagElement(path: string, pcId: string): Promise<void>;
@@ -202,6 +209,8 @@ export interface EngineClient {
   moveElementBefore(pcId: string, beforePcId: string, after?: boolean): Promise<void>;
   getPageSource(): Promise<string>;
   savePageSource(content: string): Promise<void>;
+  undoPage(): Promise<void>;
+  redoPage(): Promise<void>;
   /** System-tab replay: recent API/MCP-triggered actions. */
   getSystemEvents(): Promise<SystemEvent[]>;
   gitStatus(): Promise<GitStatus>;
@@ -356,6 +365,9 @@ export class BrowserEngineClient implements EngineClient {
   setElementStyle(pcId: string, style: { translateX?: number; translateY?: number; marginTop?: number | null }) {
     return post("/api/element/style", { pcId, ...style });
   }
+  setElementStyles(batch: { pcId: string; translateX?: number; translateY?: number; marginTop?: number | null }[]) {
+    return post("/api/element/style", { batch });
+  }
 
   async getElementStyle(pcId: string): Promise<ElementNudge> {
     const res = await fetch(`/api/element/style?pcId=${encodeURIComponent(pcId)}`);
@@ -416,6 +428,8 @@ export class BrowserEngineClient implements EngineClient {
     return res.text();
   }
   savePageSource(content: string) { return post("/api/page/source", { content }); }
+  undoPage() { return post("/api/page/undo"); }
+  redoPage() { return post("/api/page/redo"); }
 
   async getSystemEvents(): Promise<SystemEvent[]> {
     const res = await fetch("/api/system");

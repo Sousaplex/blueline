@@ -24,7 +24,7 @@ import {
   type SetupState,
   type SystemEvent,
 } from "./engine-client";
-import type { SelectionInfo } from "./selection";
+import type { AlignOp, SelectionInfo } from "./selection";
 
 /** Fold one wire event into the feed (used for both live events and replay). */
 function applyEvent(feed: FeedItem[], event: EngineEvent): FeedItem[] {
@@ -67,7 +67,8 @@ export function App() {
   const [setup, setSetup] = useState<SetupState | null>(null);
   const [systemFeed, setSystemFeed] = useState<SystemEvent[]>([]);
   const [selection, setSelection] = useState<SelectionInfo | null>(null);
-  const [deleteRequestId, setDeleteRequestId] = useState<string | null>(null);
+  const [deleteRequestIds, setDeleteRequestIds] = useState<string[] | null>(null);
+  const alignFn = useRef<((op: AlignOp) => void) | null>(null);
   const refreshTimer = useRef<number | undefined>(undefined);
   const currentSlug = useRef<string | null>(null);
 
@@ -276,16 +277,18 @@ export function App() {
           viewRound={viewRound}
           onViewRound={setViewRound}
           onSelect={setSelection}
-          onRequestDelete={setDeleteRequestId}
+          onRequestDelete={setDeleteRequestIds}
+          registerAlign={(fn) => (alignFn.current = fn)}
         />
         <div className="flex h-full min-h-0 flex-col overflow-hidden border-l">
           <InspectorPane
             selection={selection}
             project={project}
             client={client}
-            deleteRequestId={deleteRequestId}
-            onDeleteHandled={() => setDeleteRequestId(null)}
+            deleteRequestIds={deleteRequestIds}
+            onDeleteHandled={() => setDeleteRequestIds(null)}
             onDeselect={() => setSelection(null)}
+            onAlign={(op) => alignFn.current?.(op)}
           />
           <div className="min-h-0 flex-1">
             <AgentPane feed={feed} systemFeed={systemFeed} running={running} onChat={(t) => void actions.chat(t)} />

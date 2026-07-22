@@ -26,7 +26,8 @@ import {
   updateCopy,
   writePageSource,
 } from "./page-edit.ts";
-import { Project, listSourceFiles, safeRelPath, type ProjectMeta } from "./project.ts";
+import { Project, listSourceFiles, pageDims, safeRelPath, type ProjectMeta } from "./project.ts";
+import { clearHistory, historyDepth, redoPage, snapshotPage, undoPage } from "./undo.ts";
 import { PlaywrightBackend } from "./render.ts";
 import { markRunStart } from "./review.ts";
 import { resetSearchBudget } from "./search.ts";
@@ -503,6 +504,7 @@ imagery to this subject.
       this.sessions.delete(slug);
     }
     this.buffers.delete(slug);
+    clearHistory(dir);
     if (this.project?.slug === slug) await this.closeProject();
     rmSync(dir, { recursive: true, force: true });
     this.broadcast({ type: "projects_changed" });
@@ -571,7 +573,7 @@ imagery to this subject.
       selected: selected === null || selected.includes(f.path),
     }));
     if (!this.project) {
-      return { ...base, contextFiles, slug: null, meta: null, brief: "", rounds: [], images: [], editable: [], hasPage: false, hasProof: false };
+      return { ...base, contextFiles, slug: null, meta: null, artboard: null, history: { undo: 0, redo: 0 }, brief: "", rounds: [], images: [], editable: [], hasPage: false, hasProof: false };
     }
     const rounds = readdirSync(this.project.reviewDir)
       .map((f) => /^round-(\d+)\.json$/.exec(f)?.[1])
@@ -589,6 +591,8 @@ imagery to this subject.
       contextFiles,
       slug: this.project.slug,
       meta: this.project.meta(),
+      artboard: pageDims(this.project.meta().settings),
+      history: historyDepth(this.project),
       brief: existsSync(join(this.project.dir, "brief.md")) ? this.project.brief() : "",
       rounds,
       images: listImageSlots(this.project),
@@ -840,12 +844,17 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
         const project = bridge.requireProject();
         if (req.method === "POST") {
           const body = await readBody(req);
-          if (!body.pcId) return json(res, 400, { error: "pcId required" });
-          setElementStyle(project, String(body.pcId), {
-            translateX: body.translateX !== undefined ? Number(body.translateX) : undefined,
-            translateY: body.translateY !== undefined ? Number(body.translateY) : undefined,
-            marginTop: body.marginTop === null ? null : body.marginTop !== undefined ? Number(body.marginTop) : undefined,
-          });
+          // batch = one gesture (multi-drag, align) → ONE undo snapshot for the set
+          const entries = Array.isArray(body.batch) ? body.batch : body.pcId ? [body] : [];
+          if (!entries.length) return json(res, 400, { error: "pcId or batch[] required" });
+          snapshotPage(project);
+          for (const e of entries) {
+            setElementStyle(project, String(e.pcId), {
+              translateX: e.translateX !== undefined ? Number(e.translateX) : undefined,
+              translateY: e.translateY !== undefined ? Number(e.translateY) : undefined,
+              marginTop: e.marginTop === null ? null : e.marginTop !== undefined ? Number(e.marginTop) : undefined,
+            });
+          }
           bridge.broadcast({ type: "files_changed", project: project.slug });
           return json(res, 200, { ok: true });
         }
@@ -857,6 +866,7 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
       if (req.method === "POST" && url.pathname === "/api/copy") {
         const body = await readBody(req);
         const project = bridge.requireProject();
+        snapshotPage(project);
         updateCopy(project, body.pcId, body.text);
         bridge.broadcast({ type: "files_changed", project: project.slug });
         return json(res, 200, { ok: true });
@@ -864,6 +874,7 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
       if (req.method === "POST" && url.pathname === "/api/variant") {
         const body = await readBody(req);
         const project = bridge.requireProject();
+        snapshotPage(project);
         selectVariant(project, body.imageId, Number(body.variant));
         bridge.broadcast({ type: "files_changed", project: project.slug });
         return json(res, 200, { ok: true });
@@ -896,6 +907,7 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
         const body = await readBody(req);
         if (!body.imageId) return json(res, 400, { error: "imageId required" });
         const project = bridge.requireProject();
+        snapshotPage(project);
         setImageStyle(project, body.imageId, { objectPosition: body.objectPosition, zoom: body.zoom });
         bridge.broadcast({ type: "files_changed", project: project.slug });
         return json(res, 200, { ok: true });
@@ -1003,6 +1015,7 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
         const body = await readBody(req);
         if (!body.path || !body.pcId) return json(res, 400, { error: "path and pcId required" });
         const project = bridge.requireProject();
+        snapshotPage(project);
         tagElement(project, String(body.path), String(body.pcId));
         // No files_changed broadcast: the client already applied the attribute locally,
         // and a reload here would interrupt the edit the user is about to make.
@@ -1012,6 +1025,7 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
         const body = await readBody(req);
         if (!body.pcId) return json(res, 400, { error: "pcId required" });
         const project = bridge.requireProject();
+        snapshotPage(project);
         deleteElement(project, String(body.pcId));
         sys("delete_element", `${project.slug}: ${body.pcId}`);
         bridge.broadcast({ type: "files_changed", project: project.slug });
@@ -1021,16 +1035,32 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
         const body = await readBody(req);
         if (!body.pcId) return json(res, 400, { error: "pcId required" });
         const project = bridge.requireProject();
+        snapshotPage(project);
         if (body.beforePcId) moveElementBefore(project, String(body.pcId), String(body.beforePcId), body.after === true);
         else if (body.direction === "up" || body.direction === "down") moveElement(project, String(body.pcId), body.direction);
         else return json(res, 400, { error: "direction or beforePcId required" });
         bridge.broadcast({ type: "files_changed", project: project.slug });
         return json(res, 200, { ok: true });
       }
+      if (req.method === "POST" && url.pathname === "/api/page/undo") {
+        const project = bridge.requireProject();
+        const depth = undoPage(project);
+        sys("undo", `${project.slug} (${depth.undo} left)`);
+        bridge.broadcast({ type: "files_changed", project: project.slug });
+        return json(res, 200, { ok: true, ...depth });
+      }
+      if (req.method === "POST" && url.pathname === "/api/page/redo") {
+        const project = bridge.requireProject();
+        const depth = redoPage(project);
+        sys("redo", `${project.slug} (${depth.redo} left)`);
+        bridge.broadcast({ type: "files_changed", project: project.slug });
+        return json(res, 200, { ok: true, ...depth });
+      }
       if (url.pathname === "/api/page/source") {
         const project = bridge.requireProject();
         if (req.method === "POST") {
           const body = await readBody(req);
+          snapshotPage(project);
           writePageSource(project, String(body.content ?? ""));
           sys("edit_source", `${project.slug}: page.html (${String(body.content ?? "").length} chars)`);
           bridge.broadcast({ type: "files_changed", project: project.slug });

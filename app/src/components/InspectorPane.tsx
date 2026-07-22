@@ -1,13 +1,23 @@
 // Contextual inspector: top half of the right rail. Shows what's selected in
-// Live edit (text / block / image) with its properties and the actions that
-// apply — edit copy, swap/generate image variants, nudge, reorder, delete.
+// Live edit (text / block / image / multi) with its properties and the actions
+// that apply — edit copy, swap/generate image variants, nudge, reorder, align,
+// delete.
 import {
+  AlignCenterHorizontal,
+  AlignCenterVertical,
+  AlignEndHorizontal,
+  AlignEndVertical,
+  AlignHorizontalDistributeCenter,
+  AlignStartHorizontal,
+  AlignStartVertical,
+  AlignVerticalDistributeCenter,
   ArrowDown,
   ArrowUp,
   Check,
   ChevronLeft,
   ChevronRight,
   ImagePlus,
+  Layers,
   Loader2,
   MousePointerClick,
   Move,
@@ -30,7 +40,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { EngineClient, ProjectState } from "../engine-client";
-import type { SelectionInfo } from "../selection";
+import type { AlignOp, SelectionInfo } from "../selection";
 
 const STYLE_LABELS: Record<string, string> = {
   fontSize: "size",
@@ -40,37 +50,78 @@ const STYLE_LABELS: Record<string, string> = {
   textAlign: "align",
 };
 
+/** Figma-style alignment strip. A single selection aligns to the page. */
+function AlignRow({ count, onAlign }: { count: number; onAlign: (op: AlignOp) => void }) {
+  const ops: { op: AlignOp; icon: React.ReactNode; label: string; min: number }[] = [
+    { op: "left", icon: <AlignStartVertical />, label: "Align left", min: 1 },
+    { op: "centerH", icon: <AlignCenterVertical />, label: "Align horizontal centers", min: 1 },
+    { op: "right", icon: <AlignEndVertical />, label: "Align right", min: 1 },
+    { op: "top", icon: <AlignStartHorizontal />, label: "Align top", min: 1 },
+    { op: "centerV", icon: <AlignCenterHorizontal />, label: "Align vertical centers", min: 1 },
+    { op: "bottom", icon: <AlignEndHorizontal />, label: "Align bottom", min: 1 },
+    { op: "distH", icon: <AlignHorizontalDistributeCenter />, label: "Distribute horizontally", min: 3 },
+    { op: "distV", icon: <AlignVerticalDistributeCenter />, label: "Distribute vertically", min: 3 },
+  ];
+  return (
+    <div>
+      <div className="flex items-center gap-0.5 rounded-md border bg-muted/30 p-0.5">
+        {ops.map(({ op, icon, label, min }) => (
+          <Button
+            key={op}
+            variant="ghost"
+            size="icon-sm"
+            className="size-6"
+            title={count === 1 && min === 1 ? `${label} (of page)` : label}
+            disabled={count < min}
+            onClick={() => onAlign(op)}
+          >
+            {icon}
+          </Button>
+        ))}
+      </div>
+      <p className="mt-1 text-[10px] text-muted-foreground">
+        {count === 1 ? "aligns to the page" : "aligns within the selection"}
+      </p>
+    </div>
+  );
+}
+
 export function InspectorPane({
   selection,
   project,
   client,
-  deleteRequestId,
+  deleteRequestIds,
   onDeleteHandled,
   onDeselect,
+  onAlign,
 }: {
   selection: SelectionInfo | null;
   project: ProjectState;
   client: EngineClient;
   /** Set when the user pressed Delete in the preview — opens the confirm dialog. */
-  deleteRequestId: string | null;
+  deleteRequestIds: string[] | null;
   onDeleteHandled: () => void;
   onDeselect: () => void;
+  onAlign: (op: AlignOp) => void;
 }) {
   const [textDraft, setTextDraft] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<string[] | null>(null);
   const uploadInput = useRef<HTMLInputElement>(null);
 
+  const selId = selection && selection.kind !== "multi" ? selection.id : null;
+  const selText = selection && selection.kind === "text" ? (selection.text ?? "") : "";
+
   useEffect(() => {
-    setTextDraft(selection?.text ?? "");
+    setTextDraft(selText);
     setError(null);
-  }, [selection?.id, selection?.text]);
+  }, [selId, selText]);
 
   // Delete key pressed in the preview → same confirm dialog as the button.
   useEffect(() => {
-    if (deleteRequestId) setConfirmDelete(deleteRequestId);
-  }, [deleteRequestId]);
+    if (deleteRequestIds?.length) setConfirmDelete(deleteRequestIds);
+  }, [deleteRequestIds]);
 
   const act = (label: string, fn: () => Promise<unknown>) => {
     setBusy(label);
@@ -84,18 +135,19 @@ export function InspectorPane({
     return (
       <div className="flex items-center gap-2 border-b px-4 py-3 text-xs text-muted-foreground">
         <MousePointerClick className="size-3.5 shrink-0" />
-        Nothing selected — in Live edit, click an element to select it; double-click text to edit it.
+        Nothing selected — click an element to select it; ⇧-click adds more; double-click text to edit.
       </div>
     );
   }
 
-  const slot = selection.kind === "image" ? project.images.find((s) => s.id === selection.id) : undefined;
-  const canReorder = selection.kind !== "image";
+  const isMulti = selection.kind === "multi";
+  const slot = !isMulti && selection.kind === "image" ? project.images.find((s) => s.id === selection.id) : undefined;
+  const canReorder = !isMulti && selection.kind !== "image";
 
   const onUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
-    if (!file) return;
+    if (!file || isMulti) return;
     const reader = new FileReader();
     reader.onload = () => {
       const base64 = String(reader.result).split(",")[1] ?? "";
@@ -107,9 +159,19 @@ export function InspectorPane({
   return (
     <div className="flex h-1/2 min-h-0 flex-col border-b">
       <div className="flex h-9 shrink-0 items-center gap-2 border-b px-3">
-        {selection.kind === "text" ? <Type className="size-3.5" /> : selection.kind === "image" ? <ImageIcon className="size-3.5" /> : <Move className="size-3.5" />}
-        <span className="font-mono text-xs font-medium">{selection.id}</span>
-        {selection.tag && (
+        {isMulti ? (
+          <Layers className="size-3.5" />
+        ) : selection.kind === "text" ? (
+          <Type className="size-3.5" />
+        ) : selection.kind === "image" ? (
+          <ImageIcon className="size-3.5" />
+        ) : (
+          <Move className="size-3.5" />
+        )}
+        <span className="font-mono text-xs font-medium">
+          {isMulti ? `${selection.ids.length} selected` : selection.id}
+        </span>
+        {!isMulti && selection.tag && (
           <Badge variant="outline" className="h-4 px-1 text-[10px]">
             {selection.tag.toLowerCase()}
           </Badge>
@@ -125,16 +187,35 @@ export function InspectorPane({
               onClick={() => act("move", () => client.moveElement(selection.id, "down"))}>
               <ArrowDown />
             </Button>
-            <Button variant="ghost" size="icon-sm" className="size-6" title="Delete element" disabled={busy !== null}
-              onClick={() => setConfirmDelete(selection.id)}>
-              <Trash2 className="text-destructive" />
-            </Button>
           </>
+        )}
+        {(isMulti || selection.kind !== "image") && (
+          <Button variant="ghost" size="icon-sm" className="size-6" title={isMulti ? "Delete selected elements" : "Delete element"} disabled={busy !== null}
+            onClick={() => setConfirmDelete(isMulti ? selection.ids : [selection.id])}>
+            <Trash2 className="text-destructive" />
+          </Button>
         )}
       </div>
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 text-xs">
-        {selection.kind === "text" && (
+        {isMulti && (
+          <div className="space-y-2.5">
+            <AlignRow count={selection.ids.length} onAlign={onAlign} />
+            <div className="flex flex-wrap gap-1">
+              {selection.ids.map((id) => (
+                <Badge key={id} variant="outline" className="h-5 max-w-36 truncate px-1.5 font-mono text-[10px]">
+                  {id}
+                </Badge>
+              ))}
+            </div>
+            <p className="text-muted-foreground">
+              Drag or arrow-key to move the whole set together · ⇧-click a selected element to drop it from
+              the selection · Delete removes them all.
+            </p>
+          </div>
+        )}
+
+        {!isMulti && selection.kind === "text" && (
           <>
             <textarea
               className="min-h-24 w-full rounded-md border bg-transparent p-2 text-sm leading-relaxed outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -165,16 +246,17 @@ export function InspectorPane({
           </>
         )}
 
-        {selection.kind === "block" && selection.nudge && (
-          <div className="space-y-2">
+        {!isMulti && selection.kind === "block" && selection.nudge && (
+          <div className="space-y-2.5">
             <div className="grid grid-cols-3 gap-2 rounded-md border bg-muted/30 p-2 font-mono">
               <div><span className="text-muted-foreground">x</span> {selection.nudge.x.toFixed(1)}mm</div>
               <div><span className="text-muted-foreground">y</span> {selection.nudge.y.toFixed(1)}mm</div>
               <div><span className="text-muted-foreground">top</span> {selection.nudge.marginTop != null ? `${selection.nudge.marginTop.toFixed(1)}mm` : "auto"}</div>
             </div>
+            <AlignRow count={1} onAlign={onAlign} />
             <p className="text-muted-foreground">
               Arrow keys nudge (⇧ = 2mm) · drag to move · <strong>⌥-drag to reorder</strong> the page flow ·
-              Delete removes it · double-click to edit its text.
+              ⇧-click to select more · Delete removes it · double-click to edit its text.
             </p>
             <Button variant="outline" size="sm" className="h-6 text-xs" disabled={busy !== null}
               onClick={() => act("reset", () => client.setElementStyle(selection.id, { translateX: 0, translateY: 0, marginTop: null }))}>
@@ -183,7 +265,7 @@ export function InspectorPane({
           </div>
         )}
 
-        {selection.kind === "image" && (
+        {!isMulti && selection.kind === "image" && (
           <div className="space-y-2.5">
             {slot && (
               <div className="flex items-center gap-1.5">
@@ -218,10 +300,14 @@ export function InspectorPane({
       <AlertDialog open={confirmDelete !== null} onOpenChange={(o) => { if (!o) { setConfirmDelete(null); onDeleteHandled(); } }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete “{confirmDelete}” from the page?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {confirmDelete && confirmDelete.length > 1
+                ? `Delete ${confirmDelete.length} elements from the page?`
+                : `Delete “${confirmDelete?.[0]}” from the page?`}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              Removes the element and everything inside it from page.html. Earlier review rounds keep their
-              archived copies, so you can always branch back to a version that still has it.
+              Removes {confirmDelete && confirmDelete.length > 1 ? "the elements and everything inside them" : "the element and everything inside it"} from
+              page.html. Undo (⌘Z) brings it straight back, and earlier review rounds keep their archived copies.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -229,11 +315,11 @@ export function InspectorPane({
             <AlertDialogAction
               className="bg-destructive text-white hover:bg-destructive/90"
               onClick={() => {
-                const id = confirmDelete!;
+                const ids = confirmDelete!;
                 setConfirmDelete(null);
                 onDeleteHandled();
                 act("delete", async () => {
-                  await client.deleteElement(id);
+                  for (const id of ids) await client.deleteElement(id);
                   onDeselect();
                 });
               }}

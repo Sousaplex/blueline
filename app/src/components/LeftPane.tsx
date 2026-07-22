@@ -8,6 +8,7 @@ import {
   GitBranch,
   LayoutTemplate,
   Loader2,
+  Maximize2,
   Palette,
   Pencil,
   Plus,
@@ -32,44 +33,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import type { ContextFile, EngineClient, ProjectState, SourceKind } from "../engine-client";
+import { readBase64, resolveDrop } from "@/lib/upload";
+import { AssetsDialog, type AssetTab } from "./AssetsDialog";
 import { BriefEditorDialog } from "./BriefEditorDialog";
 
-const PAGE_SIZES = ["A4", "A5", "A3", "Letter", "Legal", "Tabloid"];
-
-/** Resolve dropped items (files AND folders) into {relPath, file} pairs. */
-async function resolveDrop(items: DataTransferItemList): Promise<{ relPath: string; file: File }[]> {
-  const out: { relPath: string; file: File }[] = [];
-  const walk = async (entry: any, prefix: string): Promise<void> => {
-    if (entry.isFile) {
-      const file = await new Promise<File>((res, rej) => entry.file(res, rej));
-      out.push({ relPath: prefix ? `${prefix}/${file.name}` : file.name, file });
-    } else if (entry.isDirectory) {
-      const reader = entry.createReader();
-      // readEntries returns batches of ≤100 — drain until empty
-      for (;;) {
-        const batch = await new Promise<any[]>((res, rej) => reader.readEntries(res, rej));
-        if (!batch.length) break;
-        for (const child of batch) await walk(child, prefix ? `${prefix}/${entry.name}` : entry.name);
-      }
-    }
-  };
-  const entries = [...items].map((i) => (i.webkitGetAsEntry ? i.webkitGetAsEntry() : null));
-  const files = [...items].map((i) => i.getAsFile());
-  for (let i = 0; i < entries.length; i++) {
-    if (entries[i]) await walk(entries[i], "");
-    else if (files[i]) out.push({ relPath: files[i]!.name, file: files[i]! });
-  }
-  return out;
-}
-
-function readBase64(file: File): Promise<string> {
-  return new Promise((res, rej) => {
-    const reader = new FileReader();
-    reader.onload = () => res(String(reader.result).split(",")[1] ?? "");
-    reader.onerror = rej;
-    reader.readAsDataURL(file);
-  });
-}
+const PAGE_SIZES = ["A4", "A5", "A3", "Letter", "Legal", "Tabloid", "Slide 16:9", "Slide 4:3", "Square", "Custom"];
 
 function KindIcon({ kind }: { kind: SourceKind }) {
   if (kind === "text") return <FileText className="size-3.5 shrink-0 text-muted-foreground" />;
@@ -115,6 +83,7 @@ export function LeftPane({
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<"context" | "brand" | null>(null);
   const [branching, setBranching] = useState<number | null>(null);
+  const [assetsTab, setAssetsTab] = useState<AssetTab | null>(null);
   const [templateDialog, setTemplateDialog] = useState(false);
   const [templateName, setTemplateName] = useState("");
   const [templateDesc, setTemplateDesc] = useState("");
@@ -303,6 +272,44 @@ export function LeftPane({
                 />
                 <span className="text-xs text-muted-foreground">pg</span>
               </div>
+              {meta.settings.pageSize === "Custom" && (
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    key={`w-${project.slug}-${meta.settings.widthMm}`}
+                    type="number"
+                    min={50}
+                    max={2000}
+                    defaultValue={meta.settings.widthMm ?? 210}
+                    className="h-7 flex-1 text-xs"
+                    title="Artboard width in mm"
+                    onBlur={(e) => {
+                      const v = Number(e.target.value);
+                      if (v > 0 && v !== meta.settings.widthMm) act(() => client.updateMeta({ settings: { widthMm: v } }));
+                    }}
+                  />
+                  <span className="text-xs text-muted-foreground">×</span>
+                  <Input
+                    key={`h-${project.slug}-${meta.settings.heightMm}`}
+                    type="number"
+                    min={50}
+                    max={2000}
+                    defaultValue={meta.settings.heightMm ?? 297}
+                    className="h-7 flex-1 text-xs"
+                    title="Artboard height in mm"
+                    onBlur={(e) => {
+                      const v = Number(e.target.value);
+                      if (v > 0 && v !== meta.settings.heightMm) act(() => client.updateMeta({ settings: { heightMm: v } }));
+                    }}
+                  />
+                  <span className="text-xs text-muted-foreground">mm</span>
+                </div>
+              )}
+              {project.artboard && (
+                <p className="text-[10px] text-muted-foreground">
+                  artboard {project.artboard.w}mm × {project.artboard.h}mm
+                  {meta.settings.pageSize.startsWith("Slide") && " · slide deck: 1 page = 1 slide"}
+                </p>
+              )}
               {(meta.parent || meta.kind === "variant") && (
                 <p className="flex items-center gap-1 text-xs text-muted-foreground">
                   <GitBranch className="size-3" />
@@ -371,15 +378,21 @@ export function LeftPane({
             <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground" title="Shared by every project in this workspace">
               Sources <span className="normal-case tracking-normal">· workspace-wide</span>
             </h3>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="size-6"
-              aria-label="Add source files"
-              onClick={() => contextInput.current?.click()}
-            >
-              <Plus className="size-3.5" />
-            </Button>
+            <div className="flex items-center">
+              <Button variant="ghost" size="icon-sm" className="size-6" aria-label="View all sources" title="Open the library view"
+                onClick={() => setAssetsTab("sources")}>
+                <Maximize2 className="size-3" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="size-6"
+                aria-label="Add source files"
+                onClick={() => contextInput.current?.click()}
+              >
+                <Plus className="size-3.5" />
+              </Button>
+            </div>
             <input ref={contextInput} type="file" multiple hidden onChange={onPick("context")} />
           </div>
           <ul className="space-y-0.5">
@@ -404,9 +417,15 @@ export function LeftPane({
             >
               Brand <span className="normal-case tracking-normal">· guidelines &amp; assets</span>
             </h3>
-            <Button variant="ghost" size="icon-sm" className="size-6" aria-label="Add brand files" onClick={() => brandInput.current?.click()}>
-              <Plus className="size-3.5" />
-            </Button>
+            <div className="flex items-center">
+              <Button variant="ghost" size="icon-sm" className="size-6" aria-label="View all brand files" title="Open the library view"
+                onClick={() => setAssetsTab("brand")}>
+                <Maximize2 className="size-3" />
+              </Button>
+              <Button variant="ghost" size="icon-sm" className="size-6" aria-label="Add brand files" onClick={() => brandInput.current?.click()}>
+                <Plus className="size-3.5" />
+              </Button>
+            </div>
             <input ref={brandInput} type="file" multiple hidden onChange={onPick("brand")} />
           </div>
           <ul className="space-y-1">
@@ -520,6 +539,15 @@ export function LeftPane({
           )}
         </section>
       </div>
+
+      <AssetsDialog
+        client={client}
+        project={project}
+        cacheKey={cacheKey}
+        open={assetsTab !== null}
+        onOpenChange={(o) => !o && setAssetsTab(null)}
+        initialTab={assetsTab ?? "sources"}
+      />
 
       <Dialog open={templateDialog} onOpenChange={setTemplateDialog}>
         <DialogContent className="sm:max-w-md">

@@ -1,9 +1,9 @@
-import { ChevronLeft, ChevronRight, Code2, Grid3x3, History, Loader2, MousePointerClick, RefreshCw, Save } from "lucide-react";
+import { ChevronLeft, ChevronRight, Code2, Grid3x3, History, Loader2, MousePointerClick, Redo2, RefreshCw, Save, Undo2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { EngineClient, ProjectState } from "../engine-client";
-import type { SelectionInfo } from "../selection";
+import type { AlignOp, SelectionInfo } from "../selection";
 
 type Mode = "proof" | "live" | "code";
 
@@ -38,6 +38,7 @@ export function PreviewPane({
   onViewRound,
   onSelect,
   onRequestDelete,
+  registerAlign,
 }: {
   project: ProjectState;
   client: EngineClient;
@@ -46,7 +47,9 @@ export function PreviewPane({
   viewRound: number | null;
   onViewRound: (round: number | null) => void;
   onSelect: (selection: SelectionInfo | null) => void;
-  onRequestDelete: (pcId: string) => void;
+  onRequestDelete: (pcIds: string[]) => void;
+  /** Hands the Inspector a way to trigger alignment on the current selection. */
+  registerAlign: (fn: ((op: AlignOp) => void) | null) => void;
 }) {
   // Deep-linkable initial view (?mode=live|code&grid=1) — also used by automated tests.
   const initialParams = useRef(new URLSearchParams(window.location.search));
@@ -70,6 +73,7 @@ export function PreviewPane({
   activeImageRef.current = activeImage;
   const nudgeRef = useRef<NudgeState | null>(nudge);
   nudgeRef.current = nudge;
+  const extraIdsRef = useRef<string[]>([]); // selection beyond the primary (shift-click)
   const persistTimer = useRef<number | undefined>(undefined);
   const cacheKeyRef = useRef(cacheKey);
   cacheKeyRef.current = cacheKey;
@@ -89,35 +93,67 @@ export function PreviewPane({
   const nudgeEl = (pcId: string): HTMLElement | null =>
     iframeRef.current?.contentDocument?.querySelector<HTMLElement>(`[data-pc-id="${pcId}"]`) ?? null;
 
+  const selectedIds = (): string[] => (nudgeRef.current ? [nudgeRef.current.pcId, ...extraIdsRef.current] : []);
+
   const reportBlock = (n: NudgeState, tag?: string) =>
     onSelect({ kind: "block", id: n.pcId, tag, nudge: { x: n.x, y: n.y, marginTop: n.marginTop } });
 
-  /** Apply a nudge to the iframe immediately; persist to page.html debounced. */
-  const applyNudge = (next: NudgeState) => {
-    nudgeRef.current = next; // sync, so rapid key-repeat bursts accumulate correctly
-    setNudge(next);
-    const el = nudgeEl(next.pcId);
-    if (el) {
-      el.style.transform = next.x || next.y ? `translate(${next.x.toFixed(1)}mm, ${next.y.toFixed(1)}mm)` : "";
-      if (next.marginTop != null) el.style.marginTop = `${next.marginTop.toFixed(1)}mm`;
-      else el.style.removeProperty("margin-top");
+  /** Push the current selection (single block or multi set) to the Inspector. */
+  const reportSelection = () => {
+    const n = nudgeRef.current;
+    if (!n) return onSelect(null);
+    const ids = selectedIds();
+    if (ids.length > 1) onSelect({ kind: "multi", ids });
+    else reportBlock(n, nudgeEl(n.pcId)?.tagName);
+  };
+  const reportSelectionRef = useRef(reportSelection);
+  reportSelectionRef.current = reportSelection;
+
+  /** Current translate/margin per selected element — the base for a move gesture. */
+  const captureBases = (): Map<string, Omit<NudgeState, "pcId">> => {
+    const bases = new Map<string, Omit<NudgeState, "pcId">>();
+    for (const id of selectedIds()) {
+      const el = nudgeEl(id);
+      if (el) bases.set(id, readNudge(el));
     }
-    reportBlock(next, el?.tagName);
+    return bases;
+  };
+
+  /** Move every selected element by (dx, dy) mm from its base; persist debounced. */
+  const applyDeltaToSelection = (bases: Map<string, Omit<NudgeState, "pcId">>, dx: number, dy: number) => {
+    for (const [id, b] of bases) {
+      const el = nudgeEl(id);
+      if (!el) continue;
+      const x = b.x + dx;
+      const y = b.y + dy;
+      el.style.transform = x || y ? `translate(${x.toFixed(1)}mm, ${y.toFixed(1)}mm)` : "";
+    }
+    const n = nudgeRef.current;
+    if (n && bases.has(n.pcId)) {
+      const b = bases.get(n.pcId)!;
+      const next = { ...n, x: b.x + dx, y: b.y + dy };
+      nudgeRef.current = next; // sync, so rapid key-repeat bursts accumulate correctly
+      setNudge(next);
+    }
+    reportSelectionRef.current();
     window.clearTimeout(persistTimer.current);
     persistTimer.current = window.setTimeout(() => {
       void client
-        .setElementStyle(next.pcId, { translateX: next.x, translateY: next.y, marginTop: next.marginTop })
+        .setElementStyles(
+          [...bases].map(([id, b]) => ({ pcId: id, translateX: b.x + dx, translateY: b.y + dy, marginTop: b.marginTop })),
+        )
         .then(() => setDirty(true));
     }, 500);
   };
-  const applyNudgeRef = useRef(applyNudge);
-  applyNudgeRef.current = applyNudge;
+  const applyDeltaRef = useRef(applyDeltaToSelection);
+  applyDeltaRef.current = applyDeltaToSelection;
 
   const clearSelections = () => {
     const doc = iframeRef.current?.contentDocument;
     doc?.querySelectorAll(".pc-nudge-active").forEach((el) => el.classList.remove("pc-nudge-active"));
     doc?.querySelectorAll("img.pc-active").forEach((el) => el.classList.remove("pc-active"));
     nudgeRef.current = null;
+    extraIdsRef.current = [];
     setNudge(null);
     setActiveImage(null);
     onSelect(null);
@@ -125,6 +161,104 @@ export function PreviewPane({
   };
   const clearSelectionsRef = useRef(clearSelections);
   clearSelectionsRef.current = clearSelections;
+
+  /** Figma-style alignment: 1 element aligns to the page body, 2+ align within the selection box. */
+  const alignSelection = (op: AlignOp) => {
+    const doc = iframeRef.current?.contentDocument;
+    if (!doc?.body || !nudgeRef.current) return;
+    const els = selectedIds()
+      .map((id) => nudgeEl(id))
+      .filter((el): el is HTMLElement => Boolean(el));
+    if (!els.length) return;
+    if ((op === "distH" || op === "distV") && els.length < 3) return;
+    const rects = els.map((el) => el.getBoundingClientRect());
+    const ref =
+      els.length === 1
+        ? doc.body.getBoundingClientRect()
+        : {
+            left: Math.min(...rects.map((r) => r.left)),
+            right: Math.max(...rects.map((r) => r.right)),
+            top: Math.min(...rects.map((r) => r.top)),
+            bottom: Math.max(...rects.map((r) => r.bottom)),
+          };
+    const jobs: { el: HTMLElement; dx: number; dy: number }[] = [];
+    if (op === "distH" || op === "distV") {
+      const horiz = op === "distH";
+      const items = els
+        .map((el, i) => ({ el, c: horiz ? rects[i].left + rects[i].width / 2 : rects[i].top + rects[i].height / 2 }))
+        .sort((a, b) => a.c - b.c);
+      const first = items[0].c;
+      const gap = (items[items.length - 1].c - first) / (items.length - 1);
+      items.forEach((it, i) => {
+        const d = first + gap * i - it.c;
+        jobs.push({ el: it.el, dx: horiz ? d : 0, dy: horiz ? 0 : d });
+      });
+    } else {
+      els.forEach((el, i) => {
+        const r = rects[i];
+        let dx = 0;
+        let dy = 0;
+        if (op === "left") dx = ref.left - r.left;
+        else if (op === "centerH") dx = (ref.left + ref.right) / 2 - (r.left + r.width / 2);
+        else if (op === "right") dx = ref.right - r.right;
+        else if (op === "top") dy = ref.top - r.top;
+        else if (op === "centerV") dy = (ref.top + ref.bottom) / 2 - (r.top + r.height / 2);
+        else if (op === "bottom") dy = ref.bottom - r.bottom;
+        jobs.push({ el, dx, dy });
+      });
+    }
+    const batch: { pcId: string; translateX: number; translateY: number; marginTop: number | null }[] = [];
+    for (const { el, dx, dy } of jobs) {
+      const id = el.getAttribute("data-pc-id")!;
+      const b = readNudge(el);
+      const x = b.x + dx * PX_TO_MM;
+      const y = b.y + dy * PX_TO_MM;
+      el.style.transform = x || y ? `translate(${x.toFixed(1)}mm, ${y.toFixed(1)}mm)` : "";
+      const cur = nudgeRef.current;
+      if (cur && cur.pcId === id) {
+        const next: NudgeState = { ...cur, x, y };
+        nudgeRef.current = next;
+        setNudge(next);
+      }
+      batch.push({ pcId: id, translateX: x, translateY: y, marginTop: b.marginTop });
+    }
+    void client.setElementStyles(batch).then(() => setDirty(true));
+    reportSelectionRef.current();
+  };
+  const alignRefLocal = useRef(alignSelection);
+  alignRefLocal.current = alignSelection;
+  useEffect(() => {
+    registerAlign((op) => alignRefLocal.current(op));
+    return () => registerAlign(null);
+  }, [registerAlign]);
+
+  const doUndo = () => {
+    clearSelectionsRef.current();
+    void client.undoPage().then(() => setDirty(true)).catch(() => {});
+  };
+  const doRedo = () => {
+    clearSelectionsRef.current();
+    void client.redoPage().then(() => setDirty(true)).catch(() => {});
+  };
+  const doUndoRef = useRef(doUndo);
+  doUndoRef.current = doUndo;
+  const doRedoRef = useRef(doRedo);
+  doRedoRef.current = doRedo;
+
+  // ⌘Z / ⇧⌘Z from the app window (the iframe handles its own copy below).
+  useEffect(() => {
+    if (mode !== "live") return;
+    const onKey = (ev: KeyboardEvent) => {
+      if (!(ev.metaKey || ev.ctrlKey) || ev.key.toLowerCase() !== "z") return;
+      const tag = (document.activeElement as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return; // native field undo wins
+      ev.preventDefault();
+      if (ev.shiftKey) doRedoRef.current();
+      else doUndoRef.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mode]);
 
   // 5mm layout grid overlay in the live iframe (snap uses it too).
   const syncGrid = () => {
@@ -204,15 +338,42 @@ export function PreviewPane({
           doc.defaultView!.getComputedStyle(child).display !== "inline", // a block-displayed span is structure too
       );
 
-    const selectForNudge = (el: HTMLElement) => {
+    /** Select an element. additive (shift-click) grows/toggles the selection set. */
+    const selectForNudge = (el: HTMLElement, additive = false) => {
+      const id = el.getAttribute("data-pc-id")!;
+      const current = nudgeRef.current;
+      if (additive && current) {
+        if (current.pcId === id || extraIdsRef.current.includes(id)) {
+          // shift-click on an already-selected element toggles it OUT of the set
+          el.classList.remove("pc-nudge-active");
+          if (current.pcId === id) {
+            const [nextId, ...rest] = extraIdsRef.current;
+            if (!nextId) return clearSelectionsRef.current();
+            extraIdsRef.current = rest;
+            const nel = doc.querySelector<HTMLElement>(`[data-pc-id="${nextId}"]`);
+            const next = { pcId: nextId, ...(nel ? readNudge(nel) : { x: 0, y: 0, marginTop: null }) };
+            nudgeRef.current = next;
+            setNudge(next);
+          } else {
+            extraIdsRef.current = extraIdsRef.current.filter((x) => x !== id);
+          }
+          reportSelectionRef.current();
+          return;
+        }
+        el.classList.add("pc-nudge-active");
+        extraIdsRef.current = [...extraIdsRef.current, id];
+        reportSelectionRef.current();
+        return;
+      }
       doc.querySelectorAll(".pc-nudge-active").forEach((other) => other.classList.remove("pc-nudge-active"));
       doc.querySelectorAll("img.pc-active").forEach((other) => other.classList.remove("pc-active"));
       setActiveImage(null);
+      extraIdsRef.current = [];
       el.classList.add("pc-nudge-active");
-      const next = { pcId: el.getAttribute("data-pc-id")!, ...readNudge(el) };
+      const next = { pcId: id, ...readNudge(el) };
       nudgeRef.current = next; // sync, so keystrokes right after the click see the selection
       setNudge(next);
-      reportBlock(next, el.tagName);
+      reportSelectionRef.current();
     };
 
     const clearDropMarkers = () =>
@@ -305,6 +466,7 @@ export function PreviewPane({
       // Text editing and drag-selection are mutually exclusive — drop any block selection.
       doc.querySelectorAll(".pc-nudge-active").forEach((other) => other.classList.remove("pc-nudge-active"));
       nudgeRef.current = null;
+      extraIdsRef.current = [];
       setNudge(null);
       normalizeWhitespace(elm);
       const cs = doc.defaultView!.getComputedStyle(elm);
@@ -337,12 +499,13 @@ export function PreviewPane({
       return Boolean(editing && t && (editing === t || editing.contains(t)));
     };
 
-    // Single click = select (drag / arrows / Inspector). Double click = edit text.
+    // Single click = select (shift adds to the set). Double click = edit text.
     doc.querySelectorAll<HTMLElement>("[data-pc-id]").forEach((el) => {
       el.addEventListener("click", (ev) => {
         ev.stopPropagation(); // innermost tagged block wins — never bubble to containers
         if (insideOpenEdit(ev)) return; // caret placement inside an open edit — leave it alone
         ev.preventDefault();
+        const additive = ev.shiftKey;
         void (async () => {
           // Drill to the exact element under the cursor; tag it if it's untagged.
           let target = drillTarget(ev, el);
@@ -350,12 +513,12 @@ export function PreviewPane({
             const id = await autoTag(target);
             if (!id) target = el;
           }
-          selectForNudge(target);
+          selectForNudge(target, additive);
         })();
       });
       el.addEventListener("dblclick", (ev) => {
         ev.stopPropagation();
-        if (insideOpenEdit(ev)) return;
+        if (ev.shiftKey || insideOpenEdit(ev)) return;
         // The single-click leg already drilled and tagged; resolve the same target.
         const target = drillTarget(ev, el);
         const editable = target.hasAttribute("data-pc-id") ? target : el;
@@ -365,31 +528,40 @@ export function PreviewPane({
       });
     });
 
-    // Nudge-mode drag, delegated at the document level so it works for any selected
-    // element — including ones tagged a moment ago. Plain drag = translate (smart-align
-    // + grid snap); ⌥-drag = reorder in document flow.
+    // Drag, delegated at the document level so it works for any selected element —
+    // including ones tagged a moment ago. Plain drag moves EVERY selected element
+    // (smart-align + grid snap on the grabbed one); ⌥-drag (single selection only)
+    // reorders in document flow.
     let drag: {
       el: HTMLElement;
-      x: number; y: number; startX: number; startY: number;
+      x: number; y: number;
+      bases: Map<string, Omit<NudgeState, "pcId">>;
       reorder: boolean; target: HTMLElement | null; after: boolean;
       baseRect?: DOMRect; alignV?: number[]; alignH?: number[];
     } | null = null;
     doc.addEventListener("mousedown", (ev) => {
       const n = nudgeRef.current;
       if (!n) return;
-      const elm = doc.querySelector<HTMLElement>(`[data-pc-id="${n.pcId}"]`);
       const t = ev.target && (ev.target as Node).nodeType === 1 ? (ev.target as Element) : null; // realm-safe
-      if (!elm || !t || (elm !== t && !elm.contains(t))) return; // drag starts on the selection
+      if (!t) return;
+      const ids = [n.pcId, ...extraIdsRef.current];
+      const els = ids.map((id) => doc.querySelector<HTMLElement>(`[data-pc-id="${id}"]`));
+      const grabbed = els.find((el) => el && (el === t || el.contains(t)));
+      if (!grabbed) return; // drag starts on a selected element
       ev.preventDefault();
-      drag = { el: elm, x: ev.clientX, y: ev.clientY, startX: n.x, startY: n.y, reorder: ev.altKey, target: null, after: false };
+      const bases = new Map<string, Omit<NudgeState, "pcId">>();
+      els.forEach((el, i) => el && bases.set(ids[i], readNudge(el)));
+      drag = { el: grabbed, x: ev.clientX, y: ev.clientY, bases, reorder: ev.altKey && ids.length === 1, target: null, after: false };
       if (drag.reorder) {
-        elm.classList.add("pc-dragging");
+        grabbed.classList.add("pc-dragging");
       } else {
-        drag.baseRect = elm.getBoundingClientRect();
+        drag.baseRect = grabbed.getBoundingClientRect();
         const v: number[] = [];
         const h: number[] = [];
         doc.querySelectorAll<HTMLElement>("[data-pc-id], img[data-image-id]").forEach((other) => {
-          if (other === elm || elm.contains(other) || other.contains(elm)) return;
+          const otherId = other.getAttribute("data-pc-id");
+          if (otherId && ids.includes(otherId)) return; // selected elements are moving — not align targets
+          if (els.some((el) => el && (el.contains(other) || other.contains(el)))) return;
           const r = other.getBoundingClientRect();
           if (!r.width || !r.height) return;
           v.push(r.left, r.right, r.left + r.width / 2);
@@ -401,8 +573,7 @@ export function PreviewPane({
     });
     doc.addEventListener("mousemove", (ev) => {
       if (!drag) return;
-      const n = nudgeRef.current;
-      if (!n || n.pcId !== drag.el.getAttribute("data-pc-id")) return (drag = null) as unknown as void;
+      if (!nudgeRef.current) return (drag = null) as unknown as void;
       if (drag.reorder) {
         clearDropMarkers();
         const under = doc.elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>("[data-pc-id]");
@@ -441,13 +612,21 @@ export function PreviewPane({
         if (vLines.length || hLines.length) guides.show(vLines, hLines);
         else guides.clear();
       }
-      let xmm = drag.startX + dxPx * PX_TO_MM;
-      let ymm = drag.startY + dyPx * PX_TO_MM;
+      let dxmm = dxPx * PX_TO_MM;
+      let dymm = dyPx * PX_TO_MM;
       if (showGridRef.current) {
-        if (!vLines.length) { const g = Math.round(xmm / GRID_MM) * GRID_MM; if (Math.abs(g - xmm) <= GRID_SNAP_MM) xmm = g; }
-        if (!hLines.length) { const g = Math.round(ymm / GRID_MM) * GRID_MM; if (Math.abs(g - ymm) <= GRID_SNAP_MM) ymm = g; }
+        // Snap the grabbed element's translate to the grid; the set moves in lockstep.
+        const gb = drag.bases.get(drag.el.getAttribute("data-pc-id")!) ?? { x: 0, y: 0, marginTop: null };
+        if (!vLines.length) {
+          const g = Math.round((gb.x + dxmm) / GRID_MM) * GRID_MM;
+          if (Math.abs(g - (gb.x + dxmm)) <= GRID_SNAP_MM) dxmm = g - gb.x;
+        }
+        if (!hLines.length) {
+          const g = Math.round((gb.y + dymm) / GRID_MM) * GRID_MM;
+          if (Math.abs(g - (gb.y + dymm)) <= GRID_SNAP_MM) dymm = g - gb.y;
+        }
       }
-      applyNudgeRef.current({ ...n, x: xmm, y: ymm });
+      applyDeltaRef.current(drag.bases, dxmm, dymm);
     });
     doc.addEventListener("mouseup", () => {
       if (!drag) return;
@@ -464,8 +643,16 @@ export function PreviewPane({
       }
     });
 
-    // Keyboard: arrows nudge, Escape ends an edit or deselects, Delete asks to remove.
+    // Keyboard: arrows nudge the whole selection, Escape ends an edit or deselects,
+    // Delete asks to remove the selection, ⌘Z/⇧⌘Z undo/redo.
     doc.addEventListener("keydown", (ev) => {
+      if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "z") {
+        if (doc.querySelector("[contenteditable]")) return; // let the browser handle in-edit undo
+        ev.preventDefault();
+        if (ev.shiftKey) doRedoRef.current();
+        else doUndoRef.current();
+        return;
+      }
       if (ev.key === "Escape") {
         const editing = doc.querySelector<HTMLElement>("[contenteditable]");
         if (editing) return editing.blur(); // commit-on-blur ends the text edit
@@ -476,7 +663,7 @@ export function PreviewPane({
       if (!n) return; // text edits keep their keystrokes — selection is null while editing
       if (ev.key === "Delete" || ev.key === "Backspace") {
         ev.preventDefault();
-        onRequestDelete(n.pcId);
+        onRequestDelete([n.pcId, ...extraIdsRef.current]);
         return;
       }
       const step = ev.shiftKey ? 2 : 0.5;
@@ -489,7 +676,7 @@ export function PreviewPane({
       const d = deltas[ev.key];
       if (!d) return;
       ev.preventDefault();
-      applyNudgeRef.current({ ...n, x: n.x + d[0], y: n.y + d[1] });
+      applyDeltaRef.current(captureBases(), d[0], d[1]);
     });
 
     // Image slots: click selects (Inspector shows controls); drag pans object-position.
@@ -508,6 +695,7 @@ export function PreviewPane({
         if (drag?.moved) return; // click after a drag = end of pan, not a select toggle
         doc.querySelectorAll(".pc-nudge-active").forEach((other) => other.classList.remove("pc-nudge-active"));
         nudgeRef.current = null;
+        extraIdsRef.current = [];
         setNudge(null);
         doc.querySelectorAll("img.pc-active").forEach((other) => other.classList.remove("pc-active"));
         if (activeImageRef.current === id) {
@@ -568,8 +756,10 @@ export function PreviewPane({
     );
   }
 
+  const art = project.artboard ?? { w: 210, h: 297 };
+
   return (
-    <main className="flex min-h-0 min-w-0 flex-col">
+    <main className="relative flex min-h-0 min-w-0 flex-col">
       <div className="flex h-11 shrink-0 items-center gap-3 border-b px-3">
         <Tabs value={mode} onValueChange={(v) => setMode(v as Mode)}>
           <TabsList className="h-8">
@@ -586,20 +776,8 @@ export function PreviewPane({
         {mode === "live" && (
           <span className="hidden items-center gap-1.5 whitespace-nowrap text-[11px] text-muted-foreground xl:flex">
             <MousePointerClick className="size-3.5 shrink-0" />
-            click to select &amp; drag · double-click to edit text
+            click selects · ⇧-click adds · double-click edits text
           </span>
-        )}
-
-        {mode === "live" && (
-          <Button
-            size="sm"
-            variant={showGrid ? "secondary" : "ghost"}
-            className="h-8 text-xs"
-            title="5mm grid — drags snap to it (smart-align to neighbors always on)"
-            onClick={() => setShowGrid(!showGrid)}
-          >
-            <Grid3x3 data-slot="icon" /> Grid
-          </Button>
         )}
 
         {mode === "code" && (
@@ -639,6 +817,27 @@ export function PreviewPane({
         )}
       </div>
 
+      {mode === "live" && (
+        <div className="absolute left-3 top-1/2 z-10 flex -translate-y-1/2 flex-col items-center gap-0.5 rounded-lg border bg-background/95 p-1 shadow-md backdrop-blur">
+          <Button variant="ghost" size="icon-sm" title="Undo (⌘Z)" aria-label="Undo" disabled={project.history.undo === 0} onClick={doUndo}>
+            <Undo2 />
+          </Button>
+          <Button variant="ghost" size="icon-sm" title="Redo (⇧⌘Z)" aria-label="Redo" disabled={project.history.redo === 0} onClick={doRedo}>
+            <Redo2 />
+          </Button>
+          <div className="my-0.5 h-px w-5 bg-border" />
+          <Button
+            variant={showGrid ? "secondary" : "ghost"}
+            size="icon-sm"
+            title="5mm grid — drags snap to it (smart-align to neighbors always on)"
+            aria-label="Toggle grid"
+            onClick={() => setShowGrid(!showGrid)}
+          >
+            <Grid3x3 />
+          </Button>
+        </div>
+      )}
+
       {mode === "code" ? (
         source == null ? (
           <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">loading source…</div>
@@ -673,7 +872,8 @@ export function PreviewPane({
             <iframe
               ref={iframeRef}
               title="live preview"
-              className="min-h-[297mm] w-[210mm] rounded-sm border-0 bg-white shadow-lg ring-1 ring-black/10"
+              className="shrink-0 rounded-sm border-0 bg-white shadow-lg ring-1 ring-black/10"
+              style={{ width: `${art.w}mm`, minHeight: `${art.h}mm` }}
               src={client.fileUrl("page.html", liveKey)}
               onLoad={armLiveEditing}
             />

@@ -4,9 +4,35 @@ import { DATA_ROOT } from "./config.ts";
 import { Workspace } from "./workspace.ts";
 
 export interface PageSettings {
-  pageSize: string; // "A4" | "Letter" | "A5" | …
+  pageSize: string; // "A4" | "Letter" | "Slide 16:9" | "Custom" | …
   orientation: "portrait" | "landscape";
   pages: number; // target page count — enforced by the reviewer
+  widthMm: number | null; // Custom size only
+  heightMm: number | null;
+}
+
+/** Base dimensions in mm. Print sizes are portrait-first; slide presets are landscape-first. */
+export const PAGE_DIMS: Record<string, { w: number; h: number }> = {
+  A4: { w: 210, h: 297 },
+  A5: { w: 148, h: 210 },
+  A3: { w: 297, h: 420 },
+  Letter: { w: 215.9, h: 279.4 },
+  Legal: { w: 215.9, h: 355.6 },
+  Tabloid: { w: 279.4, h: 431.8 },
+  "Slide 16:9": { w: 338.7, h: 190.5 }, // PowerPoint widescreen (13.33in × 7.5in)
+  "Slide 4:3": { w: 254, h: 190.5 },
+  Square: { w: 210, h: 210 },
+};
+
+/** Resolve the artboard size in mm, honoring orientation and custom dimensions. */
+export function pageDims(settings: PageSettings): { w: number; h: number } {
+  const base =
+    settings.pageSize === "Custom" && settings.widthMm && settings.heightMm
+      ? { w: settings.widthMm, h: settings.heightMm }
+      : (PAGE_DIMS[settings.pageSize] ?? PAGE_DIMS.A4);
+  if (settings.pageSize === "Custom") return base; // custom dims are literal — orientation is baked in
+  const landscape = settings.orientation === "landscape";
+  return (landscape && base.w < base.h) || (!landscape && base.w > base.h) ? { w: base.h, h: base.w } : base;
 }
 
 export interface ProjectMeta {
@@ -19,7 +45,13 @@ export interface ProjectMeta {
   settings: PageSettings;
 }
 
-export const DEFAULT_SETTINGS: PageSettings = { pageSize: "A4", orientation: "portrait", pages: 1 };
+export const DEFAULT_SETTINGS: PageSettings = { pageSize: "A4", orientation: "portrait", pages: 1, widthMm: null, heightMm: null };
+
+/** Clamp a custom dimension to something a printer/screen could plausibly want. */
+function clampDim(v: unknown): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? Math.max(50, Math.min(2000, n)) : null;
+}
 
 export type SourceKind = "text" | "image" | "pdf" | "other";
 
@@ -120,6 +152,8 @@ export class Project {
         pageSize: stored.settings?.pageSize?.trim() || DEFAULT_SETTINGS.pageSize,
         orientation: stored.settings?.orientation === "landscape" ? "landscape" : "portrait",
         pages: Math.max(1, Math.min(24, Number(stored.settings?.pages) || DEFAULT_SETTINGS.pages)),
+        widthMm: clampDim(stored.settings?.widthMm),
+        heightMm: clampDim(stored.settings?.heightMm),
       },
     };
   }
