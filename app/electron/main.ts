@@ -72,7 +72,7 @@ async function ensureChromium(): Promise<void> {
 const SPLASH_URL =
   "data:text/html;charset=utf-8," + // charset is REQUIRED: without it "…" decodes as Latin-1 mojibake
   encodeURIComponent(
-    `<body style="font-family:system-ui;background:#262624;color:#fafafa;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div>Starting Blueline…</div></body>`,
+    `<body style="font-family:system-ui;background:#fafafa;color:#1a1a1a;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div>Starting Blueline…</div></body>`,
   );
 
 let bridgeChild: ChildProcess | undefined;
