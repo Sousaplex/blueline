@@ -173,6 +173,8 @@ declare global {
       chooseDirectory(): Promise<string | null>;
       revealInFinder(path: string): Promise<void>;
       openPath(path: string): Promise<void>;
+      setApiKeys(keys: Record<string, string>): Promise<string[]>;
+      keychainAvailable(): Promise<boolean>;
       isElectron: true;
     };
   }
@@ -399,7 +401,17 @@ export class BrowserEngineClient implements EngineClient {
     return res.json();
   }
   completeSetup() { return post("/api/setup"); }
-  saveKeys(keys: { GEMINI_API_KEY?: string; MOONSHOT_API_KEY?: string }) { return post("/api/keys", keys); }
+  async saveKeys(keys: { GEMINI_API_KEY?: string; MOONSHOT_API_KEY?: string }) {
+    // In the packaged app, route through Electron so keys land in the OS keychain
+    // (encrypted, in app-data) instead of a plaintext .env. Browser/dev falls back
+    // to the bridge's .env path.
+    const bridge = window.blueline;
+    if (bridge?.setApiKeys) {
+      await bridge.setApiKeys(keys as Record<string, string>);
+      return;
+    }
+    await post("/api/keys", keys);
+  }
   useDefaultWorkspace() { return post("/api/workspace", { useDefault: true }); }
 
   async chooseWorkspace(): Promise<boolean> {

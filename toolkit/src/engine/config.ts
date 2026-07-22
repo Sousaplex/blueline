@@ -79,6 +79,21 @@ export function saveApiKeys(keys: Record<string, string>): string[] {
   return saved;
 }
 
+/** Apply API keys to the running process in memory ONLY — no .env written. Used
+ *  by the packaged app, where the Electron main process owns encrypted-at-rest
+ *  custody (OS keychain) and pushes keys into the bridge live. */
+export function applyApiKeys(keys: Record<string, string>): string[] {
+  const applied: string[] = [];
+  for (const [name, value] of Object.entries(keys)) {
+    if (!/^[A-Z][A-Z0-9_]*_API_KEY$/.test(name)) throw new Error(`Refusing to apply non-API-key variable: ${name}`);
+    const v = value.trim();
+    if (!v || /\s/.test(v)) throw new Error(`${name}: value looks malformed`);
+    process.env[name] = v;
+    applied.push(name);
+  }
+  return applied;
+}
+
 export function requireApiKey(envVar: string | undefined, what: string): string | undefined {
   if (!envVar) return undefined;
   const key = process.env[envVar];

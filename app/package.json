@@ -1,6 +1,6 @@
 {
   "name": "blueline-app",
-  "version": "0.15.3",
+  "version": "0.16.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,7 +11,8 @@
     "electron:dev": "npm run electron:compile && electron .",
     "electron:app": "npm run build && npm run electron:compile && electron .",
     "electron:smoke": "npm run build && npm run electron:compile && PRESSCHECK_SMOKE=1 electron .",
-    "package": "npm run build && npm run electron:compile && electron-builder --mac"
+    "package": "npm run build && npm run electron:compile && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac",
+    "package:signed": "npm run build && npm run electron:compile && electron-builder --mac"
   },
   "dependencies": {
     "@codemirror/lang-html": "^6.4.11",
@@ -92,7 +93,11 @@
         "dir",
         "dmg"
       ],
-      "identity": null
-    }
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
+    },
+    "afterSign": "build/notarize.cjs"
   }
 }

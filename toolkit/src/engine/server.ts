@@ -9,7 +9,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statS
 import { dirname, extname, join, normalize, resolve } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { WebSocketServer, type WebSocket } from "ws";
-import { DATA_ROOT, REPO_ROOT, loadConfig, saveApiKeys, type BluelineConfig } from "./config.ts";
+import { DATA_ROOT, REPO_ROOT, applyApiKeys, loadConfig, saveApiKeys, type BluelineConfig } from "./config.ts";
 import { draftBrief } from "./brief-draft.ts";
 import { gitClone, gitConnect, gitStatus, gitSync } from "./git-sync.ts";
 import { generateImages } from "./images.ts";
@@ -1004,6 +1004,21 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
         // Idle sessions recreate so the new key is picked up by their model runtimes.
         await bridge.updateSettings({});
         return json(res, 200, { ok: true, saved });
+      }
+
+      // Memory-only key apply — the packaged app's Electron main process owns
+      // encrypted-at-rest custody (OS keychain) and pushes keys here live; the
+      // bridge must NOT write them to a plaintext .env.
+      if (req.method === "POST" && url.pathname === "/api/keys/apply") {
+        const body = await readBody(req);
+        const keys: Record<string, string> = {};
+        for (const name of ["GEMINI_API_KEY", "MOONSHOT_API_KEY"] as const) {
+          if (typeof body[name] === "string" && body[name].trim()) keys[name] = body[name];
+        }
+        if (!Object.keys(keys).length) return json(res, 400, { error: "no keys provided" });
+        const applied = applyApiKeys(keys);
+        await bridge.updateSettings({});
+        return json(res, 200, { ok: true, applied });
       }
 
       if (url.pathname === "/api/proof/meta") {

@@ -5,6 +5,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { appendFileSync, cpSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
+import { keychainAvailable, loadCredentials, migrateEnvFile, saveCredentials } from "./credentials";
 
 /** One-time migration: carry settings/keys over from the pre-rename app-data dirs. */
 function migrateLegacyAppData(): void {
@@ -39,6 +40,9 @@ const childEnv = (): NodeJS.ProcessEnv => ({
   ...process.env,
   ...(BLUELINE_HOME ? { BLUELINE_HOME } : {}),
   ...(PACKAGED ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
+  // Decrypt keychain-held API keys straight into the bridge child's env — the
+  // bridge reads process.env, so no plaintext .env is needed in the packaged app.
+  ...loadCredentials(),
 });
 
 /** Run a node script with Electron's bundled Node (works inside the packaged app). */
@@ -181,6 +185,15 @@ app.whenReady().then(async () => {
     await mainWindow.loadURL(SPLASH_URL);
 
     await ensureChromium();
+    // Pull any legacy plaintext keys into the keychain BEFORE the bridge spawns,
+    // so it boots with keys injected via childEnv and the .env plaintext is gone.
+    if (PACKAGED && BLUELINE_HOME) {
+      try {
+        migrateEnvFile(BLUELINE_HOME);
+      } catch (e) {
+        smokeLog("[credentials] migration skipped: " + String(e));
+      }
+    }
     await ensureBridge();
     smokeLog("[startup] bridge ready");
 
@@ -202,6 +215,20 @@ app.whenReady().then(async () => {
     else dialog.showErrorBox("blueline failed to start", err instanceof Error ? err.message : String(err));
   }
 });
+
+// Persist API keys to the OS keychain (main-process custody) AND push them into
+// the already-running bridge in-memory, so a key set in Settings takes effect with
+// no relaunch and no plaintext ever hits disk. Returns the names saved.
+ipcMain.handle("set-api-keys", async (_e, keys: Record<string, string>): Promise<string[]> => {
+  const saved = saveCredentials(keys);
+  await fetch(`${BRIDGE_URL}/api/keys/apply`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(keys),
+  }).catch(() => {}); // the persisted copy is authoritative; bridge picks it up next launch regardless
+  return saved;
+});
+ipcMain.handle("keychain-available", () => keychainAvailable());
 
 ipcMain.handle("export-pdf", async () => exportPdf());
 ipcMain.handle("reveal-in-finder", (_e, path: string) => shell.showItemInFolder(path));
