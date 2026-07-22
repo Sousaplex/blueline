@@ -207,6 +207,9 @@ export function App() {
       <header className="relative flex h-12 shrink-0 items-center gap-3 border-b px-4">
         <img src={logo} alt="" className="size-6" />
         <span className="text-sm font-semibold tracking-tight">blueline</span>
+        <span className="font-mono text-[10px] text-muted-foreground" title={`built ${__BUILD_TIME__}`}>
+          v{__APP_VERSION__}
+        </span>
         {running && (
           <div className="absolute inset-x-0 bottom-0 h-0.5 overflow-hidden">
             <div className="pc-indeterminate h-full w-1/3 rounded-full bg-blue-500" />

@@ -41,6 +41,7 @@ export function HomeScreen({
       <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
         <img src={logo} alt="" className="size-6" />
         <span className="text-sm font-semibold tracking-tight">blueline</span>
+        <span className="font-mono text-[10px] text-muted-foreground" title={`built ${__BUILD_TIME__}`}>v{__APP_VERSION__}</span>
         <span className="truncate font-mono text-xs text-muted-foreground" title={workspaceRoot}>
           {workspaceRoot}
         </span>

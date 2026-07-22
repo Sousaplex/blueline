@@ -36,3 +36,18 @@ plan for milestones (M1 engine ✓, M2 viewer, M3 Electron shell, M4 export/vari
 - `review` needs GEMINI_API_KEY; rasterization is pdf-to-img (pure JS).
 - Never overwrite generated image variants; `nextVariant()` handles numbering.
 - Keep bash OUT of the agent's tool allowlist (`session.ts` BUILTIN_TOOLS).
+
+## Versioning & releases (MANDATORY)
+Every batch of user-facing changes bumps `app/package.json` `version` BEFORE
+`npm run package` — minor (0.X.0) for features, patch (0.0.X) for fixes. Never
+ship two different builds under the same version.
+
+Why this is load-bearing: the dmg filename (`blueline-<version>-arm64.dmg`) and
+the version badge in the app topbar (stamped with build time via vite `define`
+in `app/vite.config.ts` — hover it for the exact timestamp) are how the user
+confirms they're running the latest build. A stale version number silently
+breaks that trust.
+
+Release checklist: bump version → `cd app && npm run package` → smoke the
+packaged .app (`PRESSCHECK_SMOKE=1`, expect exit 0) → commit with the version
+in the message → push.
