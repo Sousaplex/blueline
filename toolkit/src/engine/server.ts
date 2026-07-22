@@ -8,7 +8,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statS
 import { dirname, extname, join, normalize, resolve } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { WebSocketServer, type WebSocket } from "ws";
-import { DATA_ROOT, REPO_ROOT, loadConfig, saveApiKeys, type PresscheckConfig } from "./config.ts";
+import { DATA_ROOT, REPO_ROOT, loadConfig, saveApiKeys, type BluelineConfig } from "./config.ts";
 import { gitClone, gitConnect, gitStatus, gitSync } from "./git-sync.ts";
 import { generateImages } from "./images.ts";
 import {
@@ -30,7 +30,7 @@ import { Project, listSourceFiles, safeRelPath, type ProjectMeta } from "./proje
 import { PlaywrightBackend } from "./render.ts";
 import { markRunStart } from "./review.ts";
 import { resetSearchBudget } from "./search.ts";
-import { createPresscheckSession, type PresscheckSession } from "./session.ts";
+import { createBluelineSession, type BluelineSession } from "./session.ts";
 import { deleteTemplate, instantiateTemplate, listTemplates, saveTemplate, templateBrief } from "./templates.ts";
 import { suggestDirections, variantBrief, type Direction } from "./variants.ts";
 import { resetFetchBudget } from "./web-fetch.ts";
@@ -64,7 +64,7 @@ interface WireEvent {
 export type RunState = "idle" | "queued" | "running";
 
 class Bridge {
-  private sessions = new Map<string, PresscheckSession>(); // slug -> session
+  private sessions = new Map<string, BluelineSession>(); // slug -> session
   private runStates = new Map<string, RunState>(); // slug -> queued|running
   private runQueue: string[] = [];
   private buffers = new Map<string, WireEvent[]>(); // slug -> recent events
@@ -73,7 +73,7 @@ class Bridge {
   private proofCache = new Map<string, { mtime: number; pages: Buffer[] }>();
   private registryRuntime?: ModelRuntime;
   readonly backend = new PlaywrightBackend(); // shared across all sessions
-  config: PresscheckConfig;
+  config: BluelineConfig;
   workspace: Workspace;
   project?: Project;
   /** True until a workspace is persisted for the first time — drives onboarding. */
@@ -161,11 +161,11 @@ class Bridge {
   }
 
   /** One Pi session per project, created on demand, events tagged with the slug. */
-  private async ensureSession(slug: string): Promise<PresscheckSession> {
+  private async ensureSession(slug: string): Promise<BluelineSession> {
     const existing = this.sessions.get(slug);
     if (existing) return existing;
     const project = this.project?.slug === slug ? this.project : new Project(slug, this.workspace);
-    const pc = await createPresscheckSession({ project, backend: this.backend });
+    const pc = await createBluelineSession({ project, backend: this.backend });
     this.sessions.set(slug, pc);
     pc.session.subscribe((event: any) => {
       switch (event.type) {
@@ -288,7 +288,7 @@ class Bridge {
       .filter((p) => p.models.length > 0);
   }
 
-  async updateSettings(patch: Partial<PresscheckConfig>): Promise<void> {
+  async updateSettings(patch: Partial<BluelineConfig>): Promise<void> {
     // Guard the classic trap: pasting an actual API key where an env-var NAME belongs.
     // If it doesn't look like an env name, store it as a secret and point config at
     // the provider's standard variable instead.
@@ -562,7 +562,7 @@ imagery to this subject.
       runState: this.project ? this.runState(this.project.slug) : "idle",
       runStates: Object.fromEntries(this.runStates),
       designerModel: `${this.config.designer.provider}/${this.config.designer.model}`,
-      styleFiles: listSourceFiles(this.workspace.stylesDir),
+      brandFiles: listSourceFiles(this.workspace.brandDir),
     };
     const selected = this.project?.selectedSources() ?? null;
     const contextFiles = listSourceFiles(this.workspace.contextDir).map((f) => ({
@@ -666,7 +666,7 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
           return res.end(readFileSync(file));
         }
         if (url.pathname === "/") {
-          return json(res, 200, { presscheck: "bridge running", note: "build the viewer (app: npm run build) to serve the UI here" });
+          return json(res, 200, { blueline: "bridge running", note: "build the viewer (app: npm run build) to serve the UI here" });
         }
       }
 
@@ -759,11 +759,11 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
       }
       if (req.method === "POST" && url.pathname === "/api/sources/upload") {
         const body = await readBody(req);
-        const kind = body.kind === "style" ? "style" : "context";
+        const kind = body.kind === "style" || body.kind === "brand" ? "brand" : "context";
         // name may carry a relative folder path (drag-dropped folders keep their structure)
         const rel = safeRelPath(String(body.name ?? ""));
         if (!body.dataBase64) return json(res, 400, { error: "name and dataBase64 required" });
-        const dir = kind === "style" ? bridge.workspace.stylesDir : bridge.workspace.contextDir;
+        const dir = kind === "brand" ? bridge.workspace.brandDir : bridge.workspace.contextDir;
         const target = join(dir, rel);
         mkdirSync(dirname(target), { recursive: true });
         writeFileSync(target, Buffer.from(String(body.dataBase64), "base64"));
@@ -773,9 +773,9 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
       }
       // Serve a workspace source file (context/ or styles/) — used for image thumbnails.
       if (req.method === "GET" && url.pathname === "/api/source/file") {
-        const kind = url.searchParams.get("kind") === "style" ? "style" : "context";
+        const kind = ["style", "brand"].includes(url.searchParams.get("kind") ?? "") ? "brand" : "context";
         const rel = safeRelPath(url.searchParams.get("path") ?? "");
-        const file = join(kind === "style" ? bridge.workspace.stylesDir : bridge.workspace.contextDir, rel);
+        const file = join(kind === "brand" ? bridge.workspace.brandDir : bridge.workspace.contextDir, rel);
         if (!existsSync(file) || !statSync(file).isFile()) return json(res, 404, { error: "not found" });
         res.writeHead(200, {
           "content-type": MIME[extname(file).toLowerCase()] ?? "application/octet-stream",
@@ -786,9 +786,9 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
       }
       if (req.method === "POST" && url.pathname === "/api/sources/delete") {
         const body = await readBody(req);
-        const kind = body.kind === "style" ? "style" : "context";
+        const kind = body.kind === "style" || body.kind === "brand" ? "brand" : "context";
         const rel = safeRelPath(String(body.path ?? ""));
-        const file = join(kind === "style" ? bridge.workspace.stylesDir : bridge.workspace.contextDir, rel);
+        const file = join(kind === "brand" ? bridge.workspace.brandDir : bridge.workspace.contextDir, rel);
         if (!existsSync(file) || !statSync(file).isFile()) return json(res, 404, { error: "not found" });
         rmSync(file);
         bridge.broadcast({ type: "files_changed", project: bridge.project?.slug });
@@ -1080,7 +1080,7 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
 
   await new Promise<void>((resolve) => server.listen(port, resolve));
   console.log(
-    `blueline bridge — workspace=${bridge.workspace.root} project=${bridge.project?.slug ?? "(none)"} http://localhost:${port}`,
+    `Blueline bridge — workspace=${bridge.workspace.root} project=${bridge.project?.slug ?? "(none)"} http://localhost:${port}`,
   );
 
   const shutdown = async () => {

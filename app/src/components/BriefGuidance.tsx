@@ -22,7 +22,7 @@ export function BriefGuidance({ templateName }: { templateName?: string | null }
           <Lightbulb className="size-3.5" /> How the brief is used
         </p>
         <p className="text-muted-foreground">
-          The agent reads the brief first, then your Sources and Styles, and designs the piece from it.
+          The agent reads the brief first, then your Sources and Brand files, and designs the piece from it.
           The brief is the contract — sources are supporting evidence.
         </p>
       </div>

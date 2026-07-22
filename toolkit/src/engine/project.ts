@@ -165,14 +165,17 @@ export class Project {
     writeFileSync(this.sourcesJson, JSON.stringify({ context: safe }, null, 2));
   }
 
-  /** Concatenated style guides from the workspace's styles/ directory. */
-  styleGuide(): string {
-    const stylesDir = this.workspace.stylesDir;
-    if (!existsSync(stylesDir)) return "";
-    return readdirSync(stylesDir)
-      .filter((f) => /\.(md|txt)$/i.test(f))
-      .map((f) => `## ${f}\n\n${readFileSync(join(stylesDir, f), "utf8")}`)
+  /** Concatenated brand guidelines (md/txt, subfolders included) from workspace brand/. */
+  brandGuide(): string {
+    return listSourceFiles(this.workspace.brandDir)
+      .filter((f) => f.kind === "text")
+      .map((f) => `## ${f.path}\n\n${readFileSync(join(this.workspace.brandDir, f.path), "utf8")}`)
       .join("\n\n");
+  }
+
+  /** Non-text brand assets (logos, photos, fonts) the agent must use as-is. */
+  brandAssets(): SourceFile[] {
+    return listSourceFiles(this.workspace.brandDir).filter((f) => f.kind !== "text");
   }
 
   completedRounds(): number {

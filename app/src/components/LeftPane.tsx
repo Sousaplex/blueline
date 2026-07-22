@@ -113,7 +113,7 @@ export function LeftPane({
   const shown = project.rounds.find((r) => r.round === viewRound);
   const [editingBrief, setEditingBrief] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [dragOver, setDragOver] = useState<"context" | "style" | null>(null);
+  const [dragOver, setDragOver] = useState<"context" | "brand" | null>(null);
   const [branching, setBranching] = useState<number | null>(null);
   const [templateDialog, setTemplateDialog] = useState(false);
   const [templateName, setTemplateName] = useState("");
@@ -121,7 +121,7 @@ export function LeftPane({
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [templateError, setTemplateError] = useState<string | null>(null);
   const contextInput = useRef<HTMLInputElement>(null);
-  const styleInput = useRef<HTMLInputElement>(null);
+  const brandInput = useRef<HTMLInputElement>(null);
   const meta = project.meta;
 
   const act = (fn: () => Promise<unknown>) => {
@@ -150,20 +150,20 @@ export function LeftPane({
     act(() => client.selectSources(next.length === project.contextFiles.length ? null : next));
   };
 
-  const uploadFiles = (kind: "context" | "style", entries: { relPath: string; file: File }[]) =>
+  const uploadFiles = (kind: "context" | "brand", entries: { relPath: string; file: File }[]) =>
     act(async () => {
       for (const { relPath, file } of entries) {
         await client.uploadSource(kind, relPath, await readBase64(file));
       }
     });
 
-  const onPick = (kind: "context" | "style") => (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onPick = (kind: "context" | "brand") => (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = [...(e.target.files ?? [])].map((file) => ({ relPath: file.name, file }));
     e.target.value = "";
     if (files.length) void uploadFiles(kind, files);
   };
 
-  const dropProps = (kind: "context" | "style") => ({
+  const dropProps = (kind: "context" | "brand") => ({
     onDragOver: (e: React.DragEvent) => {
       e.preventDefault();
       setDragOver(kind);
@@ -394,21 +394,26 @@ export function LeftPane({
         </section>
 
         <section
-          {...dropProps("style")}
-          className={cn("rounded-md transition-colors", dragOver === "style" && "bg-accent/60 ring-2 ring-primary/40")}
+          {...dropProps("brand")}
+          className={cn("rounded-md transition-colors", dragOver === "brand" && "bg-accent/60 ring-2 ring-primary/40")}
         >
           <div className="mb-2 flex items-center justify-between">
-            <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Styles</h3>
-            <Button variant="ghost" size="icon-sm" className="size-6" aria-label="Add style files" onClick={() => styleInput.current?.click()}>
+            <h3
+              className="text-xs font-medium uppercase tracking-wider text-muted-foreground"
+              title="The workspace's persistent brand home — the agent always honors what lives here"
+            >
+              Brand <span className="normal-case tracking-normal">· guidelines &amp; assets</span>
+            </h3>
+            <Button variant="ghost" size="icon-sm" className="size-6" aria-label="Add brand files" onClick={() => brandInput.current?.click()}>
               <Plus className="size-3.5" />
             </Button>
-            <input ref={styleInput} type="file" multiple hidden onChange={onPick("style")} />
+            <input ref={brandInput} type="file" multiple hidden onChange={onPick("brand")} />
           </div>
           <ul className="space-y-1">
-            {project.styleFiles.map((f) => (
+            {project.brandFiles.map((f) => (
               <li key={f.path} className="group flex items-center gap-2 text-sm text-muted-foreground">
                 {f.kind === "image" ? (
-                  <img src={client.sourceFileUrl("style", f.path, cacheKey)} alt="" className="size-6 shrink-0 rounded-sm border object-cover" loading="lazy" />
+                  <img src={client.sourceFileUrl("brand", f.path, cacheKey)} alt="" className="size-6 shrink-0 rounded-sm border object-cover" loading="lazy" />
                 ) : (
                   <Palette className="size-3.5 shrink-0" />
                 )}
@@ -420,14 +425,23 @@ export function LeftPane({
                   size="icon-sm"
                   className="size-5 opacity-0 transition-opacity group-hover:opacity-100"
                   aria-label={`Delete ${f.path}`}
-                  onClick={() => act(() => client.deleteSource("style", f.path))}
+                  onClick={() => act(() => client.deleteSource("brand", f.path))}
                 >
                   <Trash2 className="size-3 text-destructive" />
                 </Button>
               </li>
             ))}
-            {!project.styleFiles.length && <li className="text-sm text-muted-foreground">No style guides yet — drop brand files here</li>}
+            {!project.brandFiles.length && (
+              <li className="text-sm text-muted-foreground">
+                Drop brand guidelines (.md), logos, fonts &amp; colors here — the agent uses them on every project.
+              </li>
+            )}
           </ul>
+          {project.brandFiles.length > 0 && (
+            <p className="mt-1.5 text-[10px] text-muted-foreground">
+              the agent uses the logo files as-is and never invents a logo
+            </p>
+          )}
         </section>
 
         <Separator />

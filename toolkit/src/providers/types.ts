@@ -31,7 +31,7 @@ export interface ReviewProvider {
   review(input: {
     pagePngs: Buffer[];
     brief: string;
-    styleGuide: string;
+    brandGuide: string;
     priorRounds: ReviewResult[];
   }): Promise<ReviewResult>;
 }

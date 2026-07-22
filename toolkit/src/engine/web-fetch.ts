@@ -3,7 +3,7 @@ import { lookup } from "node:dns/promises";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { isIP } from "node:net";
 import { join } from "node:path";
-import type { PresscheckConfig } from "./config.ts";
+import type { BluelineConfig } from "./config.ts";
 import type { Project } from "./project.ts";
 import type { RenderBackend } from "./render.ts";
 
@@ -156,7 +156,7 @@ async function extractBrand(
 export async function fetchWeb(
   project: Project,
   backend: RenderBackend,
-  config: PresscheckConfig,
+  config: BluelineConfig,
   rawUrl: string,
   mode: FetchMode = "markdown",
 ): Promise<FetchResult> {

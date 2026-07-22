@@ -7,7 +7,7 @@ import {
   getAgentDir,
 } from "@earendil-works/pi-coding-agent";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import { loadConfig, type PresscheckConfig } from "./config.ts";
+import { loadConfig, type BluelineConfig } from "./config.ts";
 import { Project } from "./project.ts";
 import { buildSystemPrompt } from "./prompt.ts";
 import { PlaywrightBackend, type RenderBackend } from "./render.ts";
@@ -17,10 +17,10 @@ import { buildPresscheckTools } from "./tools.ts";
 const BUILTIN_TOOLS = ["read", "write", "edit", "grep", "find", "ls"];
 const CUSTOM_TOOL_NAMES = ["render", "review", "gen_images", "web_fetch", "web_search"];
 
-export interface PresscheckSession {
+export interface BluelineSession {
   session: AgentSession;
   project: Project;
-  config: PresscheckConfig;
+  config: BluelineConfig;
   backend: RenderBackend;
   dispose(): Promise<void>;
 }
@@ -34,7 +34,7 @@ export interface CreateSessionOptions {
   backend?: RenderBackend;
 }
 
-export async function createPresscheckSession(opts: CreateSessionOptions): Promise<PresscheckSession> {
+export async function createBluelineSession(opts: CreateSessionOptions): Promise<BluelineSession> {
   const config = loadConfig();
   const project = opts.project ?? new Project(opts.projectDir ?? "projects/demo");
   const ownsBackend = !opts.backend;

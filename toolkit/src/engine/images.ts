@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { join } from "node:path";
 import { GoogleGenAI } from "@google/genai";
 import type { ImagePromptSpec } from "../providers/types.ts";
-import type { PresscheckConfig } from "./config.ts";
+import type { BluelineConfig } from "./config.ts";
 import { requireApiKey } from "./config.ts";
 import type { Project } from "./project.ts";
 
@@ -24,7 +24,7 @@ function nextVariant(dir: string): number {
 
 export async function generateImages(
   project: Project,
-  config: PresscheckConfig,
+  config: BluelineConfig,
   onlyIds?: string[],
 ): Promise<GeneratedImageSummary[]> {
   if (!existsSync(project.promptsJson)) {
@@ -36,7 +36,7 @@ export async function generateImages(
 
   const apiKey = requireApiKey(config.images.apiKeyEnv ?? "GEMINI_API_KEY", "image generation");
   const ai = new GoogleGenAI({ apiKey });
-  const styleNotes = project.styleGuide();
+  const styleNotes = project.brandGuide();
 
   const summaries: GeneratedImageSummary[] = [];
   for (const spec of selected) {

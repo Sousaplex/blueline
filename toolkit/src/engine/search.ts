@@ -4,7 +4,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { GoogleGenAI } from "@google/genai";
-import type { PresscheckConfig } from "./config.ts";
+import type { BluelineConfig } from "./config.ts";
 import { requireApiKey } from "./config.ts";
 import type { Project } from "./project.ts";
 
@@ -25,7 +25,7 @@ function consumeSearchBudget(project: Project, max: number): void {
   writeFileSync(file, JSON.stringify({ used: used + 1 }));
 }
 
-export async function runWebSearch(project: Project, config: PresscheckConfig, query: string): Promise<string> {
+export async function runWebSearch(project: Project, config: BluelineConfig, query: string): Promise<string> {
   consumeSearchBudget(project, config.webSearch.maxSearchesPerRun);
   const apiKey = requireApiKey(config.webSearch.apiKeyEnv ?? "GEMINI_API_KEY", "web search");
   const ai = new GoogleGenAI({ apiKey });

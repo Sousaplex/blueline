@@ -9,7 +9,7 @@ export interface DesignerConfig {
   apiKeyEnv?: string;      // env var holding the API key for the provider
 }
 
-export interface PresscheckConfig {
+export interface BluelineConfig {
   designer: DesignerConfig;
   images: { provider: string; model: string; variantsPerPrompt: number; apiKeyEnv?: string };
   reviewer: { provider: string; model: string; maxRounds: number; apiKeyEnv?: string };
@@ -18,7 +18,7 @@ export interface PresscheckConfig {
   webSearch: { model: string; maxSearchesPerRun: number; apiKeyEnv?: string };
 }
 
-const DEFAULTS: Pick<PresscheckConfig, "webFetch" | "webSearch"> = {
+const DEFAULTS: Pick<BluelineConfig, "webFetch" | "webSearch"> = {
   webFetch: { maxFetchesPerRun: 10, maxContentChars: 20_000 },
   webSearch: { model: "gemini-3.5-flash", maxSearchesPerRun: 5, apiKeyEnv: "GEMINI_API_KEY" },
 };
@@ -28,9 +28,9 @@ const DEFAULTS: Pick<PresscheckConfig, "webFetch" | "webSearch"> = {
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
 // Data root = where mutable state lives: providers.json, workspace.json, .env,
-// and the default workspace. The packaged app sets PRESSCHECK_HOME to the OS
+// and the default workspace. The packaged app sets BLUELINE_HOME to the OS
 // app-data dir; in dev it equals REPO_ROOT so nothing changes.
-export const DATA_ROOT = process.env.PRESSCHECK_HOME ? resolve(process.env.PRESSCHECK_HOME) : REPO_ROOT;
+export const DATA_ROOT = process.env.BLUELINE_HOME ? resolve(process.env.BLUELINE_HOME) : REPO_ROOT;
 if (DATA_ROOT !== REPO_ROOT) mkdirSync(DATA_ROOT, { recursive: true });
 
 // Load .env from the data root (and, in dev, the repo) — existing env wins.
@@ -45,7 +45,7 @@ for (const root of new Set([DATA_ROOT, REPO_ROOT])) {
   }
 }
 
-export function loadConfig(): PresscheckConfig {
+export function loadConfig(): BluelineConfig {
   const configPath = resolve(DATA_ROOT, "config", "providers.json");
   const examplePath = resolve(REPO_ROOT, "config", "providers.example.json");
   const path = existsSync(configPath) ? configPath : examplePath;

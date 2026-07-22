@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="docs/media/logo.png" width="112" alt="blueline logo" />
+  <img src="docs/media/logo.png" width="112" alt="Blueline logo" />
 </p>
 
-<h1 align="center">blueline</h1>
+<h1 align="center">Blueline</h1>
 
 <p align="center">
   Print-ready marketing collateral, designed and press-checked by an agent.<br/>
@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/media/screenshot.png" alt="blueline app: proof view with review rounds, sources, and agent pane" />
+  <img src="docs/media/screenshot.png" alt="Blueline app: proof view with review rounds, sources, and agent pane" />
 </p>
 
 ## What it does
@@ -51,7 +51,7 @@ print-ready PDF that is pixel-identical to the preview.
 
 ### Desktop app
 
-Grab `blueline-<version>-arm64.dmg` from `app/release/` (unsigned for now — right-click →
+Grab `Blueline-<version>-arm64.dmg` from `app/release/` (unsigned for now — right-click →
 Open on first launch). First run walks you through picking a workspace folder and pasting a
 `GEMINI_API_KEY` (one free key powers design, imagery, review, and research; get one at
 aistudio.google.com). Keys are stored locally in the app's own `.env` and applied live.

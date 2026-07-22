@@ -1,17 +1,17 @@
-// presscheck MCP server — lets external agents (Claude Code, Kimi CLI, …)
-// drive presscheck: create projects, write briefs, queue design runs, read
+// Blueline MCP server — lets external agents (Claude Code, Kimi CLI, …)
+// drive Blueline: create projects, write briefs, queue design runs, read
 // review verdicts. It is a thin stdio client of the engine bridge, so state
 // is shared with the desktop app / viewer: what an agent does here shows up
 // live in the UI.
 //
 // Register (Claude Code):
-//   claude mcp add presscheck -- npx tsx /path/to/presscheck/toolkit/src/mcp/server.ts
+//   claude mcp add blueline -- npx tsx /path/to/blueline/toolkit/src/mcp/server.ts
 // The bridge must be running (the desktop app, or `npm run serve` in toolkit/).
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
-const BRIDGE = process.env.PRESSCHECK_BRIDGE_URL ?? "http://localhost:7717";
+const BRIDGE = process.env.BLUELINE_BRIDGE_URL ?? "http://localhost:7717";
 
 async function api(path: string, body?: unknown): Promise<any> {
   let res: Response;
@@ -24,7 +24,7 @@ async function api(path: string, body?: unknown): Promise<any> {
     });
   } catch {
     throw new Error(
-      `presscheck bridge unreachable at ${BRIDGE} — start the presscheck app, or run \`npm run serve\` in the toolkit directory`,
+      `Blueline bridge unreachable at ${BRIDGE} — start the Blueline app, or run \`npm run serve\` in the toolkit directory`,
     );
   }
   const payload = await res.json().catch(() => ({}));
@@ -67,9 +67,9 @@ server.tool(
 
 server.tool(
   "add_source",
-  "Add a source file to the workspace (kind=context: facts/copy points/product docs; kind=style: brand & style guides that apply to every project). Content is plain text/markdown.",
+  "Add a source file to the workspace (kind=context: facts/copy points/product docs; kind=brand: brand guidelines & assets that apply to every project). Content is plain text/markdown.",
   {
-    kind: z.enum(["context", "style"]),
+    kind: z.enum(["context", "brand"]),
     filename: z.string().describe("e.g. product-facts.md"),
     content: z.string(),
   },
@@ -164,7 +164,7 @@ server.tool(
 
 server.tool(
   "open_project",
-  "Open a project in the presscheck UI (switches what the human sees; not required for run_project).",
+  "Open a project in the Blueline UI (switches what the human sees; not required for run_project).",
   { slug: z.string() },
   async ({ slug }) => {
     await api("/api/open", { projectDir: slug });

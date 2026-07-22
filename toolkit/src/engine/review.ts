@@ -2,7 +2,7 @@ import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { GoogleGenAI, Type as GType } from "@google/genai";
 import type { ReviewResult } from "../providers/types.ts";
-import type { PresscheckConfig } from "./config.ts";
+import type { BluelineConfig } from "./config.ts";
 import { requireApiKey } from "./config.ts";
 import type { Project } from "./project.ts";
 import { analyzePage, catastrophicBands, describeWhitespace } from "./whitespace.ts";
@@ -63,7 +63,7 @@ async function rasterizePdf(pdfPath: string): Promise<Buffer[]> {
 /** Rasterize the proof, ask the vision reviewer, persist review/round-N.json. */
 export async function runReview(
   project: Project,
-  config: PresscheckConfig,
+  config: BluelineConfig,
 ): Promise<{ round: number; result: ReviewResult; pageCount: number }> {
   const completed = project.completedRounds();
   const thisRun = completed - runStartRound(project);
@@ -111,7 +111,7 @@ export async function runReview(
     "",
     `# Brief\n${project.brief()}`,
     "",
-    `# Style guide\n${project.styleGuide() || "(none provided)"}`,
+    `# Brand guidelines\n${project.brandGuide() || "(none provided)"}`,
     "",
     `# Previous review round\n${priorRounds}`,
   ].join("\n");

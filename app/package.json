@@ -1,6 +1,6 @@
 {
   "name": "blueline-app",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -46,7 +46,7 @@
   "main": "dist-electron/main.cjs",
   "build": {
     "appId": "com.blueline.app",
-    "productName": "blueline",
+    "productName": "Blueline",
     "asar": false,
     "directories": {
       "output": "release"

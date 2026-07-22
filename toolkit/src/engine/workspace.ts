@@ -1,10 +1,10 @@
 // A workspace is the user-chosen folder where all design work lives:
 //   <root>/projects/<slug>/   — one dir per deliverable
 //   <root>/context/           — source material (agent read-only)
-//   <root>/styles/            — brand & style guides (agent read-only)
-// The presscheck repo itself is the default workspace (backwards compatible
+//   <root>/brand/             — brand guidelines + assets (agent read-only)
+// The Blueline repo itself is the default workspace (backwards compatible
 // with the demo). The last-used workspace persists in config/workspace.json.
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { DATA_ROOT } from "./config.ts";
 
@@ -27,11 +27,15 @@ export class Workspace {
 
   get projectsDir() { return join(this.root, "projects"); }
   get contextDir() { return join(this.root, "context"); }
-  get stylesDir() { return join(this.root, "styles"); }
+  /** Brand guidelines + assets (logos, fonts, palettes) — the agent's persistent brand home. */
+  get brandDir() { return join(this.root, "brand"); }
 
-  /** Create the standard sub-folders (idempotent). */
+  /** Create the standard sub-folders (idempotent); migrates legacy styles/ → brand/. */
   ensure(): this {
-    for (const dir of [this.projectsDir, this.contextDir, this.stylesDir]) {
+    if (existsSync(join(this.root, "styles")) && !existsSync(this.brandDir)) {
+      renameSync(join(this.root, "styles"), this.brandDir);
+    }
+    for (const dir of [this.projectsDir, this.contextDir, this.brandDir]) {
       mkdirSync(dir, { recursive: true });
     }
     return this;

@@ -53,7 +53,7 @@ export interface ContextFile {
   selected: boolean;
 }
 
-export interface StyleFile {
+export interface BrandFile {
   path: string;
   kind: SourceKind;
   size: number;
@@ -77,7 +77,7 @@ export interface ProjectState {
   meta: ProjectMeta | null;
   brief: string;
   contextFiles: ContextFile[];
-  styleFiles: StyleFile[];
+  brandFiles: BrandFile[];
   rounds: RoundInfo[];
   images: ImageSlot[];
   editable: { pcId: string; text: string }[];
@@ -162,7 +162,7 @@ export interface ProjectListing {
 /** Injected by the Electron preload script; absent in browser mode. */
 declare global {
   interface Window {
-    presscheck?: {
+    blueline?: {
       exportPdf(): Promise<string | null>;
       chooseDirectory(): Promise<string | null>;
       isElectron: true;
@@ -186,9 +186,9 @@ export interface EngineClient {
   createVariants(slug: string, directions: { label: string; direction: string }[]): Promise<void>;
   selectSources(files: string[] | null): Promise<void>;
   /** name may include a relative folder path ("photos/team.jpg") — folders are created. */
-  uploadSource(kind: "context" | "style", name: string, dataBase64: string): Promise<void>;
-  deleteSource(kind: "context" | "style", path: string): Promise<void>;
-  sourceFileUrl(kind: "context" | "style", path: string, cacheKey: number): string;
+  uploadSource(kind: "context" | "brand", name: string, dataBase64: string): Promise<void>;
+  deleteSource(kind: "context" | "brand", path: string): Promise<void>;
+  sourceFileUrl(kind: "context" | "brand", path: string, cacheKey: number): string;
   updateMeta(patch: { displayName?: string; series?: string | null; settings?: Partial<PageSettings> }): Promise<void>;
   /** Branch a project; round-specific when round is given. Opens the new project. */
   forkProject(slug: string, round?: number, name?: string): Promise<string>;
@@ -320,11 +320,11 @@ export class BrowserEngineClient implements EngineClient {
     return post("/api/variants", { slug, directions });
   }
   selectSources(files: string[] | null) { return post("/api/sources/select", { files }); }
-  uploadSource(kind: "context" | "style", name: string, dataBase64: string) {
+  uploadSource(kind: "context" | "brand", name: string, dataBase64: string) {
     return post("/api/sources/upload", { kind, name, dataBase64 });
   }
-  deleteSource(kind: "context" | "style", path: string) { return post("/api/sources/delete", { kind, path }); }
-  sourceFileUrl(kind: "context" | "style", path: string, cacheKey: number): string {
+  deleteSource(kind: "context" | "brand", path: string) { return post("/api/sources/delete", { kind, path }); }
+  sourceFileUrl(kind: "context" | "brand", path: string, cacheKey: number): string {
     return `/api/source/file?kind=${kind}&path=${encodeURIComponent(path)}&k=${cacheKey}`;
   }
   updateMeta(patch: { displayName?: string; series?: string | null; settings?: Partial<PageSettings> }) {
@@ -373,8 +373,8 @@ export class BrowserEngineClient implements EngineClient {
   useDefaultWorkspace() { return post("/api/workspace", { useDefault: true }); }
 
   async chooseWorkspace(): Promise<boolean> {
-    const root = window.presscheck
-      ? await window.presscheck.chooseDirectory()
+    const root = window.blueline
+      ? await window.blueline.chooseDirectory()
       : window.prompt("Workspace folder (absolute path):");
     if (!root) return false;
     await post("/api/workspace", { root });
@@ -382,7 +382,7 @@ export class BrowserEngineClient implements EngineClient {
   }
 
   async exportPdf(): Promise<string | null> {
-    if (window.presscheck) return window.presscheck.exportPdf();
+    if (window.blueline) return window.blueline.exportPdf();
     window.open("/files/out/proof.pdf", "_blank"); // browser fallback: latest proof
     return null;
   }

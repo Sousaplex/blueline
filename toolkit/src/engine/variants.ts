@@ -1,7 +1,7 @@
 // Design-direction variants: propose N clearly distinct directions for a brief,
 // then fan them out as sibling projects that run through the parallel queue.
 import { GoogleGenAI, Type as GType } from "@google/genai";
-import type { PresscheckConfig } from "./config.ts";
+import type { BluelineConfig } from "./config.ts";
 import { requireApiKey } from "./config.ts";
 import type { Project } from "./project.ts";
 
@@ -24,7 +24,7 @@ const DIRECTIONS_SCHEMA = {
 
 export async function suggestDirections(
   project: Project,
-  config: PresscheckConfig,
+  config: BluelineConfig,
   count: number,
 ): Promise<Direction[]> {
   const apiKey = requireApiKey(config.reviewer.apiKeyEnv ?? "GEMINI_API_KEY", "variant suggestions");
@@ -44,7 +44,7 @@ export async function suggestDirections(
               "",
               `# Brief\n${project.brief()}`,
               "",
-              `# Brand style guide\n${project.styleGuide() || "(none)"}`,
+              `# Brand guidelines\n${project.brandGuide() || "(none)"}`,
             ].join("\n"),
           },
         ],

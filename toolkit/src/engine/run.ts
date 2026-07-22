@@ -2,7 +2,7 @@
 import { markRunStart } from "./review.ts";
 import { resetSearchBudget } from "./search.ts";
 import { resetFetchBudget } from "./web-fetch.ts";
-import { createPresscheckSession } from "./session.ts";
+import { createBluelineSession } from "./session.ts";
 
 function parseArgs(argv: string[]) {
   const args = { projectDir: "", modelOverride: undefined as string | undefined, prompt: undefined as string | undefined };
@@ -19,7 +19,7 @@ function parseArgs(argv: string[]) {
 }
 
 const args = parseArgs(process.argv.slice(2));
-const { session, project, config, dispose } = await createPresscheckSession({
+const { session, project, config, dispose } = await createBluelineSession({
   projectDir: args.projectDir,
   modelOverride: args.modelOverride,
 });
@@ -27,7 +27,7 @@ const { session, project, config, dispose } = await createPresscheckSession({
 resetFetchBudget(project);
 resetSearchBudget(project);
 markRunStart(project);
-console.log(`presscheck engine — project=${project.slug} model=${session.model?.id} reviewer=${config.reviewer.model}`);
+console.log(`Blueline engine — project=${project.slug} model=${session.model?.id} reviewer=${config.reviewer.model}`);
 
 let currentTool: string | undefined;
 session.subscribe((event) => {

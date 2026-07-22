@@ -1,6 +1,6 @@
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import type { PresscheckConfig } from "./config.ts";
+import type { BluelineConfig } from "./config.ts";
 import { generateImages } from "./images.ts";
 import type { Project } from "./project.ts";
 import type { RenderBackend } from "./render.ts";
@@ -12,8 +12,8 @@ function text(t: string) {
   return { content: [{ type: "text" as const, text: t }], details: {} };
 }
 
-/** The four presscheck domain tools, bound to one project + render backend. */
-export function buildPresscheckTools(project: Project, backend: RenderBackend, config: PresscheckConfig) {
+/** The four Blueline domain tools, bound to one project + render backend. */
+export function buildPresscheckTools(project: Project, backend: RenderBackend, config: BluelineConfig) {
   const render = defineTool({
     name: "render",
     label: "Render PDF",

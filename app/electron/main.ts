@@ -25,19 +25,19 @@ migrateLegacyAppData();
 
 // Dev: dist-electron/main.cjs -> app/ -> repo root. Packaged: everything the
 // bridge needs ships under Contents/Resources, and mutable state moves to the
-// per-user app-data dir via PRESSCHECK_HOME.
+// per-user app-data dir via BLUELINE_HOME.
 const REPO_ROOT = resolve(__dirname, "..", "..");
 const PACKAGED = app.isPackaged;
 const TOOLKIT_DIR = PACKAGED ? join(process.resourcesPath, "toolkit") : join(REPO_ROOT, "toolkit");
-const PRESSCHECK_HOME = process.env.PRESSCHECK_HOME ?? (PACKAGED ? app.getPath("userData") : undefined);
-const BRIDGE_PORT = Number(process.env.PRESSCHECK_PORT ?? 7717);
+const BLUELINE_HOME = process.env.BLUELINE_HOME ?? (PACKAGED ? app.getPath("userData") : undefined);
+const BRIDGE_PORT = Number(process.env.BLUELINE_PORT ?? 7717);
 const BRIDGE_URL = `http://localhost:${BRIDGE_PORT}`;
-const SMOKE = process.env.PRESSCHECK_SMOKE === "1";
-const SMOKE_DIR = process.env.PRESSCHECK_SMOKE_DIR ?? join(app.getPath("temp"), "presscheck-smoke");
+const SMOKE = process.env.BLUELINE_SMOKE === "1";
+const SMOKE_DIR = process.env.BLUELINE_SMOKE_DIR ?? join(app.getPath("temp"), "blueline-smoke");
 
 const childEnv = (): NodeJS.ProcessEnv => ({
   ...process.env,
-  ...(PRESSCHECK_HOME ? { PRESSCHECK_HOME } : {}),
+  ...(BLUELINE_HOME ? { BLUELINE_HOME } : {}),
   ...(PACKAGED ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
 });
 
@@ -72,7 +72,7 @@ async function ensureChromium(): Promise<void> {
 const SPLASH_URL =
   "data:text/html;charset=utf-8," + // charset is REQUIRED: without it "…" decodes as Latin-1 mojibake
   encodeURIComponent(
-    `<body style="font-family:system-ui;background:#262624;color:#fafafa;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div>Starting blueline…</div></body>`,
+    `<body style="font-family:system-ui;background:#262624;color:#fafafa;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div>Starting Blueline…</div></body>`,
   );
 
 let bridgeChild: ChildProcess | undefined;
@@ -165,7 +165,7 @@ app.whenReady().then(async () => {
     mainWindow = new BrowserWindow({
       width: 1440,
       height: 900,
-      title: "blueline",
+      title: "Blueline",
       show: true,
       webPreferences: {
         preload: join(__dirname, "preload.cjs"),
@@ -208,7 +208,7 @@ ipcMain.handle("export-pdf", async () => exportPdf());
 ipcMain.handle("choose-directory", async () => {
   const picked = await dialog.showOpenDialog(mainWindow!, {
     title: "Choose workspace folder",
-    message: "Pick the folder where blueline keeps projects, context, and styles",
+    message: "Pick the folder where Blueline keeps projects, context, and brand files",
     properties: ["openDirectory", "createDirectory"],
   });
   return picked.canceled ? null : (picked.filePaths[0] ?? null);
