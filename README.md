@@ -73,6 +73,18 @@ stored locally in the app's own `.env` and applied live.
 > other setup needed on their side. To skip the Gatekeeper step entirely you'd sign + notarize
 > the build, which requires an Apple Developer account ($99/yr); see **Status** below.
 
+### Workspace sync (share with your team)
+
+Settings → connect a git remote to back up a workspace or share it with teammates. It uses
+the system `git` and whatever credentials your machine already has (SSH agent or credential
+helper) — there's no separate GitHub login in the app, and teammates need git auth only if
+they'll push. **Connect to an empty repo:** the first sync pushes your projects, `context/`,
+`brand/`, `templates/`, and `config/providers.json`. If the repo already has unrelated
+history the push is rejected (git never force-pushes here) — it won't overwrite anything.
+Secrets never sync: `.env` (your API keys) and the machine-local `config/workspace.json` are
+always git-ignored, and a workspace connected before v0.15.2 has its `.env` untracked on the
+next sync (rotate any key that was already pushed — history still holds it).
+
 ### Development
 
 ```bash

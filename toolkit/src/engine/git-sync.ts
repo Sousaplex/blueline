@@ -2,7 +2,7 @@
 // team, or just back the work up. Uses the system git binary and whatever
 // credentials the user's environment already has (ssh agent, credential helper).
 import { execFile } from "node:child_process";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
@@ -51,12 +51,40 @@ export async function gitStatus(root: string): Promise<GitStatus> {
   return { isRepo: true, remote, branch, dirty, ahead, behind };
 }
 
-const WORKSPACE_GITIGNORE = `# blueline workspace — transient per-run state stays local
-projects/*/fetched/
-projects/*/.run-start.json
-projects/*/.search-budget.json
-.DS_Store
-`;
+// Never let these leave the machine: .env holds the raw API keys, config/workspace.json
+// holds absolute local paths. Everything else (projects, context, brand, templates,
+// config/providers.json) is meant to be shared with the team.
+const SECRET_PATHS = [".env", "config/workspace.json"];
+const REQUIRED_IGNORES = [
+  ...SECRET_PATHS,
+  ".env.*",
+  "projects/*/fetched/",
+  "projects/*/.run-start.json",
+  "projects/*/.search-budget.json",
+  ".DS_Store",
+];
+
+/** Ensure the workspace .gitignore excludes secrets + transient state (idempotent —
+ *  appends only the lines that are missing, so it also repairs a pre-existing file). */
+export function ensureGitignore(root: string): void {
+  const path = join(root, ".gitignore");
+  const existing = existsSync(path) ? readFileSync(path, "utf8") : "";
+  const present = new Set(existing.split("\n").map((l: string) => l.trim()));
+  const missing = REQUIRED_IGNORES.filter((ig) => !present.has(ig));
+  if (!missing.length && existing) return;
+  const header = existing
+    ? `${existing}${existing.endsWith("\n") ? "" : "\n"}# blueline — keep secrets and machine-local state out of sync\n`
+    : "# blueline workspace — secrets and transient per-run state stay local\n";
+  writeFileSync(path, header + missing.join("\n") + "\n");
+}
+
+/** Stop tracking secrets a pre-fix connect may already have staged/committed. `--cached`
+ *  keeps the file on disk; `--ignore-unmatch` is a no-op when the path was never tracked.
+ *  NOTE: this removes them going forward — anything already pushed stays in git history,
+ *  so an exposed key must still be rotated. */
+async function untrackSecrets(root: string): Promise<void> {
+  await git(root, "rm", "-r", "--cached", "--ignore-unmatch", "--", ...SECRET_PATHS).catch(() => {});
+}
 
 /** Turn the current workspace into a repo connected to `url` (idempotent). */
 export async function gitConnect(root: string, url: string): Promise<GitStatus> {
@@ -65,7 +93,8 @@ export async function gitConnect(root: string, url: string): Promise<GitStatus> 
   if (!status.isRepo) {
     await git(root, "init", "-b", "main");
   }
-  if (!existsSync(join(root, ".gitignore"))) writeFileSync(join(root, ".gitignore"), WORKSPACE_GITIGNORE);
+  ensureGitignore(root); // BEFORE any add/commit — the very first sync must already exclude .env
+  await untrackSecrets(root);
   const hasOrigin = await git(root, "remote", "get-url", "origin").catch(() => null);
   if (hasOrigin) await git(root, "remote", "set-url", "origin", url.trim());
   else await git(root, "remote", "add", "origin", url.trim());
@@ -90,6 +119,10 @@ export interface SyncResult {
 export async function gitSync(root: string, message?: string): Promise<SyncResult> {
   const status = await gitStatus(root);
   if (!status.isRepo || !status.remote) throw new Error("Workspace is not connected to a remote — connect a repo first");
+  // Defensive: repair the ignore rules and untrack secrets on EVERY sync, so a workspace
+  // connected before this fix stops pushing .env from the next sync onward.
+  ensureGitignore(root);
+  await untrackSecrets(root);
   const parts: string[] = [];
 
   const hasUpstream = await git(root, "rev-parse", "--abbrev-ref", "@{upstream}").catch(() => null);

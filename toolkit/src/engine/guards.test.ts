@@ -287,3 +287,24 @@ test("element nudge clamps offsets and round-trips through page.html", () => {
   assert.deepEqual(getElementStyle(p, "stats"), { translateX: 0, translateY: 0, marginTop: null });
   assert.throws(() => setElementStyle(p, "nope", { translateX: 1 }), /No element/);
 });
+
+test("workspace .gitignore always excludes secrets (.env, config/workspace.json)", async () => {
+  const { ensureGitignore } = await import("./git-sync.ts");
+  // fresh workspace: a brand-new .gitignore lists the secret paths
+  const root = mkdtempSync(join(tmpdir(), "pc-gi-"));
+  ensureGitignore(root);
+  const fresh = readFileSync(join(root, ".gitignore"), "utf8");
+  for (const secret of [".env", "config/workspace.json"]) assert.ok(fresh.includes(secret), `missing ${secret}`);
+  assert.ok(!fresh.includes("config/providers.json"), "providers.json is shareable, must NOT be ignored");
+  // pre-existing .gitignore that lacks .env gets it appended, existing lines preserved
+  const root2 = mkdtempSync(join(tmpdir(), "pc-gi-"));
+  writeFileSync(join(root2, ".gitignore"), "node_modules/\n");
+  ensureGitignore(root2);
+  const patched = readFileSync(join(root2, ".gitignore"), "utf8");
+  assert.ok(patched.includes("node_modules/"), "existing rule preserved");
+  assert.ok(patched.includes(".env"), ".env appended");
+  // idempotent: a second pass makes no change
+  const before = readFileSync(join(root2, ".gitignore"), "utf8");
+  ensureGitignore(root2);
+  assert.equal(readFileSync(join(root2, ".gitignore"), "utf8"), before, "second pass is a no-op");
+});
