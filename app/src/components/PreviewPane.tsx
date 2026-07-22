@@ -100,6 +100,22 @@ export function PreviewPane({
     if (!editing) setLiveKey(cacheKey);
   }, [cacheKey]);
 
+  // Keep the live canvas's images in sync with their selected variant WITHOUT reloading
+  // the iframe. While an image is selected the iframe is frozen (see liveKey above), so a
+  // variant shuttle / upload / regenerate would otherwise stay invisible until deselect.
+  // Swapping the <img src> in place is instant and preserves the selection and crop pan.
+  useEffect(() => {
+    if (mode !== "live") return;
+    const doc = iframeRef.current?.contentDocument;
+    if (!doc) return;
+    for (const slot of project.images) {
+      if (!slot.current) continue;
+      const img = doc.querySelector<HTMLImageElement>(`img[data-image-id="${slot.id}"]`);
+      const want = `images/${slot.id}/v${slot.current}.png`;
+      if (img && !(img.getAttribute("src") ?? "").startsWith(want)) img.setAttribute("src", want);
+    }
+  }, [project.images, mode, liveKey]);
+
   const nudgeEl = (pcId: string): HTMLElement | null =>
     iframeRef.current?.contentDocument?.querySelector<HTMLElement>(`[data-pc-id="${pcId}"]`) ?? null;
 
