@@ -22,6 +22,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import type { ContextFile, EngineClient, ProjectState, SourceKind } from "../engine-client";
+import { BriefForm } from "./BriefForm";
 
 const PAGE_SIZES = ["A4", "A5", "A3", "Letter", "Legal", "Tabloid"];
 
@@ -310,12 +311,7 @@ export function LeftPane({
           </div>
           {editingBrief ? (
             <div className="space-y-2">
-              <textarea
-                className="min-h-64 w-full rounded-md border bg-transparent p-2.5 font-mono text-[11px] leading-relaxed outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                value={briefDraft}
-                autoFocus
-                onChange={(e) => setBriefDraft(e.target.value)}
-              />
+              <BriefForm initial={project.brief} onChange={setBriefDraft} />
               <div className="flex justify-end gap-2">
                 <Button variant="outline" size="sm" onClick={() => setEditingBrief(false)}>
                   Cancel

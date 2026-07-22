@@ -13,6 +13,7 @@ import { gitClone, gitConnect, gitStatus, gitSync } from "./git-sync.ts";
 import { generateImages } from "./images.ts";
 import {
   deleteElement,
+  tagElement,
   getElementStyle,
   listEditable,
   listImageSlots,
@@ -972,6 +973,15 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
 
 
 
+      if (req.method === "POST" && url.pathname === "/api/element/tag") {
+        const body = await readBody(req);
+        if (!body.path || !body.pcId) return json(res, 400, { error: "path and pcId required" });
+        const project = bridge.requireProject();
+        tagElement(project, String(body.path), String(body.pcId));
+        // No files_changed broadcast: the client already applied the attribute locally,
+        // and a reload here would interrupt the edit the user is about to make.
+        return json(res, 200, { ok: true });
+      }
       if (req.method === "POST" && url.pathname === "/api/element/delete") {
         const body = await readBody(req);
         if (!body.pcId) return json(res, 400, { error: "pcId required" });

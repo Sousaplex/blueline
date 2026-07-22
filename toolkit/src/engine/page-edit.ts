@@ -141,6 +141,21 @@ export function getElementStyle(project: Project, pcId: string): { translateX: n
   };
 }
 
+/** Give an untagged element a data-pc-id so the human editor can work with it.
+ *  The element is addressed by a strict child-index path from <body> — the only
+ *  selector grammar accepted here, so arbitrary CSS can't be smuggled in. */
+export function tagElement(project: Project, cssPath: string, pcId: string): void {
+  if (!/^[a-z][a-z0-9-]{0,63}$/.test(pcId)) throw new Error(`Invalid pc-id: ${pcId}`);
+  if (!/^body(\s*>\s*\*:nth-child\(\d{1,3}\))+$/.test(cssPath)) throw new Error("Invalid element path");
+  const { dom } = loadDom(project);
+  if (dom.document.querySelector(`[data-pc-id="${pcId}"]`)) throw new Error(`pc-id "${pcId}" is already in use`);
+  const el = dom.document.querySelector(cssPath);
+  if (!el) throw new Error("No element at that path (page changed since it was picked?)");
+  if (el.getAttribute("data-pc-id")) throw new Error("Element is already tagged");
+  el.setAttribute("data-pc-id", pcId);
+  save(project, dom.document);
+}
+
 /** Remove an element from the page entirely (viewer confirms before calling). */
 export function deleteElement(project: Project, pcId: string): void {
   const { dom } = loadDom(project);

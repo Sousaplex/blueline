@@ -11,21 +11,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { EngineClient } from "../engine-client";
-
-const BRIEF_PLACEHOLDER = `# Brief: <what is this piece?>
-
-**Format:** one-pager, A4 portrait, print (PDF)
-**Audience:** <who will hold this in their hands?>
-**Goal:** <what should they do after reading it?>
-
-## Key messages
-1. ...
-
-## Must include
-- ...
-
-## Tone
-...`;
+import { BriefForm } from "./BriefForm";
 
 export function NewProjectDialog({
   client,
@@ -77,13 +63,8 @@ export function NewProjectDialog({
             />
           </div>
           <div className="space-y-1.5">
-            <Label>Brief (markdown — leave empty for a template to fill in later)</Label>
-            <textarea
-              className="min-h-48 w-full rounded-md border bg-transparent p-2.5 font-mono text-xs leading-relaxed outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              value={brief}
-              placeholder={BRIEF_PLACEHOLDER}
-              onChange={(e) => setBrief(e.target.value)}
-            />
+            <Label>Brief — the agent designs from this (fill what you know; edit any time)</Label>
+            <BriefForm initial="" onChange={setBrief} />
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>

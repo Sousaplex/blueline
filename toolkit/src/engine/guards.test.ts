@@ -122,7 +122,23 @@ test("updateCopy treats any non-inline child as structure (the h3+p card case)",
   assert.ok(html.includes("<h3>Title</h3>") && html.includes("Bigger claim"));
 });
 
-const { deleteElement, moveElement, moveElementBefore, pageSource, writePageSource } = await import("./page-edit.ts");
+const { deleteElement, moveElement, moveElementBefore, pageSource, writePageSource, tagElement } = await import("./page-edit.ts");
+
+test("tagElement tags via strict child-index paths only", () => {
+  const p = tempProject();
+  writeFileSync(
+    p.pageHtml,
+    `<html><body><div data-pc-id="wrap"><div class="metric"><span>75%</span><span>caption</span></div></div></body></html>`,
+  );
+  // body > wrap > .metric > second span
+  tagElement(p, "body > *:nth-child(1) > *:nth-child(1) > *:nth-child(2)", "metric-caption");
+  const html = readFileSync(p.pageHtml, "utf8");
+  assert.ok(/<span data-pc-id="metric-caption">caption<\/span>/.test(html));
+  assert.throws(() => tagElement(p, "body > *:nth-child(1)", "wrap2"), /already tagged/);
+  assert.throws(() => tagElement(p, "div.metric", "x"), /Invalid element path/); // free CSS rejected
+  assert.throws(() => tagElement(p, "body > *:nth-child(1) > *:nth-child(1) > *:nth-child(1)", "metric-caption"), /already in use/);
+  assert.throws(() => tagElement(p, "body > *:nth-child(9)", "nope"), /No element/);
+});
 
 test("element delete/move/source operations", () => {
   const p = tempProject();

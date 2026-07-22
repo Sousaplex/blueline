@@ -53,7 +53,9 @@ image slot instead of generating a replacement.
    Reference images as <img src="images/<id>/v1.png" data-image-id="<id>">.
    Give every text-bearing element AND every layout block (sections, columns, cards) a stable
    data-pc-id attribute (e.g. data-pc-id="headline", data-pc-id="stats-band") — the human
-   editor uses these to tweak copy and nudge spacing without you.
+   editor uses these to tweak copy and nudge spacing without you. Visually distinct text
+   fragments get SEPARATE elements with SEPARATE data-pc-ids: a stat number and its caption,
+   an eyebrow and its title, a name and a role — never one element whose text mixes them.
 3. Write images/prompts.json — prompts must carry the style guide's palette and mood.
 4. gen_images, then render, then review.
 5. Apply the reviewer's fixes: layout issues are fixed in CSS (do not weaken the design to

@@ -75,6 +75,20 @@ export function PreviewPane({
   const nudgeRef = useRef<NudgeState | null>(nudge);
   nudgeRef.current = nudge;
   const persistTimer = useRef<number | undefined>(undefined);
+  const cacheKeyRef = useRef(cacheKey);
+  cacheKeyRef.current = cacheKey;
+  // The live iframe freezes while the user has a selection or an open text edit —
+  // a mid-edit reload would eat their focus (and their typing).
+  const [liveKey, setLiveKey] = useState(cacheKey);
+  useEffect(() => {
+    const doc = iframeRef.current?.contentDocument;
+    const editing = Boolean(
+      nudgeRef.current ||
+        activeImageRef.current ||
+        (doc?.activeElement as HTMLElement | null)?.hasAttribute?.("contenteditable"),
+    );
+    if (!editing) setLiveKey(cacheKey);
+  }, [cacheKey]);
 
   const nudgeEl = (pcId: string): HTMLElement | null =>
     iframeRef.current?.contentDocument?.querySelector<HTMLElement>(`[data-pc-id="${pcId}"]`) ?? null;
@@ -111,6 +125,7 @@ export function PreviewPane({
     setNudge(null);
     setActiveImage(null);
     onSelect(null);
+    setLiveKey(cacheKeyRef.current); // catch up on any renders frozen during the edit
   };
   const clearSelectionsRef = useRef(clearSelections);
   clearSelectionsRef.current = clearSelections;
@@ -197,7 +212,11 @@ export function PreviewPane({
     const INLINE_TAGS = new Set(["B", "I", "EM", "STRONG", "SPAN", "A", "BR", "SMALL", "SUP", "SUB", "CODE", "U", "MARK", "WBR", "TIME", "ABBR"]);
     const isStructural = (el: HTMLElement) =>
       Boolean(el.querySelector("[data-pc-id], [data-image-id], img")) ||
-      [...el.children].some((child) => !INLINE_TAGS.has(child.tagName.toUpperCase()));
+      [...el.children].some(
+        (child) =>
+          !INLINE_TAGS.has(child.tagName.toUpperCase()) ||
+          doc.defaultView!.getComputedStyle(child).display !== "inline", // a block-displayed span is structure too
+      );
 
     const selectForNudge = (el: HTMLElement) => {
       doc.querySelectorAll(".pc-nudge-active").forEach((other) => other.classList.remove("pc-nudge-active"));
@@ -212,6 +231,43 @@ export function PreviewPane({
 
     const clearDropMarkers = () =>
       doc.querySelectorAll(".pc-drop-before, .pc-drop-after").forEach((el) => el.classList.remove("pc-drop-before", "pc-drop-after"));
+
+    // Click-to-drill: the user clicked INSIDE a tagged block, on an element that has no
+    // pc-id of its own (a stat number, a badge, a caption span…). Tag it on the spot so
+    // it becomes independently editable, then operate on it instead of the ancestor.
+    const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    const pathOf = (node: HTMLElement): string => {
+      const parts: string[] = [];
+      let cur: HTMLElement | null = node;
+      while (cur && cur.tagName !== "BODY") {
+        const parent: HTMLElement | null = cur.parentElement;
+        if (!parent) return "";
+        parts.unshift(`*:nth-child(${Array.prototype.indexOf.call(parent.children, cur) + 1})`);
+        cur = parent;
+      }
+      return cur ? `body > ${parts.join(" > ")}` : "";
+    };
+    const autoTag = async (node: HTMLElement): Promise<string | null> => {
+      const path = pathOf(node);
+      if (!path) return null;
+      const base = slugify(node.className.toString().split(/\s+/)[0] || node.tagName) || "el";
+      const id = `${base}-${Math.random().toString(36).slice(2, 6)}`;
+      node.setAttribute("data-pc-id", id); // optimistic — the iframe copy is live immediately
+      try {
+        await client.tagElement(path, id);
+        return id;
+      } catch {
+        node.removeAttribute("data-pc-id");
+        return null;
+      }
+    };
+    /** The precise element the user clicked, drilled below the handler's element. */
+    const drillTarget = (ev: MouseEvent, el: HTMLElement): HTMLElement => {
+      const raw = ev.target && (ev.target as Node).nodeType === 1 ? (ev.target as HTMLElement) : null; // realm-safe: iframe Element !== parent Element
+      if (!raw || raw === el) return el;
+      if (raw.hasAttribute("data-image-id") || raw.tagName === "BODY" || raw.tagName === "HTML") return el;
+      return raw;
+    };
 
     // Smart-align guide lines (magenta) shown while a drag snaps to sibling edges/centers.
     const guides = {
@@ -243,134 +299,150 @@ export function PreviewPane({
     const GRID_MM = 5;
     const GRID_SNAP_MM = 1.2; // grid capture distance (only when the grid is shown)
 
+    /** Begin an inline text edit with a one-shot blur commit (change-detected). */
+    const beginTextEdit = (elm: HTMLElement) => {
+      const cs = doc.defaultView!.getComputedStyle(elm);
+      onSelect({
+        kind: "text",
+        id: elm.getAttribute("data-pc-id")!,
+        tag: elm.tagName,
+        text: elm.textContent ?? "",
+        styles: { fontSize: cs.fontSize, fontWeight: cs.fontWeight, lineHeight: cs.lineHeight, color: cs.color, textAlign: cs.textAlign },
+      });
+      const original = elm.textContent ?? "";
+      elm.setAttribute("contenteditable", "plaintext-only");
+      elm.focus();
+      elm.addEventListener(
+        "blur",
+        () => {
+          elm.removeAttribute("contenteditable");
+          const text = elm.textContent ?? "";
+          if (text === original) return; // click-in, click-out: touch nothing
+          void actions.updateCopy(elm.getAttribute("data-pc-id")!, text).then(() => setDirty(true));
+        },
+        { once: true },
+      );
+    };
+
     doc.querySelectorAll<HTMLElement>("[data-pc-id]").forEach((el) => {
       el.addEventListener("click", (ev) => {
-        ev.stopPropagation(); // innermost block wins — never bubble edits to containers
-        if (editToolRef.current === "nudge") {
-          ev.preventDefault();
-          selectForNudge(el);
-          return;
-        }
+        ev.stopPropagation(); // innermost tagged block wins — never bubble to containers
         ev.preventDefault();
-        if (isStructural(el)) return; // containers are nudge-only, not text-editable
-        const cs = doc.defaultView!.getComputedStyle(el);
-        onSelect({
-          kind: "text",
-          id: el.getAttribute("data-pc-id")!,
-          tag: el.tagName,
-          text: el.textContent ?? "",
-          styles: { fontSize: cs.fontSize, fontWeight: cs.fontWeight, lineHeight: cs.lineHeight, color: cs.color, textAlign: cs.textAlign },
-        });
-        el.dataset.pcOriginal = el.textContent ?? "";
-        el.setAttribute("contenteditable", "plaintext-only");
-        el.focus();
+        void (async () => {
+          // Drill to the exact element under the cursor; tag it if it's untagged.
+          let target = drillTarget(ev, el);
+          if (target !== el && !target.hasAttribute("data-pc-id")) {
+            const id = await autoTag(target);
+            if (!id) target = el;
+          }
+          if (editToolRef.current === "nudge" || isStructural(target)) {
+            // Nudge tool, or a structural block in text tool: select it so the
+            // Inspector shows context (text editing stays leaf-only).
+            selectForNudge(target);
+            return;
+          }
+          beginTextEdit(target);
+        })();
       });
-      el.addEventListener("blur", () => {
-        if (!el.hasAttribute("contenteditable")) return;
-        el.removeAttribute("contenteditable");
-        const pcId = el.getAttribute("data-pc-id")!;
-        const text = el.textContent ?? "";
-        const original = el.dataset.pcOriginal;
-        delete el.dataset.pcOriginal;
-        if (text === original) return; // click-in, click-out: touch nothing
-        void actions.updateCopy(pcId, text).then(() => setDirty(true));
-      });
+    });
 
-      // Nudge-mode drag: plain drag = translate (with smart-align + grid snap);
-      // ⌥-drag = reorder in document flow.
-      let drag: {
-        x: number; y: number; startX: number; startY: number;
-        reorder: boolean; target: HTMLElement | null; after: boolean;
-        baseRect?: DOMRect; alignV?: number[]; alignH?: number[];
-      } | null = null;
-      el.addEventListener("mousedown", (ev) => {
-        const n = nudgeRef.current;
-        if (editToolRef.current !== "nudge" || n?.pcId !== el.getAttribute("data-pc-id")) return;
-        ev.preventDefault();
-        drag = { x: ev.clientX, y: ev.clientY, startX: n.x, startY: n.y, reorder: ev.altKey, target: null, after: false };
-        if (drag.reorder) {
-          el.classList.add("pc-dragging");
-        } else {
-          // Collect the edges/centers of every other block once — smart-align targets.
-          drag.baseRect = el.getBoundingClientRect();
-          const v: number[] = [];
-          const h: number[] = [];
-          doc.querySelectorAll<HTMLElement>("[data-pc-id], img[data-image-id]").forEach((other) => {
-            if (other === el || el.contains(other) || other.contains(el)) return;
-            const r = other.getBoundingClientRect();
-            if (!r.width || !r.height) return;
-            v.push(r.left, r.right, r.left + r.width / 2);
-            h.push(r.top, r.bottom, r.top + r.height / 2);
-          });
-          drag.alignV = v;
-          drag.alignH = h;
-        }
-      });
-      doc.addEventListener("mousemove", (ev) => {
-        if (!drag) return;
-        const n = nudgeRef.current;
-        if (!n || n.pcId !== el.getAttribute("data-pc-id")) return (drag = null);
-        if (drag.reorder) {
-          clearDropMarkers();
-          const under = doc.elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>("[data-pc-id]");
-          if (under && under !== el && !el.contains(under) && !under.contains(el)) {
-            const rect = under.getBoundingClientRect();
-            drag.after = ev.clientY > rect.top + rect.height / 2;
-            drag.target = under;
-            under.classList.add(drag.after ? "pc-drop-after" : "pc-drop-before");
-          } else {
-            drag.target = null;
-          }
-          return;
-        }
-        let dxPx = ev.clientX - drag.x;
-        let dyPx = ev.clientY - drag.y;
-        const vLines: number[] = [];
-        const hLines: number[] = [];
-        if (drag.baseRect && drag.alignV && drag.alignH) {
-          const r = drag.baseRect;
-          let bestX: { adj: number; line: number } | null = null;
-          for (const edge of [r.left + dxPx, r.right + dxPx, r.left + r.width / 2 + dxPx]) {
-            for (const t of drag.alignV) {
-              const adj = t - edge;
-              if (Math.abs(adj) <= SNAP_PX && (!bestX || Math.abs(adj) < Math.abs(bestX.adj))) bestX = { adj, line: t };
-            }
-          }
-          let bestY: { adj: number; line: number } | null = null;
-          for (const edge of [r.top + dyPx, r.bottom + dyPx, r.top + r.height / 2 + dyPx]) {
-            for (const t of drag.alignH) {
-              const adj = t - edge;
-              if (Math.abs(adj) <= SNAP_PX && (!bestY || Math.abs(adj) < Math.abs(bestY.adj))) bestY = { adj, line: t };
-            }
-          }
-          if (bestX) { dxPx += bestX.adj; vLines.push(bestX.line); }
-          if (bestY) { dyPx += bestY.adj; hLines.push(bestY.line); }
-          if (vLines.length || hLines.length) guides.show(vLines, hLines);
-          else guides.clear();
-        }
-        let xmm = drag.startX + dxPx * PX_TO_MM;
-        let ymm = drag.startY + dyPx * PX_TO_MM;
-        // Grid snap (only when the grid is visible, and only on axes smart-align didn't claim).
-        if (showGridRef.current) {
-          if (!vLines.length) { const s = Math.round(xmm / GRID_MM) * GRID_MM; if (Math.abs(s - xmm) <= GRID_SNAP_MM) xmm = s; }
-          if (!hLines.length) { const s = Math.round(ymm / GRID_MM) * GRID_MM; if (Math.abs(s - ymm) <= GRID_SNAP_MM) ymm = s; }
-        }
-        applyNudgeRef.current({ ...n, x: xmm, y: ymm });
-      });
-      doc.addEventListener("mouseup", () => {
-        if (!drag) return;
-        const d = drag;
-        drag = null;
-        el.classList.remove("pc-dragging");
+    // Nudge-mode drag, delegated at the document level so it works for any selected
+    // element — including ones tagged a moment ago. Plain drag = translate (smart-align
+    // + grid snap); ⌥-drag = reorder in document flow.
+    let drag: {
+      el: HTMLElement;
+      x: number; y: number; startX: number; startY: number;
+      reorder: boolean; target: HTMLElement | null; after: boolean;
+      baseRect?: DOMRect; alignV?: number[]; alignH?: number[];
+    } | null = null;
+    doc.addEventListener("mousedown", (ev) => {
+      const n = nudgeRef.current;
+      if (editToolRef.current !== "nudge" || !n) return;
+      const elm = doc.querySelector<HTMLElement>(`[data-pc-id="${n.pcId}"]`);
+      const t = ev.target && (ev.target as Node).nodeType === 1 ? (ev.target as Element) : null; // realm-safe
+      if (!elm || !t || (elm !== t && !elm.contains(t))) return; // drag starts on the selection
+      ev.preventDefault();
+      drag = { el: elm, x: ev.clientX, y: ev.clientY, startX: n.x, startY: n.y, reorder: ev.altKey, target: null, after: false };
+      if (drag.reorder) {
+        elm.classList.add("pc-dragging");
+      } else {
+        drag.baseRect = elm.getBoundingClientRect();
+        const v: number[] = [];
+        const h: number[] = [];
+        doc.querySelectorAll<HTMLElement>("[data-pc-id], img[data-image-id]").forEach((other) => {
+          if (other === elm || elm.contains(other) || other.contains(elm)) return;
+          const r = other.getBoundingClientRect();
+          if (!r.width || !r.height) return;
+          v.push(r.left, r.right, r.left + r.width / 2);
+          h.push(r.top, r.bottom, r.top + r.height / 2);
+        });
+        drag.alignV = v;
+        drag.alignH = h;
+      }
+    });
+    doc.addEventListener("mousemove", (ev) => {
+      if (!drag) return;
+      const n = nudgeRef.current;
+      if (!n || n.pcId !== drag.el.getAttribute("data-pc-id")) return (drag = null) as unknown as void;
+      if (drag.reorder) {
         clearDropMarkers();
-        guides.clear();
-        if (d.reorder && d.target) {
-          const id = el.getAttribute("data-pc-id")!;
-          const beforeId = d.target.getAttribute("data-pc-id")!;
-          clearSelectionsRef.current();
-          void client.moveElementBefore(id, beforeId, d.after).then(() => setDirty(true));
+        const under = doc.elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>("[data-pc-id]");
+        if (under && under !== drag.el && !drag.el.contains(under) && !under.contains(drag.el)) {
+          const rect = under.getBoundingClientRect();
+          drag.after = ev.clientY > rect.top + rect.height / 2;
+          drag.target = under;
+          under.classList.add(drag.after ? "pc-drop-after" : "pc-drop-before");
+        } else {
+          drag.target = null;
         }
-      });
+        return;
+      }
+      let dxPx = ev.clientX - drag.x;
+      let dyPx = ev.clientY - drag.y;
+      const vLines: number[] = [];
+      const hLines: number[] = [];
+      if (drag.baseRect && drag.alignV && drag.alignH) {
+        const r = drag.baseRect;
+        let bestX: { adj: number; line: number } | null = null;
+        for (const edge of [r.left + dxPx, r.right + dxPx, r.left + r.width / 2 + dxPx]) {
+          for (const t of drag.alignV) {
+            const adj = t - edge;
+            if (Math.abs(adj) <= SNAP_PX && (!bestX || Math.abs(adj) < Math.abs(bestX.adj))) bestX = { adj, line: t };
+          }
+        }
+        let bestY: { adj: number; line: number } | null = null;
+        for (const edge of [r.top + dyPx, r.bottom + dyPx, r.top + r.height / 2 + dyPx]) {
+          for (const t of drag.alignH) {
+            const adj = t - edge;
+            if (Math.abs(adj) <= SNAP_PX && (!bestY || Math.abs(adj) < Math.abs(bestY.adj))) bestY = { adj, line: t };
+          }
+        }
+        if (bestX) { dxPx += bestX.adj; vLines.push(bestX.line); }
+        if (bestY) { dyPx += bestY.adj; hLines.push(bestY.line); }
+        if (vLines.length || hLines.length) guides.show(vLines, hLines);
+        else guides.clear();
+      }
+      let xmm = drag.startX + dxPx * PX_TO_MM;
+      let ymm = drag.startY + dyPx * PX_TO_MM;
+      if (showGridRef.current) {
+        if (!vLines.length) { const g = Math.round(xmm / GRID_MM) * GRID_MM; if (Math.abs(g - xmm) <= GRID_SNAP_MM) xmm = g; }
+        if (!hLines.length) { const g = Math.round(ymm / GRID_MM) * GRID_MM; if (Math.abs(g - ymm) <= GRID_SNAP_MM) ymm = g; }
+      }
+      applyNudgeRef.current({ ...n, x: xmm, y: ymm });
+    });
+    doc.addEventListener("mouseup", () => {
+      if (!drag) return;
+      const d = drag;
+      drag = null;
+      d.el.classList.remove("pc-dragging");
+      clearDropMarkers();
+      guides.clear();
+      if (d.reorder && d.target) {
+        const id = d.el.getAttribute("data-pc-id")!;
+        const beforeId = d.target.getAttribute("data-pc-id")!;
+        clearSelectionsRef.current();
+        void client.moveElementBefore(id, beforeId, d.after).then(() => setDirty(true));
+      }
     });
 
     // Keyboard: arrows nudge, Escape deselects, Delete asks to remove the element.
@@ -587,7 +659,7 @@ export function PreviewPane({
               ref={iframeRef}
               title="live preview"
               className="min-h-[297mm] w-[210mm] rounded-sm border-0 bg-white shadow-lg ring-1 ring-black/10"
-              src={client.fileUrl("page.html", cacheKey)}
+              src={client.fileUrl("page.html", liveKey)}
               onLoad={armLiveEditing}
             />
           )}

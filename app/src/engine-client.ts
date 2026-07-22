@@ -181,6 +181,8 @@ export interface EngineClient {
   createSeries(slug: string, rootName: string, topics: string[], run: boolean): Promise<{ slug: string; state: RunState }[]>;
   setElementStyle(pcId: string, style: { translateX?: number; translateY?: number; marginTop?: number | null }): Promise<void>;
   getElementStyle(pcId: string): Promise<ElementNudge>;
+  /** Assign a data-pc-id to an untagged element (path = strict body>nth-child chain). */
+  tagElement(path: string, pcId: string): Promise<void>;
   deleteElement(pcId: string): Promise<void>;
   moveElement(pcId: string, direction: "up" | "down"): Promise<void>;
   moveElementBefore(pcId: string, beforePcId: string, after?: boolean): Promise<void>;
@@ -382,6 +384,7 @@ export class BrowserEngineClient implements EngineClient {
     return post("/api/images/style", { imageId, ...style });
   }
 
+  tagElement(path: string, pcId: string) { return post("/api/element/tag", { path, pcId }); }
   deleteElement(pcId: string) { return post("/api/element/delete", { pcId }); }
   moveElement(pcId: string, direction: "up" | "down") { return post("/api/element/move", { pcId, direction }); }
   moveElementBefore(pcId: string, beforePcId: string, after?: boolean) {
