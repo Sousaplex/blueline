@@ -34,5 +34,8 @@ exports.default = async function notarize(context) {
       };
   console.log(`[notarize] submitting ${appName}.app to Apple — this can take a few minutes…`);
   await notarize(opts);
-  console.log("[notarize] notarization complete");
+  // Staple the ticket INTO the .app now (afterSign runs before dmg/zip packaging),
+  // so the notarized app launches offline with no Gatekeeper round-trip.
+  require("node:child_process").execFileSync("xcrun", ["stapler", "staple", appPath], { stdio: "inherit" });
+  console.log("[notarize] notarization + stapling complete");
 };
