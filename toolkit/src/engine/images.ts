@@ -4,6 +4,7 @@ import { GoogleGenAI } from "@google/genai";
 import type { ImagePromptSpec } from "../providers/types.ts";
 import type { BluelineConfig } from "./config.ts";
 import { requireApiKey } from "./config.ts";
+import { recordImages } from "./cost-ledger.ts";
 import type { Project } from "./project.ts";
 
 export interface GeneratedImageSummary {
@@ -108,5 +109,7 @@ export async function generateImages(
     }
     summaries.push(summary);
   }
+  const totalImages = summaries.reduce((n, s) => n + s.files.length, 0);
+  if (totalImages) recordImages(project.dir, model, totalImages); // `model` is already resolved
   return summaries;
 }

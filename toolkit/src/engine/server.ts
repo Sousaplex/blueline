@@ -10,6 +10,8 @@ import { dirname, extname, join, normalize, resolve } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { WebSocketServer, type WebSocket } from "ws";
 import { DATA_ROOT, REPO_ROOT, applyApiKeys, loadConfig, saveApiKeys, type BluelineConfig } from "./config.ts";
+import { resetLedger, takeLedger } from "./cost-ledger.ts";
+import { textCost } from "./pricing.ts";
 import { draftBrief } from "./brief-draft.ts";
 import { gitClone, gitConnect, gitDisconnect, gitStatus, gitSync } from "./git-sync.ts";
 import { generateImages } from "./images.ts";
@@ -70,6 +72,7 @@ export type RunState = "idle" | "queued" | "running";
 class Bridge {
   private sessions = new Map<string, BluelineSession>(); // slug -> session
   private runStates = new Map<string, RunState>(); // slug -> queued|running
+  private costBase = new Map<string, { input: number; output: number }>(); // designer tokens at run start
   // Chat requests in flight: when the agent finishes one and page.html changed,
   // the result is archived as an "edit" round — every AI edit is design history.
   private pendingEdits = new Map<string, { prompt: string; hash: string; rounds: number }>();
@@ -190,16 +193,27 @@ class Bridge {
           this.broadcast({ type: "files_changed", project: slug });
           break;
         }
-        case "agent_start":
+        case "agent_start": {
           this.runStates.set(slug, "running");
           this.broadcast({ type: "run_state", project: slug, state: "running" });
+          // Snapshot designer token counts + clear the per-run cost ledger.
+          try {
+            const t = pc.session.getSessionStats().tokens;
+            this.costBase.set(slug, { input: t.input, output: t.output });
+          } catch {
+            this.costBase.set(slug, { input: 0, output: 0 });
+          }
+          resetLedger(join(this.workspace.projectsDir, slug));
           break;
-        case "agent_end":
+        }
+        case "agent_end": {
           this.runStates.delete(slug);
           this.broadcast({ type: "run_state", project: slug, state: "idle" });
+          this.emitRunCost(slug, pc);
           this.captureEditRound(slug);
           this.pumpQueue();
           break;
+        }
       }
     });
     return pc;
@@ -238,6 +252,40 @@ class Bridge {
       this.broadcast({ type: "error", project: slug, message: err instanceof Error ? err.message : String(err) });
       this.broadcast({ type: "run_state", project: slug, state: "idle" });
       this.pumpQueue();
+    }
+  }
+
+  /** Compute a run's estimated cost (designer tokens from Pi + image/review/search from
+   *  the ledger) and broadcast it for the agent feed. */
+  private emitRunCost(slug: string, pc: BluelineSession): void {
+    try {
+      const base = this.costBase.get(slug) ?? { input: 0, output: 0 };
+      this.costBase.delete(slug);
+      let dIn = 0;
+      let dOut = 0;
+      try {
+        const t = pc.session.getSessionStats().tokens;
+        dIn = Math.max(0, t.input - base.input);
+        dOut = Math.max(0, t.output - base.output);
+      } catch {
+        /* stats unavailable — designer cost stays 0 */
+      }
+      const designer = textCost(this.config.designer.model, dIn, dOut);
+      const l = takeLedger(join(this.workspace.projectsDir, slug));
+      const total = designer + l.imageUsd + l.reviewUsd + l.searchUsd;
+      if (total <= 0 && l.images === 0) return; // edit-only round, nothing billed
+      this.broadcast({
+        type: "run_cost",
+        project: slug,
+        designer,
+        images: l.imageUsd,
+        imageCount: l.images,
+        review: l.reviewUsd,
+        search: l.searchUsd,
+        total,
+      });
+    } catch {
+      /* cost reporting must never break the run */
     }
   }
 

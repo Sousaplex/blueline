@@ -156,6 +156,7 @@ export type EngineEvent =
   | { type: "tool_start"; project?: string; tool: string; args: Record<string, unknown> }
   | { type: "tool_end"; project?: string; tool: string; summary: string }
   | { type: "run_state"; project: string; state: RunState }
+  | { type: "run_cost"; project: string; designer: number; images: number; imageCount: number; review: number; search: number; total: number }
   | { type: "files_changed"; project?: string }
   | { type: "settings_changed" }
   | { type: "project_changed"; slug: string | null }

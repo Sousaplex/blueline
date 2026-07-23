@@ -1,6 +1,7 @@
 import {
   ChevronRight,
   CircleX,
+  Coins,
   Download,
   FileCheck2,
   FolderOpen,
@@ -82,7 +83,10 @@ export type FeedItem =
   | { kind: "user"; text: string; at: number }
   | { kind: "export"; path: string; at: number }
   | { kind: "tool"; tool: string; args: Record<string, unknown>; summary?: string; done: boolean; at: number }
+  | { kind: "cost"; total: number; designer: number; images: number; imageCount: number; review: number; search: number; at: number }
   | { kind: "error"; message: string; at: number };
+
+const usd = (n: number) => (n <= 0 ? "$0.00" : n < 0.01 ? "<$0.01" : `$${n.toFixed(2)}`);
 
 function ToolIcon({ tool, className }: { tool: string; className?: string }) {
   const cls = className ?? "size-3.5";
@@ -344,6 +348,22 @@ export function AgentPane({
               );
             case "tool":
               return <ToolRow key={i} item={item} />;
+            case "cost": {
+              const parts = [
+                `designer ${usd(item.designer)}`,
+                item.imageCount ? `${item.imageCount} image${item.imageCount === 1 ? "" : "s"} ${usd(item.images)}` : null,
+                item.review > 0 ? `review ${usd(item.review)}` : null,
+                item.search > 0 ? `search ${usd(item.search)}` : null,
+              ].filter(Boolean);
+              return (
+                <div key={i} className="flex items-center gap-2 rounded-md border bg-muted/40 px-2.5 py-1.5"
+                  title={`Estimated Gemini API cost — ${parts.join(", ")}`}>
+                  <Coins className="size-3.5 shrink-0 text-muted-foreground" />
+                  <span className="text-xs font-medium">Run cost ~{usd(item.total)}</span>
+                  <span className="truncate text-[10px] text-muted-foreground">est · {parts.join(" · ")}</span>
+                </div>
+              );
+            }
             case "error":
               return (
                 <div key={i} className="space-y-0.5 px-1">

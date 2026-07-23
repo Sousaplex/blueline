@@ -54,6 +54,20 @@ function applyEvent(feed: FeedItem[], event: EngineEvent): FeedItem[] {
     }
     case "error":
       return [...feed, { kind: "error", message: event.message, at: Date.now() }];
+    case "run_cost":
+      return [
+        ...feed,
+        {
+          kind: "cost",
+          total: event.total,
+          designer: event.designer,
+          images: event.images,
+          imageCount: event.imageCount,
+          review: event.review,
+          search: event.search,
+          at: Date.now(),
+        },
+      ];
     default:
       return feed;
   }
@@ -123,6 +137,7 @@ export function App() {
         case "tool_start":
         case "tool_end":
         case "error":
+        case "run_cost":
           if (!event.project || event.project === currentSlug.current) {
             setFeed((f) => applyEvent(f, event));
           }

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { GoogleGenAI } from "@google/genai";
 import type { BluelineConfig } from "./config.ts";
 import { requireApiKey } from "./config.ts";
+import { recordSearch } from "./cost-ledger.ts";
 import type { Project } from "./project.ts";
 
 function budgetFile(project: Project): string {
@@ -46,6 +47,9 @@ export async function runWebSearch(project: Project, config: BluelineConfig, que
     ],
     config: { tools: [{ googleSearch: {} }] },
   });
+
+  const u = response.usageMetadata;
+  if (u) recordSearch(project.dir, config.webSearch.model, u.promptTokenCount ?? 0, u.candidatesTokenCount ?? 0);
 
   const answer = response.text ?? "(no answer)";
   const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks ?? [];

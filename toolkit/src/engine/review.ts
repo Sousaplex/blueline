@@ -4,6 +4,7 @@ import { GoogleGenAI, Type as GType } from "@google/genai";
 import type { ReviewResult } from "../providers/types.ts";
 import { formatStyleSpec, loadStyleSpec } from "./style-spec.ts";
 import { GENRE_GUIDANCE } from "./prompt.ts";
+import { recordReview } from "./cost-ledger.ts";
 import type { BluelineConfig } from "./config.ts";
 import { requireApiKey } from "./config.ts";
 import type { Project } from "./project.ts";
@@ -150,6 +151,9 @@ export async function runReview(
       responseSchema: REVIEW_SCHEMA,
     },
   });
+
+  const usage = response.usageMetadata;
+  if (usage) recordReview(project.dir, config.reviewer.model, usage.promptTokenCount ?? 0, usage.candidatesTokenCount ?? 0);
 
   const result = JSON.parse(response.text ?? "{}") as ReviewResult;
   if (result.verdict !== "pass" && result.verdict !== "revise") {

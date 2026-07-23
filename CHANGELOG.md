@@ -10,6 +10,8 @@ and the GitHub release tags.
 Batch of fixes and features from the first round of test-user feedback.
 
 ### Added
+- **Estimated cost per run** — after each generation the agent feed shows a "Run cost ~$X"
+  chip (designer tokens + images + review + search), estimated from Google's Gemini prices.
 - **Git sync: change repo / disconnect** — repoint a workspace to a different git remote or
   disconnect entirely (keep local history, or optionally erase it) from Settings → Git.
 - **QR-code tool** — the agent can generate a scannable QR (URL, text, vCard) as a
