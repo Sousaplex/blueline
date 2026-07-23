@@ -1,8 +1,10 @@
+import { cpSync, existsSync, mkdirSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { BluelineConfig } from "./config.ts";
 import { generateImages } from "./images.ts";
-import { pageDims, type Project } from "./project.ts";
+import { pageDims, safeRelPath, type Project } from "./project.ts";
 import type { RenderBackend } from "./render.ts";
 import { RoundLimitError, runReview } from "./review.ts";
 import { runWebSearch } from "./search.ts";
@@ -65,6 +67,39 @@ export function buildPresscheckTools(project: Project, backend: RenderBackend, c
         return `${s.id}: ${ok}${errs}`;
       });
       return text(`Generated variants:\n${lines.join("\n")}`);
+    },
+  });
+
+  const useImage = defineTool({
+    name: "use_image",
+    label: "Use an existing image",
+    description:
+      "Place an EXISTING image from the workspace (context/ or brand/) into an image slot instead of generating a new one. Prefer this whenever a suitable real photo, logo, or graphic already exists — reused real photography beats synthetic imagery, and brand logos must be reused, never regenerated. After calling, reference it in page.html as an image slot.",
+    promptSnippet: "use_image: copy a context/ or brand/ image into images/<id>/ (reuse, don't generate)",
+    parameters: Type.Object({
+      id: Type.String({ description: "image slot id to place it in, e.g. 'hero', 'logo', 'team'" }),
+      source: Type.String({
+        description: "path of an existing image relative to context/ or brand/, e.g. 'photos/team.jpg' or 'logos/acme.png'",
+      }),
+    }),
+    async execute(_id, params) {
+      const rel = safeRelPath(params.source);
+      const src = [join(project.workspace.contextDir, rel), join(project.workspace.brandDir, rel)].find((p) => existsSync(p));
+      if (!src) return text(`No such image in context/ or brand/: ${rel}. List available files with ls/read first.`);
+      const ext = (rel.match(/\.[a-z0-9]+$/i)?.[0] ?? ".png").toLowerCase();
+      const slot = safeRelPath(params.id).replace(/\//g, "-");
+      const destDir = join(project.imagesDir, slot);
+      mkdirSync(destDir, { recursive: true });
+      const used = readdirSync(destDir)
+        .map((f) => Number(/^v(\d+)\./.exec(f)?.[1]))
+        .filter((n) => Number.isFinite(n));
+      const n = used.length ? Math.max(...used) + 1 : 1;
+      const destRel = `images/${slot}/v${n}${ext}`;
+      cpSync(src, join(project.dir, destRel));
+      return text(
+        `Placed ${rel} into ${destRel}. Reference it as <img src="${destRel}" data-image-id="${slot}"> ` +
+          `inside a crop frame. Do NOT gen_images for this slot.`,
+      );
     },
   });
 
@@ -141,5 +176,5 @@ export function buildPresscheckTools(project: Project, backend: RenderBackend, c
     },
   });
 
-  return [render, review, genImages, webFetch, webSearch, setFormat];
+  return [render, review, genImages, useImage, webFetch, webSearch, setFormat];
 }

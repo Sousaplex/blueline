@@ -10,6 +10,9 @@ and the GitHub release tags.
 Batch of fixes and features from the first round of test-user feedback.
 
 ### Added
+- **Reuse existing images** — the agent can now place a real photo/logo from `context/` or
+  `brand/` into a design (new `use_image` tool) instead of always generating one; the prompt
+  lists what's available and prefers reuse (brand logos are never regenerated).
 - **Floating image toolbar** in live edit: move the image, pan inside the crop, resize the
   box, zoom within the crop, and shuttle variants — all from a toolbar on the selected image.
 - **Cancel a generation** — the Run button becomes Cancel while a run is active; aborts the agent.

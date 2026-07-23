@@ -1,5 +1,5 @@
 import type { BluelineConfig } from "./config.ts";
-import { PAGE_DIMS, pageDims, type Project } from "./project.ts";
+import { PAGE_DIMS, listSourceFiles, pageDims, type Project } from "./project.ts";
 import { formatStyleSpec, loadStyleSpec } from "./style-spec.ts";
 
 /** Per-genre composition doctrine. The default craft rules below assume a one-pager;
@@ -70,11 +70,15 @@ indistinguishable in type and rhythm; the reviewer flags deviations as defects.
 `
     : "";
   const brandAssets = project.brandAssets();
-  const brandAssetList = brandAssets.length
-    ? `\nBrand assets available (use these EXACT files — copy into image slots as needed):\n${brandAssets
-        .map((f) => `  - ${project.workspace.brandDir}/${f.path}`)
-        .join("\n")}`
-    : "";
+  const contextImages = listSourceFiles(project.workspace.contextDir).filter((f) => f.kind === "image");
+  const reuseImageNote =
+    brandAssets.length || contextImages.length
+      ? `\nImages ALREADY AVAILABLE — PREFER use_image over gen_images when one of these fits. Reused real
+photography beats synthetic imagery, and brand logos MUST be reused, never regenerated:
+${[...brandAssets.map((f) => `  - brand/${f.path}`), ...contextImages.map((f) => `  - context/${f.path}`)].join("\n")}
+Call use_image({ id, source }) — source is the path above (relative to brand/ or context/) — to place
+one into an image slot. Only gen_images for imagery that genuinely does not exist yet.`
+      : "";
   const templateContract = template
     ? `
 # Template contract — this project was created from the "${template}" template
@@ -120,7 +124,7 @@ Workspace-level, read-only:
 - ${project.workspace.brandDir}/ (the brand home: guidelines AND assets — logos, fonts,
   palettes, photography. ALWAYS honor these; they outlive any single project.)
   Brand rules: if a logo file exists here, use THAT file — never generate or redraw a logo.
-  Palette, fonts and tone come from the brand guidelines; invent them only when brand/ is empty.${brandAssetList}
+  Palette, fonts and tone come from the brand guidelines; invent them only when brand/ is empty.${reuseImageNote}
 
 Source selection: if the project has a sources.json with a "context" array, read ONLY those
 files from the context dir (they were hand-picked for this project; entries may include
