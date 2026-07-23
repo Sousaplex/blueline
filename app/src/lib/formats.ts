@@ -2,6 +2,9 @@
 // Mirrors toolkit/src/engine/project.ts PAGE_DIMS — keep the two in sync.
 export const PAGE_SIZES = ["A4", "A5", "A3", "Letter", "Legal", "Tabloid", "Slide 16:9", "Slide 4:3", "Square", "Custom"];
 
+// Document genre — shapes layout, not size. Mirrors toolkit DOC_TYPES.
+export const DOC_TYPES = ["one-pager", "infographic", "poster", "deck", "report", "brochure", "flyer"];
+
 export const PAGE_DIMS: Record<string, { w: number; h: number }> = {
   A4: { w: 210, h: 297 },
   A5: { w: 148, h: 210 },

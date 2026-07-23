@@ -12,7 +12,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { PAGE_SIZES, previewDims } from "@/lib/formats";
+import { DOC_TYPES, PAGE_SIZES, previewDims } from "@/lib/formats";
 import type { EngineClient, TemplateInfo } from "../engine-client";
 import { BriefForm } from "./BriefForm";
 import { BriefGuidance } from "./BriefGuidance";
@@ -34,6 +34,7 @@ export function NewProjectDialog({
   const [templates, setTemplates] = useState<TemplateInfo[]>([]);
   const [pageSize, setPageSize] = useState("A4");
   const [orientation, setOrientation] = useState<"portrait" | "landscape">("portrait");
+  const [docType, setDocType] = useState("one-pager");
   const [pages, setPages] = useState(1);
   const [widthMm, setWidthMm] = useState(210);
   const [heightMm, setHeightMm] = useState(297);
@@ -62,7 +63,7 @@ export function NewProjectDialog({
       // A template dictates the format; blank projects take the picker's settings.
       const settings = selected
         ? undefined
-        : { pageSize, orientation, pages, ...(pageSize === "Custom" ? { widthMm, heightMm } : {}) };
+        : { pageSize, orientation, docType, pages, ...(pageSize === "Custom" ? { widthMm, heightMm } : {}) };
       await client.createProject(name, brief || undefined, selected?.slug, settings);
       setName("");
       setBrief("");
@@ -131,7 +132,19 @@ export function NewProjectDialog({
               </p>
             ) : (
               <div className="space-y-1.5">
-                <Label>Format</Label>
+                <Label>Type &amp; format</Label>
+                <Select value={docType} onValueChange={setDocType}>
+                  <SelectTrigger size="sm" className="h-8 w-full text-xs capitalize">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DOC_TYPES.map((t) => (
+                      <SelectItem key={t} value={t} className="capitalize">
+                        {t.replace("-", " ")}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <div className="flex items-center gap-1.5">
                   <Select value={pageSize} onValueChange={pickSize}>
                     <SelectTrigger size="sm" className="h-8 flex-1 text-xs">

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { GoogleGenAI, Type as GType } from "@google/genai";
 import type { ReviewResult } from "../providers/types.ts";
 import { formatStyleSpec, loadStyleSpec } from "./style-spec.ts";
+import { GENRE_GUIDANCE } from "./prompt.ts";
 import type { BluelineConfig } from "./config.ts";
 import { requireApiKey } from "./config.ts";
 import type { Project } from "./project.ts";
@@ -98,6 +99,13 @@ export async function runReview(
     "- Hierarchy: there must be ONE dominant focal element; a wall of equal-weight blocks is a defect.",
     "- Justified body text with visible rivers/gaps in narrow columns is a defect.",
     "A piece exhibiting two or more composition defects can NEVER be a pass, even if technically clean.",
+    "",
+    `# Document type: ${settings.docType ?? "one-pager"} — judge composition through THIS genre's intent, not a generic one-pager:`,
+    GENRE_GUIDANCE[settings.docType ?? "one-pager"] ?? GENRE_GUIDANCE["one-pager"],
+    "Apply the checks above THROUGH this lens: e.g. for an infographic a regular grid of equal-weight",
+    "data modules is CORRECT (not a hierarchy defect); for a report/brochure, multi-column flowing text",
+    "is correct. The single-focal-element rule applies to one-pagers/posters/flyers, not to genres whose",
+    "composition is inherently modular. Flag only what is wrong FOR THIS GENRE.",
     "",
     "Be strict but terminating: if the piece is close enough that a demanding human art director",
     "would sign off, verdict is `pass`.",

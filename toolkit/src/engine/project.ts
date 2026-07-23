@@ -3,12 +3,19 @@ import { isAbsolute, join, resolve } from "node:path";
 import { DATA_ROOT } from "./config.ts";
 import { Workspace } from "./workspace.ts";
 
+/** Document GENRE — orthogonal to size. Drives the composition doctrine the agent
+ *  receives (and the reviewer enforces): an infographic is a modular data grid, a
+ *  poster is one dominant visual, a report is multi-column flowing text, etc. */
+export const DOC_TYPES = ["one-pager", "infographic", "poster", "deck", "report", "flyer", "brochure"] as const;
+export type DocType = (typeof DOC_TYPES)[number];
+
 export interface PageSettings {
   pageSize: string; // "A4" | "Letter" | "Slide 16:9" | "Custom" | …
   orientation: "portrait" | "landscape";
   pages: number; // target page count — enforced by the reviewer
   widthMm: number | null; // Custom size only
   heightMm: number | null;
+  docType?: string; // genre/intent (DOC_TYPES) — shapes layout guidance, NOT size. meta() always fills it.
 }
 
 /** Base dimensions in mm. Print sizes are portrait-first; slide presets are landscape-first. */
@@ -45,7 +52,7 @@ export interface ProjectMeta {
   settings: PageSettings;
 }
 
-export const DEFAULT_SETTINGS: PageSettings = { pageSize: "A4", orientation: "portrait", pages: 1, widthMm: null, heightMm: null };
+export const DEFAULT_SETTINGS: PageSettings = { pageSize: "A4", orientation: "portrait", pages: 1, widthMm: null, heightMm: null, docType: "one-pager" };
 
 /** Clamp a custom dimension to something a printer/screen could plausibly want. */
 function clampDim(v: unknown): number | null {
@@ -154,6 +161,9 @@ export class Project {
         pages: Math.max(1, Math.min(24, Number(stored.settings?.pages) || DEFAULT_SETTINGS.pages)),
         widthMm: clampDim(stored.settings?.widthMm),
         heightMm: clampDim(stored.settings?.heightMm),
+        docType: (DOC_TYPES as readonly string[]).includes(stored.settings?.docType ?? "")
+          ? (stored.settings!.docType as string)
+          : DEFAULT_SETTINGS.docType,
       },
     };
   }

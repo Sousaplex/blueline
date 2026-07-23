@@ -24,6 +24,7 @@ export interface PageSettings {
   pages: number;
   widthMm: number | null;
   heightMm: number | null;
+  docType?: string;
 }
 
 export interface ProjectMeta {

@@ -110,30 +110,33 @@ export function buildPresscheckTools(project: Project, backend: RenderBackend, c
     name: "set_format",
     label: "Change document format",
     description:
-      "Change the document's required format — page/slide count, page size, orientation. ONLY call this when the human explicitly asked for the change ('add a third page', 'make it A5'); the reviewer's mechanical page-count gate follows the updated settings. After calling, restructure page.html to fill the new format exactly.",
-    promptSnippet: "set_format: update required pages/size/orientation (human-requested only)",
+      "Change the document's required format — page/slide count, page size, orientation, or document TYPE (one-pager, infographic, poster, deck, report, brochure, flyer). ONLY call this when the human explicitly asked ('add a third page', 'make it A5', 'make this an infographic'); the reviewer follows the updated settings. docType changes the LAYOUT doctrine, not the size. After calling, restructure page.html to match.",
+    promptSnippet: "set_format: update required pages/size/orientation/docType (human-requested only)",
     parameters: Type.Object({
       pages: Type.Optional(Type.Integer({ minimum: 1, maximum: 24, description: "new required page/slide count" })),
       pageSize: Type.Optional(
         Type.String({ description: 'e.g. "A4", "Letter", "Slide 16:9", "Square", "Custom" (with widthMm/heightMm)' }),
       ),
       orientation: Type.Optional(Type.Union([Type.Literal("portrait"), Type.Literal("landscape")])),
+      docType: Type.Optional(
+        Type.String({ description: 'document genre: "one-pager" | "infographic" | "poster" | "deck" | "report" | "brochure" | "flyer"' }),
+      ),
       widthMm: Type.Optional(Type.Number({ description: "Custom size only" })),
       heightMm: Type.Optional(Type.Number({ description: "Custom size only" })),
     }),
     async execute(_id, params) {
       const patch: Record<string, unknown> = {};
-      for (const key of ["pages", "pageSize", "orientation", "widthMm", "heightMm"] as const) {
+      for (const key of ["pages", "pageSize", "orientation", "docType", "widthMm", "heightMm"] as const) {
         if (params[key] !== undefined) patch[key] = params[key];
       }
-      if (!Object.keys(patch).length) return text("Nothing to change — pass pages, pageSize, orientation or custom dimensions.");
+      if (!Object.keys(patch).length) return text("Nothing to change — pass pages, pageSize, orientation, docType or custom dimensions.");
       const meta = project.updateMeta({ settings: patch as never });
       const dims = pageDims(meta.settings);
       return text(
-        `Format updated. The binding contract is now: ${meta.settings.pageSize} ${meta.settings.orientation} ` +
+        `Format updated. The binding contract is now: ${meta.settings.docType} · ${meta.settings.pageSize} ${meta.settings.orientation} ` +
           `(${dims.w}mm × ${dims.h}mm), EXACTLY ${meta.settings.pages} page(s). This supersedes the format in your ` +
-          `system prompt. Update @page { size: ... } and restructure page.html to fill exactly ${meta.settings.pages} ` +
-          `page(s), then render and review.`,
+          `system prompt. Compose as a ${meta.settings.docType}, update @page { size: ... } and restructure page.html to fill ` +
+          `exactly ${meta.settings.pages} page(s), then render and review.`,
       );
     },
   });
