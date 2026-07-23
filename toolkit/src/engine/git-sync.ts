@@ -2,7 +2,7 @@
 // team, or just back the work up. Uses the system git binary and whatever
 // credentials the user's environment already has (ssh agent, credential helper).
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
@@ -99,6 +99,21 @@ export async function gitConnect(root: string, url: string): Promise<GitStatus> 
   if (hasOrigin) await git(root, "remote", "set-url", "origin", url.trim());
   else await git(root, "remote", "add", "origin", url.trim());
   await git(root, "fetch", "--quiet", "origin").catch(() => {}); // may be an empty repo — fine
+  return gitStatus(root);
+}
+
+/** Disconnect the workspace from its remote. Default: drop the `origin` remote but KEEP
+ *  local history (reversible, zero data loss). `wipeHistory` fully un-repos the workspace
+ *  (removes .git) — irreversible, opt-in only. Neither touches the remote repo itself; a
+ *  mis-targeted repo that was already pushed to must be deleted on GitHub by the user. */
+export async function gitDisconnect(root: string, opts?: { wipeHistory?: boolean }): Promise<GitStatus> {
+  const status = await gitStatus(root);
+  if (!status.isRepo) return status;
+  await git(root, "remote", "remove", "origin").catch(() => {}); // no-op if already gone
+  if (opts?.wipeHistory) {
+    const gitDir = join(root, ".git");
+    if (existsSync(gitDir) && gitDir.endsWith(".git")) rmSync(gitDir, { recursive: true, force: true });
+  }
   return gitStatus(root);
 }
 

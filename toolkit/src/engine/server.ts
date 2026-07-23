@@ -11,7 +11,7 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { WebSocketServer, type WebSocket } from "ws";
 import { DATA_ROOT, REPO_ROOT, applyApiKeys, loadConfig, saveApiKeys, type BluelineConfig } from "./config.ts";
 import { draftBrief } from "./brief-draft.ts";
-import { gitClone, gitConnect, gitStatus, gitSync } from "./git-sync.ts";
+import { gitClone, gitConnect, gitDisconnect, gitStatus, gitSync } from "./git-sync.ts";
 import { generateImages } from "./images.ts";
 import {
   deleteElement,
@@ -1195,6 +1195,12 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
         if (!body.url) return json(res, 400, { error: "url required" });
         const status = await gitConnect(bridge.workspace.root, String(body.url));
         sys("git_connect", String(body.url));
+        return json(res, 200, { ok: true, status });
+      }
+      if (req.method === "POST" && url.pathname === "/api/git/disconnect") {
+        const body = await readBody(req);
+        const status = await gitDisconnect(bridge.workspace.root, { wipeHistory: !!body.wipeHistory });
+        sys("git_disconnect", body.wipeHistory ? "removed remote + wiped local history" : "removed remote");
         return json(res, 200, { ok: true, status });
       }
       if (req.method === "POST" && url.pathname === "/api/git/sync") {

@@ -23,6 +23,9 @@ export function GitSyncDialog({ client }: { client: EngineClient }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [changing, setChanging] = useState(false); // revealing the "change repo" input
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  const [wipeHistory, setWipeHistory] = useState(false);
 
   const refresh = () => client.gitStatus().then(setStatus).catch(() => setStatus(null));
   useEffect(() => {
@@ -82,6 +85,65 @@ export function GitSyncDialog({ client }: { client: EngineClient }) {
                 {busy === "sync" ? <Loader2 className="animate-spin" data-slot="icon" /> : <RefreshCw data-slot="icon" />}
                 Sync now
               </Button>
+
+              {!changing && !confirmDisconnect && (
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" className="flex-1" disabled={busy !== null}
+                    onClick={() => { setChanging(true); setUrl(""); setError(null); setNote(null); }}>
+                    Change repo…
+                  </Button>
+                  <Button variant="outline" size="sm" className="flex-1 text-destructive hover:text-destructive" disabled={busy !== null}
+                    onClick={() => { setConfirmDisconnect(true); setWipeHistory(false); setError(null); setNote(null); }}>
+                    Disconnect
+                  </Button>
+                </div>
+              )}
+
+              {changing && (
+                <div className="space-y-1.5 rounded-md border p-2.5">
+                  <Label htmlFor="git-newurl" className="text-xs">Repoint to a different repo (use an EMPTY repo)</Label>
+                  <div className="flex gap-2">
+                    <Input id="git-newurl" value={url} onChange={(e) => setUrl(e.target.value)}
+                      placeholder="git@github.com:you/other.git" className="font-mono text-xs" />
+                    <Button size="sm" disabled={busy !== null || !url.trim()}
+                      onClick={() => act("change", async () => {
+                        await client.gitConnect(url.trim());
+                        setChanging(false);
+                        return "Repointed. Local history is kept; the next Sync pushes to the new repo (must be empty).";
+                      })}>
+                      {busy === "change" ? <Loader2 className="animate-spin" data-slot="icon" /> : null} Repoint
+                    </Button>
+                    <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => setChanging(false)}>Cancel</Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    The old repo isn't modified. Pushing into a repo that already has content is rejected — pick an empty one.
+                  </p>
+                </div>
+              )}
+
+              {confirmDisconnect && (
+                <div className="space-y-2 rounded-md border p-2.5">
+                  <p className="text-xs">
+                    Disconnect from <span className="break-all font-mono">{status.remote}</span>? Local history is kept and
+                    the remote repo is untouched.
+                  </p>
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <input type="checkbox" checked={wipeHistory} onChange={(e) => setWipeHistory(e.target.checked)} />
+                    Also erase local git history (irreversible)
+                  </label>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="destructive" disabled={busy !== null}
+                      onClick={() => act("disconnect", async () => {
+                        await client.gitDisconnect(wipeHistory);
+                        setConfirmDisconnect(false);
+                        return wipeHistory ? "Disconnected; local history erased." : "Disconnected. Local history kept.";
+                      })}>
+                      {busy === "disconnect" ? <Loader2 className="animate-spin" data-slot="icon" /> : null} Disconnect
+                    </Button>
+                    <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => setConfirmDisconnect(false)}>Cancel</Button>
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div className="space-y-1.5">

@@ -234,6 +234,7 @@ export interface EngineClient {
   getSystemEvents(): Promise<SystemEvent[]>;
   gitStatus(): Promise<GitStatus>;
   gitConnect(url: string): Promise<GitStatus>;
+  gitDisconnect(wipeHistory?: boolean): Promise<GitStatus>;
   gitSync(message?: string): Promise<{ pulled: boolean; committed: boolean; pushed: boolean; summary: string }>;
   gitClone(url: string, dest: string): Promise<void>;
   /** Pick a workspace dir (native dialog in Electron, path prompt in browser) and switch to it. */
@@ -504,6 +505,16 @@ export class BrowserEngineClient implements EngineClient {
     });
     const payload = await res.json();
     if (!res.ok) throw new Error(payload.error ?? `git connect: HTTP ${res.status}`);
+    return payload.status;
+  }
+  async gitDisconnect(wipeHistory?: boolean): Promise<GitStatus> {
+    const res = await fetch("/api/git/disconnect", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ wipeHistory: !!wipeHistory }),
+    });
+    const payload = await res.json();
+    if (!res.ok) throw new Error(payload.error ?? `git disconnect: HTTP ${res.status}`);
     return payload.status;
   }
 
