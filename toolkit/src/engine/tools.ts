@@ -5,6 +5,7 @@ import { Type } from "typebox";
 import type { BluelineConfig } from "./config.ts";
 import { generateImages } from "./images.ts";
 import { pageDims, safeRelPath, type Project } from "./project.ts";
+import { generateQr } from "./qr.ts";
 import type { RenderBackend } from "./render.ts";
 import { RoundLimitError, runReview } from "./review.ts";
 import { runWebSearch } from "./search.ts";
@@ -141,6 +142,30 @@ export function buildPresscheckTools(project: Project, backend: RenderBackend, c
     },
   });
 
+  const genQr = defineTool({
+    name: "gen_qr",
+    label: "Generate QR code",
+    description:
+      "Generate a QR code (URL, plain text, vCard) as a print-ready file placed in an image slot. Default SVG (crisp vector for print). Use when the brief calls for a scannable link/CTA.",
+    promptSnippet: "gen_qr: data + id -> images/<id>/qr.svg (scannable code)",
+    parameters: Type.Object({
+      id: Type.String({ description: "image slot id, e.g. 'signup-qr'" }),
+      data: Type.String({ description: "the URL or text to encode" }),
+      format: Type.Optional(Type.Union([Type.Literal("svg"), Type.Literal("png")])),
+      size: Type.Optional(Type.Integer({ minimum: 64, maximum: 2048, description: "px (PNG only)" })),
+      margin: Type.Optional(Type.Integer({ minimum: 0, maximum: 8, description: "quiet-zone modules (default 2)" })),
+      ecc: Type.Optional(Type.Union([Type.Literal("L"), Type.Literal("M"), Type.Literal("Q"), Type.Literal("H")])),
+    }),
+    async execute(_id, params) {
+      const rel = await generateQr(project, params);
+      const slot = params.id.replace(/\//g, "-");
+      return text(
+        `QR code written to ${rel} (encodes: ${params.data}). Reference it as <img src="${rel}" data-image-id="${slot}">. ` +
+          `A QR must NOT be cropped — size its container to fit and use object-fit: contain (not cover), on a white/light background with quiet-zone margin.`,
+      );
+    },
+  });
+
   const setFormat = defineTool({
     name: "set_format",
     label: "Change document format",
@@ -176,5 +201,5 @@ export function buildPresscheckTools(project: Project, backend: RenderBackend, c
     },
   });
 
-  return [render, review, genImages, useImage, webFetch, webSearch, setFormat];
+  return [render, review, genImages, useImage, genQr, webFetch, webSearch, setFormat];
 }

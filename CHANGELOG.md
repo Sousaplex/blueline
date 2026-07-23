@@ -10,6 +10,8 @@ and the GitHub release tags.
 Batch of fixes and features from the first round of test-user feedback.
 
 ### Added
+- **QR-code tool** — the agent can generate a scannable QR (URL, text, vCard) as a
+  print-ready SVG (or PNG) and place it in the design (`gen_qr`).
 - **Reuse existing images** — the agent can now place a real photo/logo from `context/` or
   `brand/` into a design (new `use_image` tool) instead of always generating one; the prompt
   lists what's available and prefers reuse (brand logos are never regenerated).
