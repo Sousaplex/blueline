@@ -1,6 +1,6 @@
-# Presscheck — dev notes for Claude Code sessions
+# Blueline — dev notes for Claude Code sessions
 
-> **The engine is authoritative, not this file.** Presscheck embeds the Pi coding agent
+> **The engine is authoritative, not this file.** Blueline embeds the Pi coding agent
 > (`toolkit/src/engine/`) as its production harness; the design-loop contract lives in
 > [toolkit/src/engine/prompt.ts](toolkit/src/engine/prompt.ts). This file only orients
 > dev sessions working ON Blueline.
@@ -51,6 +51,14 @@ breaks that trust.
 Release checklist: bump version → `cd app && npm run package` → smoke the
 packaged .app (`BLUELINE_SMOKE=1`, expect exit 0) → verify the smoke capture
 shows the NEW version badge → commit with the version in the message → push.
+
+## Changelog (MANDATORY — from v0.17.0 onward)
+Keep [CHANGELOG.md](CHANGELOG.md) current. Every version bump adds an entry under an
+`## [x.y.z]` heading grouping user-facing changes (Added / Changed / Fixed). Update it
+as part of the same release commit that bumps `app/package.json` — a version without a
+changelog entry is an incomplete release. In-progress work accumulates under an
+`## [Unreleased]` heading and is renamed to the version at release time. History before
+0.17.0 is intentionally not backfilled.
 
 Smoke isolation trap: if a blueline instance is already running, it holds
 port 7717 and the smoke instance silently attaches to the OLD app's bridge —
