@@ -1,6 +1,6 @@
 {
   "name": "blueline-app",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,7 +12,8 @@
     "electron:app": "npm run build && npm run electron:compile && electron .",
     "electron:smoke": "npm run build && npm run electron:compile && PRESSCHECK_SMOKE=1 electron .",
     "package": "npm run build && npm run electron:compile && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac",
-    "package:signed": "npm run build && npm run electron:compile && electron-builder --mac"
+    "package:signed": "npm run build && npm run electron:compile && electron-builder --mac",
+    "release:publish": "npm run build && npm run electron:compile && electron-builder --mac --publish always"
   },
   "dependencies": {
     "@codemirror/lang-html": "^6.4.11",
@@ -23,6 +24,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "diff": "^9.0.0",
+    "electron-updater": "^6.8.9",
     "lucide-react": "^1.25.0",
     "radix-ui": "^1.6.4",
     "react": "^19.0.0",
@@ -88,15 +90,21 @@
         "to": "config/providers.example.json"
       }
     ],
+    "publish": {
+      "provider": "github",
+      "owner": "Sousaplex",
+      "repo": "blueline"
+    },
     "mac": {
       "target": [
         "dir",
-        "dmg"
+        "dmg",
+        "zip"
       ],
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
-      "entitlementsInherit": "build/entitlements.mac.plist"
+      "entitlementsInherit": "build/entitlements.mac.inherit.plist"
     },
     "afterSign": "build/notarize.cjs"
   }

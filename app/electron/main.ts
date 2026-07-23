@@ -6,6 +6,7 @@ import { appendFileSync, cpSync, existsSync, mkdirSync, writeFileSync } from "no
 import { dirname, join, resolve } from "node:path";
 import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
 import { keychainAvailable, loadCredentials, migrateEnvFile, saveCredentials } from "./credentials";
+import electronUpdater from "electron-updater";
 
 /** One-time migration: carry settings/keys over from the pre-rename app-data dirs. */
 function migrateLegacyAppData(): void {
@@ -208,6 +209,18 @@ app.whenReady().then(async () => {
     if (SMOKE) {
       await runSmokeTest();
       app.exit(0);
+    }
+
+    // Auto-update: check the GitHub Releases feed, download a newer signed build in
+    // the background, and notify the user to restart. Never during smoke or dev.
+    if (PACKAGED && !SMOKE) {
+      const { autoUpdater } = electronUpdater;
+      autoUpdater.autoDownload = true;
+      autoUpdater.on("error", (e) => console.log("[updater] error:", String(e)));
+      autoUpdater.on("update-available", (i) => console.log("[updater] update available:", i.version));
+      autoUpdater.on("update-downloaded", (i) => console.log("[updater] downloaded:", i.version, "— will install on quit"));
+      // checkForUpdatesAndNotify handles the "restart to update?" native notification.
+      autoUpdater.checkForUpdatesAndNotify().catch((e) => console.log("[updater] check failed:", String(e)));
     }
   } catch (err) {
     smokeLog("[blueline] startup failed: " + String(err));

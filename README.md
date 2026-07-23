@@ -51,8 +51,10 @@ print-ready PDF that is pixel-identical to the preview.
 
 ### Desktop app
 
-Grab `Blueline-<version>-arm64.dmg` from `app/release/`, open it, and drag **Blueline** to
-Applications. Apple-silicon Macs only.
+Download the latest `Blueline-<version>-arm64.dmg` from the
+[**Releases page**](https://github.com/Sousaplex/blueline/releases/latest), open it, and drag
+**Blueline** to Applications. Apple-silicon Macs only. Once installed, the app **auto-updates**
+itself from new releases in the background (see [app/RELEASING.md](app/RELEASING.md)).
 
 **First launch (the app is unsigned, so macOS will block it once).** The app isn't code-signed
 or notarized yet, so Gatekeeper stops the first open with *"Blueline can't be opened"* — it is

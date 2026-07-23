@@ -2,10 +2,15 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <!-- Blueline runs the engine bridge as a child of the packaged app via
-       ELECTRON_RUN_AS_NODE, and launches Playwright's Chromium. Under a hardened
-       runtime those need the JIT / unsigned-exec-memory exceptions, and library
-       validation must be relaxed so the bundled node_modules native addons load. -->
+  <!-- Main app entitlements. Blueline re-execs its own binary as Node
+       (ELECTRON_RUN_AS_NODE) to run the engine bridge, and launches Playwright's
+       Chromium. Under a hardened runtime those need JIT / unsigned-exec-memory,
+       relaxed library validation, and — critically — permission to honor the
+       ELECTRON_RUN_AS_NODE / DYLD environment variables, or the child re-exec is
+       silently downgraded to a normal Electron process and never returns.
+       NOTE: com.apple.security.inherit must NOT appear here — on a top-level app
+       it means "inherit my parent's entitlements" and nullifies these. It belongs
+       only in the inherited-child plist below. -->
   <key>com.apple.security.cs.allow-jit</key>
   <true/>
   <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
@@ -13,9 +18,6 @@
   <key>com.apple.security.cs.disable-library-validation</key>
   <true/>
   <key>com.apple.security.cs.allow-dyld-environment-variables</key>
-  <true/>
-  <!-- Child processes inherit the parent's sandbox/runtime entitlements. -->
-  <key>com.apple.security.inherit</key>
   <true/>
 </dict>
 </plist>
