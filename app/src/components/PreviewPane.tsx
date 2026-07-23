@@ -1,4 +1,6 @@
 import { html } from "@codemirror/lang-html";
+import { search, searchKeymap } from "@codemirror/search";
+import { keymap } from "@codemirror/view";
 import { oneDark } from "@codemirror/theme-one-dark";
 import CodeMirror from "@uiw/react-codemirror";
 import { ChevronLeft, ChevronRight, Code2, Crop, Grid3x3, History, Loader2, Maximize, Minus, MousePointerClick, Move, Plus, Redo2, RefreshCw, Save, Sparkles, Undo2, X, ZoomIn, ZoomOut } from "lucide-react";
@@ -1085,12 +1087,12 @@ export function PreviewPane({
         source == null ? (
           <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">loading source…</div>
         ) : (
-          <div className="min-h-0 flex-1 overflow-hidden [&_.cm-editor]:h-full [&_.cm-editor]:text-xs [&_.cm-scroller]:font-mono">
+          <div className="min-h-0 flex-1 overflow-hidden [&_.cm-editor]:h-full [&_.cm-editor]:text-xs [&_.cm-panel]:border-t [&_.cm-panel]:bg-muted [&_.cm-panel]:text-xs [&_.cm-panel_input]:rounded [&_.cm-panel_input]:border [&_.cm-panel_input]:bg-background [&_.cm-panel_input]:px-1 [&_.cm-scroller]:font-mono [&_.cm-textfield]:text-foreground">
             <CodeMirror
               value={source}
               height="100%"
               theme={currentTheme() === "dark" ? oneDark : "light"}
-              extensions={[html()]}
+              extensions={[html(), search({ top: true }), keymap.of(searchKeymap)]}
               onChange={(v) => {
                 setSource(v);
                 setSourceDirty(true);

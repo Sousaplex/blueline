@@ -291,6 +291,7 @@ export function App() {
         currentSlug={project.slug}
         hasPage={project.hasPage}
         onOpen={(dir) => void client.openProject(dir).catch((e) => setFeed((f) => [...f, { kind: "error", message: String(e), at: Date.now() }]))}
+        onDelete={(slug) => void client.deleteProject(slug).catch((e) => setFeed((f) => [...f, { kind: "error", message: String(e), at: Date.now() }]))}
         onNewVariants={() => setVariantsOpen(true)}
         onNewSeries={() => setSeriesOpen(true)}
         onBranch={() => void client.forkProject(project.slug!).catch((e) => setFeed((f) => [...f, { kind: "error", message: String(e), at: Date.now() }]))}

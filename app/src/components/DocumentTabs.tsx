@@ -2,7 +2,18 @@
 // variants, branches and series siblings — with a "+" menu for growing it.
 // This is the primary way to hop between variations; the Library stays the
 // whole-workspace browser.
-import { FilePlus2, GitBranch, Layers, Plus, Sparkles } from "lucide-react";
+import { useState } from "react";
+import { FilePlus2, GitBranch, Layers, Loader2, Plus, Sparkles, X } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -47,6 +58,7 @@ export function DocumentTabs({
   currentSlug,
   hasPage,
   onOpen,
+  onDelete,
   onNewVariants,
   onNewSeries,
   onBranch,
@@ -56,39 +68,59 @@ export function DocumentTabs({
   currentSlug: string;
   hasPage: boolean;
   onOpen: (dir: string) => void;
+  onDelete: (slug: string) => void;
   onNewVariants: () => void;
   onNewSeries: () => void;
   onBranch: () => void;
   onNewProject: () => void;
 }) {
   const family = familyOf(projects, currentSlug);
+  const [confirmDelete, setConfirmDelete] = useState<ProjectListing | null>(null);
 
   return (
-    <div className="flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-b bg-muted/20 px-2">
-      {family.map((p) => (
-        <button
-          key={p.slug}
-          className={cn(
-            "flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-xs transition-colors",
-            p.slug === currentSlug
-              ? "border-border bg-background font-medium shadow-sm"
-              : "border-transparent text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-          )}
-          title={`${p.meta.displayName}${p.meta.kind === "variant" ? " · variant" : ""}${p.meta.forkedFromRound != null ? ` · branched @ round ${p.meta.forkedFromRound}` : ""}`}
-          onClick={() => p.slug !== currentSlug && onOpen(p.dir)}
-        >
-          {p.runState === "running" && <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-emerald-500" />}
-          {p.runState === "queued" && <span className="size-1.5 shrink-0 rounded-full bg-amber-500" />}
-          <span className="max-w-44 truncate">{p.meta.displayName}</span>
-          {p.meta.kind === "variant" && (
-            <Badge variant="secondary" className="h-4 px-1 text-[9px] uppercase">var</Badge>
-          )}
-          {p.meta.forkedFromRound != null && (
-            <span className="font-mono text-[9px] text-muted-foreground">r{p.meta.forkedFromRound}</span>
-          )}
-          {p.lastVerdict === "pass" && <span className="size-1.5 shrink-0 rounded-full bg-emerald-500/50" title="passed review" />}
-        </button>
-      ))}
+    <div className="flex h-9 shrink-0 items-end gap-0.5 overflow-x-auto border-b bg-muted/20 px-2">
+      {family.map((p) => {
+        const active = p.slug === currentSlug;
+        return (
+          <div
+            key={p.slug}
+            className={cn(
+              "group relative flex h-8 shrink-0 items-center gap-1.5 rounded-t-md border px-2.5 text-xs transition-colors",
+              active
+                ? "-mb-px border-border border-b-transparent bg-background font-medium"
+                : "border-transparent text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+            )}
+            title={`${p.meta.displayName}${p.meta.kind === "variant" ? " · variant" : ""}${p.meta.forkedFromRound != null ? ` · branched @ round ${p.meta.forkedFromRound}` : ""}`}
+          >
+            <button className="flex items-center gap-1.5" onClick={() => !active && onOpen(p.dir)}>
+              {p.runState === "running" && <Loader2 className="size-3 shrink-0 animate-spin text-emerald-500" />}
+              {p.runState === "queued" && <span className="size-1.5 shrink-0 rounded-full bg-amber-500" title="queued" />}
+              <span className="max-w-44 truncate">{p.meta.displayName}</span>
+              {p.meta.kind === "variant" && (
+                <Badge variant="secondary" className="h-4 px-1 text-[9px] uppercase">var</Badge>
+              )}
+              {p.meta.forkedFromRound != null && (
+                <span className="font-mono text-[9px] text-muted-foreground">r{p.meta.forkedFromRound}</span>
+              )}
+              {p.lastVerdict === "pass" && <span className="size-1.5 shrink-0 rounded-full bg-emerald-500/50" title="passed review" />}
+            </button>
+            <button
+              className={cn(
+                "-mr-1 ml-0.5 rounded p-0.5 transition-opacity hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30",
+                active ? "text-muted-foreground opacity-60 hover:opacity-100" : "text-muted-foreground opacity-0 group-hover:opacity-70",
+              )}
+              title={p.runState !== "idle" ? "Stop the run before deleting" : "Delete this document"}
+              disabled={p.runState !== "idle"}
+              onClick={(e) => {
+                e.stopPropagation();
+                setConfirmDelete(p);
+              }}
+            >
+              <X className="size-3" />
+            </button>
+          </div>
+        );
+      })}
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -115,6 +147,28 @@ export function DocumentTabs({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <AlertDialog open={!!confirmDelete} onOpenChange={(o) => !o && setConfirmDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete “{confirmDelete?.meta.displayName}”?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes the document and all its rounds from the workspace. This can’t be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (confirmDelete) onDelete(confirmDelete.slug);
+                setConfirmDelete(null);
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
