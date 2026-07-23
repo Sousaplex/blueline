@@ -290,7 +290,7 @@ export function InspectorPane({
               </Button>
               <input ref={uploadInput} type="file" accept="image/*" hidden onChange={onUpload} />
             </div>
-            <p className="text-muted-foreground">Drag the photo in the page to reposition its crop; zoom persists from the crop drag.</p>
+            <p className="text-muted-foreground">Use the toolbar on the image to move it, resize the box, zoom within the crop, or pan the crop by dragging.</p>
           </div>
         )}
 

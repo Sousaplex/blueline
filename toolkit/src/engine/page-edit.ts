@@ -209,33 +209,68 @@ export function writePageSource(project: Project, html: string): void {
   writeFileSync(project.pageHtml, s);
 }
 
-/** Persist pan/zoom for an image: object-position + scale, keeping object-fit cover. */
+const FRAME_MIN_MM = 5;
+const FRAME_MAX_MM = 400;
+
+/** Persist image geometry. IMG-level: object-position (pan) + scale (zoom within the
+ *  crop). FRAME-level (the img's crop container): width/height (resize the displayed
+ *  box) + translate (move the box on the page without reflowing siblings). */
 export function setImageStyle(
   project: Project,
   imageId: string,
-  style: { objectPosition?: string; zoom?: number },
+  style: {
+    objectPosition?: string;
+    zoom?: number;
+    frameWidthMm?: number;
+    frameHeightMm?: number;
+    translateXMm?: number;
+    translateYMm?: number;
+  },
 ): void {
   const { dom } = loadDom(project);
   const img = dom.document.querySelector(`img[data-image-id="${imageId}"]`);
   if (!img) throw new Error(`page.html has no <img data-image-id="${imageId}">`);
-  const existing = new Map<string, string>(
-    (img.getAttribute("style") ?? "")
-      .split(";")
-      .map((s: string) => s.trim())
-      .filter(Boolean)
-      .map((s: string) => [s.slice(0, s.indexOf(":")).trim(), s.slice(s.indexOf(":") + 1).trim()] as [string, string]),
-  );
-  existing.set("object-fit", "cover");
-  if (style.objectPosition) {
-    if (!/^[\d.]+%\s+[\d.]+%$/.test(style.objectPosition)) throw new Error("objectPosition must be 'X% Y%'");
-    existing.set("object-position", style.objectPosition);
+
+  mergeStyle(img, (existing) => {
+    existing.set("object-fit", "cover");
+    if (style.objectPosition) {
+      if (!/^[\d.]+%\s+[\d.]+%$/.test(style.objectPosition)) throw new Error("objectPosition must be 'X% Y%'");
+      existing.set("object-position", style.objectPosition);
+    }
+    if (style.zoom !== undefined) {
+      const z = Math.min(Math.max(Number(style.zoom), 1), 3);
+      if (z === 1) existing.delete("transform");
+      else existing.set("transform", `scale(${z.toFixed(2)})`);
+    }
+  });
+
+  // Frame = the crop container that clips the image (its direct parent by convention).
+  const frame = (img as any).parentElement;
+  const touchesFrame =
+    style.frameWidthMm !== undefined ||
+    style.frameHeightMm !== undefined ||
+    style.translateXMm !== undefined ||
+    style.translateYMm !== undefined;
+  if (frame && touchesFrame) {
+    const clampDim = (v: number) => Math.max(FRAME_MIN_MM, Math.min(FRAME_MAX_MM, Number(v) || 0));
+    const clampOff = (v: number) => Math.max(-NUDGE_LIMIT_MM, Math.min(NUDGE_LIMIT_MM, Number(v) || 0));
+    mergeStyle(frame, (existing) => {
+      if (style.frameWidthMm !== undefined) {
+        existing.set("width", `${clampDim(style.frameWidthMm).toFixed(1)}mm`);
+        existing.set("overflow", "hidden");
+      }
+      if (style.frameHeightMm !== undefined) {
+        existing.set("height", `${clampDim(style.frameHeightMm).toFixed(1)}mm`);
+        existing.set("overflow", "hidden");
+      }
+      if (style.translateXMm !== undefined || style.translateYMm !== undefined) {
+        const x = clampOff(style.translateXMm ?? 0);
+        const y = clampOff(style.translateYMm ?? 0);
+        if (x === 0 && y === 0) existing.delete("transform");
+        else existing.set("transform", `translate(${x.toFixed(1)}mm, ${y.toFixed(1)}mm)`);
+      }
+    });
   }
-  if (style.zoom !== undefined) {
-    const z = Math.min(Math.max(Number(style.zoom), 1), 3);
-    if (z === 1) existing.delete("transform");
-    else existing.set("transform", `scale(${z.toFixed(2)})`);
-  }
-  img.setAttribute("style", [...existing.entries()].map(([k, v]) => `${k}: ${v}`).join("; "));
   save(project, dom.document);
 }
 

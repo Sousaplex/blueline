@@ -1,7 +1,8 @@
 import { html } from "@codemirror/lang-html";
 import { oneDark } from "@codemirror/theme-one-dark";
 import CodeMirror from "@uiw/react-codemirror";
-import { ChevronLeft, ChevronRight, Code2, Grid3x3, History, Loader2, Maximize, MousePointerClick, Redo2, RefreshCw, Save, Sparkles, Undo2, X, ZoomIn, ZoomOut } from "lucide-react";
+import { ChevronLeft, ChevronRight, Code2, Crop, Grid3x3, History, Loader2, Maximize, Minus, MousePointerClick, Move, Plus, Redo2, RefreshCw, Save, Sparkles, Undo2, X, ZoomIn, ZoomOut } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -77,6 +78,11 @@ export function PreviewPane({
   const [page, setPage] = useState(0);
   const [dirty, setDirty] = useState(false);
   const [activeImage, setActiveImage] = useState<string | null>(null);
+  // Image editing: drag mode (pan the crop vs move the box) + floating-toolbar anchor.
+  const [imgDragMode, setImgDragMode] = useState<"crop" | "move">("crop");
+  const imgDragModeRef = useRef<"crop" | "move">("crop");
+  imgDragModeRef.current = imgDragMode;
+  const [imgTool, setImgTool] = useState<{ id: string; top: number; left: number } | null>(null);
   const [nudge, setNudge] = useState<NudgeState | null>(null);
   const [source, setSource] = useState<string | null>(null);
   const [sourceDirty, setSourceDirty] = useState(false);
@@ -185,6 +191,8 @@ export function PreviewPane({
     extraIdsRef.current = [];
     setNudge(null);
     setActiveImage(null);
+    setImgTool(null);
+    setImgDragMode("crop");
     onSelect(null);
     setLiveKey(cacheKeyRef.current); // catch up on any renders frozen during the edit
   };
@@ -226,6 +234,67 @@ export function PreviewPane({
   stepZoomRef.current = stepZoom;
   const setZoomRef = useRef(setZoom);
   setZoomRef.current = setZoom;
+
+  /** Position the floating image toolbar over an image inside the (CSS-zoomed) iframe,
+   *  in parent screen coords for a position:fixed element. */
+  const anchorImgTool = (imgEl: HTMLElement, id: string) => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+    const ir = iframe.getBoundingClientRect();
+    const r = imgEl.getBoundingClientRect(); // iframe-internal px
+    const z = zoomValRef.current;
+    setImgTool({ id, top: ir.top + r.top * z, left: ir.left + (r.left + r.width / 2) * z });
+  };
+  const anchorImgToolRef = useRef(anchorImgTool);
+  anchorImgToolRef.current = anchorImgTool;
+
+  // Keep the image toolbar glued to its image as the canvas scrolls or zooms.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const reposition = () => {
+      const id = activeImageRef.current;
+      const doc = iframeRef.current?.contentDocument;
+      if (!id || !doc) return;
+      const img = doc.querySelector<HTMLElement>(`img[data-image-id="${id}"]`);
+      if (img) anchorImgToolRef.current(img, id);
+    };
+    reposition();
+    canvas?.addEventListener("scroll", reposition, { passive: true });
+    window.addEventListener("resize", reposition);
+    return () => {
+      canvas?.removeEventListener("scroll", reposition);
+      window.removeEventListener("resize", reposition);
+    };
+  }, [zoomVal, liveKey]);
+
+  const liveImg = (id: string) =>
+    iframeRef.current?.contentDocument?.querySelector<HTMLImageElement>(`img[data-image-id="${id}"]`) ?? null;
+
+  /** Resize the crop box (displayed image size) by a factor; live + persist. */
+  const imgResize = (id: string, factor: number) => {
+    const img = liveImg(id);
+    const frame = img?.parentElement as HTMLElement | null;
+    if (!img || !frame) return;
+    const r = frame.getBoundingClientRect(); // iframe-internal px → mm (parent zoom doesn't apply inside)
+    const w = Math.max(5, Math.min(400, (r.width / MM_TO_PX) * factor));
+    const h = Math.max(5, Math.min(400, (r.height / MM_TO_PX) * factor));
+    frame.style.width = `${w.toFixed(1)}mm`;
+    frame.style.height = `${h.toFixed(1)}mm`;
+    frame.style.overflow = "hidden";
+    anchorImgToolRef.current(img, id);
+    void client.setImageStyle(id, { frameWidthMm: w, frameHeightMm: h }).then(() => setDirty(true));
+  };
+
+  /** Zoom the image WITHIN its crop (scale the img); live + persist. */
+  const imgZoomStep = (id: string, delta: number) => {
+    const img = liveImg(id);
+    if (!img) return;
+    const m = /scale\(([\d.]+)\)/.exec(img.style.transform || "");
+    const z = Math.max(1, Math.min(3, +(((m ? Number(m[1]) : 1) + delta)).toFixed(2)));
+    img.style.objectFit = "cover";
+    img.style.transform = z === 1 ? "" : `scale(${z})`;
+    void client.setImageStyle(id, { zoom: z }).then(() => setDirty(true));
+  };
 
   /** Shared zoom shortcuts: ⌘/Ctrl +, -, 0 (fit), 1 (100%). Returns true when handled. */
   const handleZoomKey = (ev: KeyboardEvent): boolean => {
@@ -805,17 +874,25 @@ export function PreviewPane({
     // Image slots: click selects (Inspector shows controls); drag pans object-position.
     doc.querySelectorAll<HTMLImageElement>("img[data-image-id]").forEach((img) => {
       const id = img.getAttribute("data-image-id")!;
-      let drag: { x: number; y: number; posX: number; posY: number; moved: boolean } | null = null;
+      const frame = img.parentElement as HTMLElement | null;
+      type Drag =
+        | { mode: "crop"; x: number; y: number; posX: number; posY: number; moved: boolean }
+        | { mode: "move"; x: number; y: number; tx: number; ty: number; moved: boolean };
+      let drag: Drag | null = null;
 
       const parsePos = (): [number, number] => {
         const m = /([\d.]+)%\s+([\d.]+)%/.exec(img.style.objectPosition || "50% 50%");
         return m ? [Number(m[1]), Number(m[2])] : [50, 50];
       };
+      const parseTranslate = (): [number, number] => {
+        const m = /translate\(\s*(-?[\d.]+)mm\s*,\s*(-?[\d.]+)mm\s*\)/.exec(frame?.style.transform || "");
+        return m ? [Number(m[1]), Number(m[2])] : [0, 0];
+      };
 
       img.addEventListener("click", (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
-        if (drag?.moved) return; // click after a drag = end of pan, not a select toggle
+        if (drag?.moved) return; // click after a drag = end of the gesture, not a select toggle
         doc.querySelectorAll(".pc-nudge-active").forEach((other) => other.classList.remove("pc-nudge-active"));
         nudgeRef.current = null;
         extraIdsRef.current = [];
@@ -823,10 +900,13 @@ export function PreviewPane({
         doc.querySelectorAll("img.pc-active").forEach((other) => other.classList.remove("pc-active"));
         if (activeImageRef.current === id) {
           setActiveImage(null);
+          setImgTool(null);
           onSelect(null);
         } else {
           img.classList.add("pc-active");
           setActiveImage(id);
+          setImgDragMode("crop");
+          anchorImgToolRef.current(img, id);
           onSelect({ kind: "image", id, tag: "IMG" });
         }
       });
@@ -834,24 +914,44 @@ export function PreviewPane({
       img.addEventListener("mousedown", (ev) => {
         if (activeImageRef.current !== id) return;
         ev.preventDefault();
-        const [posX, posY] = parsePos();
-        drag = { x: ev.clientX, y: ev.clientY, posX, posY, moved: false };
+        if (imgDragModeRef.current === "move") {
+          const [tx, ty] = parseTranslate();
+          drag = { mode: "move", x: ev.clientX, y: ev.clientY, tx, ty, moved: false };
+        } else {
+          const [posX, posY] = parsePos();
+          drag = { mode: "crop", x: ev.clientX, y: ev.clientY, posX, posY, moved: false };
+        }
       });
       doc.addEventListener("mousemove", (ev) => {
         if (!drag || activeImageRef.current !== id) return;
-        const rect = img.getBoundingClientRect();
-        const dx = ((ev.clientX - drag.x) / rect.width) * 100;
-        const dy = ((ev.clientY - drag.y) / rect.height) * 100;
-        if (Math.abs(dx) + Math.abs(dy) > 1) drag.moved = true;
-        const nx = Math.min(100, Math.max(0, drag.posX - dx));
-        const ny = Math.min(100, Math.max(0, drag.posY - dy));
-        img.style.objectFit = "cover";
-        img.style.objectPosition = `${nx.toFixed(1)}% ${ny.toFixed(1)}%`;
+        if (drag.mode === "crop") {
+          const rect = img.getBoundingClientRect();
+          const dx = ((ev.clientX - drag.x) / rect.width) * 100;
+          const dy = ((ev.clientY - drag.y) / rect.height) * 100;
+          if (Math.abs(dx) + Math.abs(dy) > 1) drag.moved = true;
+          const nx = Math.min(100, Math.max(0, drag.posX - dx));
+          const ny = Math.min(100, Math.max(0, drag.posY - dy));
+          img.style.objectFit = "cover";
+          img.style.objectPosition = `${nx.toFixed(1)}% ${ny.toFixed(1)}%`;
+        } else if (frame) {
+          // Move the whole crop box: translate in mm (screen-px delta ÷ zoomed px/mm).
+          const perMm = MM_TO_PX * zoomValRef.current;
+          if (Math.abs(ev.clientX - drag.x) + Math.abs(ev.clientY - drag.y) > 2) drag.moved = true;
+          const nx = drag.tx + (ev.clientX - drag.x) / perMm;
+          const ny = drag.ty + (ev.clientY - drag.y) / perMm;
+          frame.style.transform = `translate(${nx.toFixed(1)}mm, ${ny.toFixed(1)}mm)`;
+          anchorImgToolRef.current(img, id);
+        }
       });
       doc.addEventListener("mouseup", () => {
         if (!drag || activeImageRef.current !== id) return;
         if (drag.moved) {
-          void client.setImageStyle(id, { objectPosition: img.style.objectPosition }).then(() => setDirty(true));
+          if (drag.mode === "crop") {
+            void client.setImageStyle(id, { objectPosition: img.style.objectPosition }).then(() => setDirty(true));
+          } else {
+            const [tx, ty] = parseTranslate();
+            void client.setImageStyle(id, { translateXMm: tx, translateYMm: ty }).then(() => setDirty(true));
+          }
         }
         drag = null;
       });
@@ -1104,6 +1204,60 @@ export function PreviewPane({
           ))}
         </div>
       )}
+
+      {mode === "live" && imgTool && activeImage === imgTool.id && runState === "idle" && (() => {
+        const slot = project.images.find((s) => s.id === imgTool.id);
+        const modeBtn = (m: "move" | "crop", Icon: typeof Move, title: string) => (
+          <button
+            title={title}
+            onClick={() => setImgDragMode(m)}
+            className={cn(
+              "rounded p-1 transition-colors",
+              imgDragMode === m ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent",
+            )}
+          >
+            <Icon className="size-3.5" />
+          </button>
+        );
+        const iconBtn = (Icon: typeof Plus, title: string, onClick: () => void, disabled = false) => (
+          <button
+            title={title}
+            disabled={disabled}
+            onClick={onClick}
+            className="rounded p-1 text-muted-foreground transition-colors hover:bg-accent disabled:opacity-40"
+          >
+            <Icon className="size-3.5" />
+          </button>
+        );
+        return (
+          <div
+            className="fixed z-50 -translate-x-1/2 -translate-y-full"
+            style={{ top: imgTool.top - 8, left: imgTool.left }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-0.5 rounded-lg border bg-background/95 p-1 shadow-xl backdrop-blur">
+              {modeBtn("move", Move, "Drag to move the image")}
+              {modeBtn("crop", Crop, "Drag to pan inside the crop")}
+              <div className="mx-0.5 h-4 w-px bg-border" />
+              <span className="pl-0.5 text-[10px] text-muted-foreground">Size</span>
+              {iconBtn(Minus, "Smaller", () => imgResize(imgTool.id, 0.91))}
+              {iconBtn(Plus, "Larger", () => imgResize(imgTool.id, 1.1))}
+              <div className="mx-0.5 h-4 w-px bg-border" />
+              <span className="pl-0.5 text-[10px] text-muted-foreground">Zoom</span>
+              {iconBtn(ZoomOut, "Zoom out within crop", () => imgZoomStep(imgTool.id, -0.15))}
+              {iconBtn(ZoomIn, "Zoom in within crop", () => imgZoomStep(imgTool.id, 0.15))}
+              {slot && slot.variants.length > 1 && (
+                <>
+                  <div className="mx-0.5 h-4 w-px bg-border" />
+                  {iconBtn(ChevronLeft, "Previous variant", () => void actions.selectVariant(slot.id, slot.current! - 1), !slot.current || slot.current <= Math.min(...slot.variants))}
+                  <span className="px-0.5 text-[10px] tabular-nums text-muted-foreground">v{slot.current ?? "?"}/{slot.variants.length}</span>
+                  {iconBtn(ChevronRight, "Next variant", () => void actions.selectVariant(slot.id, slot.current! + 1), !slot.current || slot.current >= Math.max(...slot.variants))}
+                </>
+              )}
+            </div>
+          </div>
+        );
+      })()}
     </main>
   );
 }

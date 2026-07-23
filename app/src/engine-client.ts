@@ -112,6 +112,17 @@ export type SettingsPatch = {
 
 export type RunState = "idle" | "queued" | "running";
 
+/** Image geometry edits. img-level: objectPosition (pan) + zoom (scale within crop).
+ *  frame-level: width/height (resize the box) + translate (move it on the page). */
+export interface ImageStyle {
+  objectPosition?: string;
+  zoom?: number;
+  frameWidthMm?: number;
+  frameHeightMm?: number;
+  translateXMm?: number;
+  translateYMm?: number;
+}
+
 export interface SystemEvent {
   type: "system";
   source: string; // "app" | "mcp" | custom client tag
@@ -247,7 +258,7 @@ export interface EngineClient {
   selectVariant(imageId: string, variant: number): Promise<void>;
   generateMoreImages(imageId: string): Promise<void>;
   uploadImageVariant(imageId: string, dataBase64: string): Promise<void>;
-  setImageStyle(imageId: string, style: { objectPosition?: string; zoom?: number }): Promise<void>;
+  setImageStyle(imageId: string, style: ImageStyle): Promise<void>;
   proofMeta(round?: number): Promise<{ pages: number }>;
   proofPageUrl(index: number, cacheKey: number, round?: number): string;
   fileUrl(rel: string, cacheKey: number): string;
@@ -444,7 +455,7 @@ export class BrowserEngineClient implements EngineClient {
   selectVariant(imageId: string, variant: number) { return post("/api/variant", { imageId, variant }); }
   generateMoreImages(imageId: string) { return post("/api/images/generate", { imageId }); }
   uploadImageVariant(imageId: string, dataBase64: string) { return post("/api/images/upload", { imageId, dataBase64 }); }
-  setImageStyle(imageId: string, style: { objectPosition?: string; zoom?: number }) {
+  setImageStyle(imageId: string, style: ImageStyle) {
     return post("/api/images/style", { imageId, ...style });
   }
 

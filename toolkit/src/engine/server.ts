@@ -995,7 +995,14 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
         if (!body.imageId) return json(res, 400, { error: "imageId required" });
         const project = bridge.requireProject();
         snapshotPage(project);
-        setImageStyle(project, body.imageId, { objectPosition: body.objectPosition, zoom: body.zoom });
+        setImageStyle(project, body.imageId, {
+          objectPosition: body.objectPosition,
+          zoom: body.zoom,
+          frameWidthMm: body.frameWidthMm,
+          frameHeightMm: body.frameHeightMm,
+          translateXMm: body.translateXMm,
+          translateYMm: body.translateYMm,
+        });
         bridge.broadcast({ type: "files_changed", project: project.slug });
         return json(res, 200, { ok: true });
       }
