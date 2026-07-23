@@ -1,7 +1,7 @@
 import { html } from "@codemirror/lang-html";
 import { oneDark } from "@codemirror/theme-one-dark";
 import CodeMirror from "@uiw/react-codemirror";
-import { ChevronLeft, ChevronRight, Code2, Grid3x3, History, Loader2, Maximize, MousePointerClick, Redo2, RefreshCw, Save, Undo2, ZoomIn, ZoomOut } from "lucide-react";
+import { ChevronLeft, ChevronRight, Code2, Grid3x3, History, Loader2, Maximize, MousePointerClick, Redo2, RefreshCw, Save, Sparkles, Undo2, X, ZoomIn, ZoomOut } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -34,6 +34,7 @@ interface Actions {
   updateCopy(pcId: string, text: string): Promise<void>;
   selectVariant(id: string, v: number): Promise<void>;
   render(): Promise<void>;
+  cancel(slug?: string): void;
 }
 
 export function PreviewPane({
@@ -41,6 +42,7 @@ export function PreviewPane({
   client,
   cacheKey,
   actions,
+  runState,
   viewRound,
   onViewRound,
   onSelect,
@@ -52,6 +54,7 @@ export function PreviewPane({
   client: EngineClient;
   cacheKey: number;
   actions: Actions;
+  runState: "idle" | "queued" | "running";
   viewRound: number | null;
   onViewRound: (round: number | null) => void;
   onSelect: (selection: SelectionInfo | null) => void;
@@ -997,6 +1000,7 @@ export function PreviewPane({
           </div>
         )
       ) : (
+        <div className="relative flex min-h-0 flex-1 flex-col">
         <div ref={canvasRef} className="flex-1 overflow-auto bg-muted/30">
           <div className="mx-auto w-fit p-6">
             {mode === "proof" ? (
@@ -1027,6 +1031,46 @@ export function PreviewPane({
               />
             )}
           </div>
+        </div>
+        {runState !== "idle" && viewRound == null && (() => {
+          const canvasEmpty = mode === "proof" ? pageCount === 0 : !project.hasPage;
+          const label = runState === "queued" ? "Queued — waiting for a slot…" : project.hasPage ? "Regenerating…" : "Designing your proof…";
+          return canvasEmpty ? (
+            <div className="absolute inset-0 flex items-center justify-center bg-muted/40 backdrop-blur-[1px]">
+              <div className="flex w-64 flex-col items-center gap-4 rounded-xl border bg-background/95 px-8 py-7 text-center shadow-xl">
+                <Sparkles className="size-7 animate-pulse text-primary" />
+                <div className="flex flex-col gap-1">
+                  <p className="text-sm font-medium">{label}</p>
+                  <p className="text-xs text-muted-foreground">The agent is designing and press-checking your piece — this can take a minute.</p>
+                </div>
+                <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
+                  <div className="h-full w-1/3 rounded-full bg-primary/70 animate-[pc-indeterminate_1.1s_ease-in-out_infinite]" />
+                </div>
+                {runState === "running" && (
+                  <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => actions.cancel()}>
+                    <X data-slot="icon" /> Cancel generation
+                  </Button>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center">
+              <div className="pointer-events-auto flex items-center gap-2 rounded-full border bg-background/95 px-3 py-1.5 text-xs shadow-md">
+                <Loader2 className="size-3.5 animate-spin text-primary" />
+                <span className="font-medium">{label}</span>
+                {runState === "running" && (
+                  <button
+                    className="ml-1 rounded-full p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                    title="Cancel generation"
+                    onClick={() => actions.cancel()}
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })()}
         </div>
       )}
 

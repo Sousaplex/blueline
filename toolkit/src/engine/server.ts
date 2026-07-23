@@ -258,6 +258,31 @@ class Bridge {
     return "running";
   }
 
+  /** Cancel a queued or running generation — defaults to the currently open project. */
+  async cancel(slug?: string): Promise<void> {
+    const target = slug ?? this.requireProject().slug;
+    const state = this.runState(target);
+    if (state === "idle") return;
+    if (state === "queued") {
+      this.runQueue = this.runQueue.filter((s) => s !== target);
+      this.runStates.delete(target);
+      this.broadcast({ type: "run_state", project: target, state: "idle" });
+      this.logSystem("api", "run_cancel", `${target} (dequeued)`);
+      return;
+    }
+    // running: abort the Pi session (waits for it to become idle → fires agent_end,
+    // whose handler clears run state and pumps the queue).
+    this.logSystem("api", "run_cancel", target);
+    const pc = this.sessions.get(target);
+    if (pc) await pc.session.abort();
+    // Safety net if abort didn't emit agent_end for any reason.
+    if (this.runStates.get(target) !== "idle" && this.runStates.get(target) !== undefined) {
+      this.runStates.delete(target);
+      this.broadcast({ type: "run_state", project: target, state: "idle" });
+      this.pumpQueue();
+    }
+  }
+
   private pageHash(project: Project): string {
     return existsSync(project.pageHtml) ? createHash("sha1").update(readFileSync(project.pageHtml)).digest("hex") : "";
   }
@@ -1073,6 +1098,11 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
         const state = await bridge.run(body.slug, body.prompt);
         sys("run_project", `${body.slug ?? bridge.project?.slug}: ${state}`);
         return json(res, 200, { ok: true, state });
+      }
+      if (req.method === "POST" && url.pathname === "/api/run/cancel") {
+        const body = await readBody(req);
+        await bridge.cancel(body.slug);
+        return json(res, 200, { ok: true });
       }
       if (req.method === "POST" && url.pathname === "/api/chat") {
         const body = await readBody(req);

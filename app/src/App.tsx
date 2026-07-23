@@ -1,4 +1,4 @@
-import { Download, Play, RefreshCw, Timer } from "lucide-react";
+import { Download, Play, RefreshCw, Square, Timer } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import logo from "./assets/logo.png";
 import { AgentPane, type FeedItem } from "./components/AgentPane";
@@ -176,6 +176,8 @@ export function App() {
         return client.chat(text);
       },
       render: () => client.render(),
+      cancel: (slug?: string) =>
+        client.cancelRun(slug).catch((e) => setFeed((f) => [...f, { kind: "error" as const, message: String(e), at: Date.now() }])),
       updateCopy: (pcId: string, text: string) => client.updateCopy(pcId, text),
       selectVariant: (id: string, v: number) => client.selectVariant(id, v),
     }),
@@ -251,9 +253,15 @@ export function App() {
         )}
         <div className="flex-1" />
         <Badge variant="outline" className="font-mono text-xs">{project.designerModel}</Badge>
-        <Button size="sm" disabled={currentRunState !== "idle"} onClick={() => void actions.run()}>
-          <Play data-slot="icon" /> Run
-        </Button>
+        {currentRunState === "idle" ? (
+          <Button size="sm" onClick={() => void actions.run()}>
+            <Play data-slot="icon" /> Run
+          </Button>
+        ) : (
+          <Button size="sm" variant="destructive" onClick={() => void actions.cancel()}>
+            <Square data-slot="icon" /> Cancel
+          </Button>
+        )}
         <Button size="sm" variant="outline" disabled={!project.hasPage} onClick={() => void actions.render()}>
           <RefreshCw data-slot="icon" /> Re-render
         </Button>
@@ -303,6 +311,7 @@ export function App() {
           client={client}
           cacheKey={cacheKey}
           actions={actions}
+          runState={currentRunState}
           viewRound={viewRound}
           onViewRound={setViewRound}
           onSelect={setSelection}

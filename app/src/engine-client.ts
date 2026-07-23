@@ -239,6 +239,7 @@ export interface EngineClient {
   getSettings(): Promise<EngineSettings>;
   updateSettings(patch: SettingsPatch): Promise<void>;
   run(slug?: string, prompt?: string): Promise<void>;
+  cancelRun(slug?: string): Promise<void>;
   chat(text: string): Promise<void>;
   getFeed(slug: string): Promise<EngineEvent[]>;
   render(): Promise<void>;
@@ -431,6 +432,7 @@ export class BrowserEngineClient implements EngineClient {
 
   updateSettings(patch: SettingsPatch) { return post("/api/settings", patch); }
   run(slug?: string, prompt?: string) { return post("/api/run", { slug, prompt }); }
+  cancelRun(slug?: string) { return post("/api/run/cancel", { slug }); }
   chat(text: string) { return post("/api/chat", { text }); }
 
   async getFeed(slug: string): Promise<EngineEvent[]> {
