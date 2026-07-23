@@ -139,7 +139,15 @@ async function exportPdf(targetPath?: string): Promise<string | null> {
   const printWin = new BrowserWindow({ show: false, webPreferences: { offscreen: true } });
   try {
     await printWin.loadURL(`${BRIDGE_URL}/files/page.html`);
-    await new Promise((r) => setTimeout(r, 500)); // fonts/images settle
+    // Wait for images to DECODE (webp decodes lazily and would otherwise drop from the
+    // PDF) and fonts to load — not just a fixed settle.
+    await printWin.webContents.executeJavaScript(
+      `(async () => {
+        await Promise.all(Array.from(document.images).map((img) => img.decode().catch(() => {})));
+        if (document.fonts && document.fonts.ready) await document.fonts.ready;
+      })()`,
+    );
+    await new Promise((r) => setTimeout(r, 150)); // small paint settle
     const pdf = await printWin.webContents.printToPDF({
       printBackground: true,
       preferCSSPageSize: true,

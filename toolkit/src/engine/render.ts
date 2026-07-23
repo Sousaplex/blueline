@@ -38,6 +38,16 @@ export class PlaywrightBackend implements RenderBackend {
   async renderPdf(htmlPath: string, outPath: string, opts: RenderOptions = {}): Promise<void> {
     await this.withPage(async (page) => {
       await page.goto(`file://${htmlPath}`, { waitUntil: "networkidle" });
+      // `networkidle` fires ~500ms after load but does NOT wait for image *decoding*.
+      // webp decodes lazily/heavier than png, so the print snapshot is frequently taken
+      // before it's ready → the image drops out of the PDF (but shows in the on-screen
+      // live iframe, which paints lazily). Force every image to finish decoding, and
+      // fonts to load, before printing. Passed as a STRING so tsx's transpile can't
+      // inject its __name helper into the serialized function (ReferenceError in-page).
+      await page.evaluate(`(async () => {
+        await Promise.all(Array.from(document.images).map((img) => img.decode().catch(() => {})));
+        if (document.fonts && document.fonts.ready) await document.fonts.ready;
+      })()`);
       await page.pdf({
         path: outPath,
         printBackground: opts.printBackground ?? true,
