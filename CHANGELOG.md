@@ -5,6 +5,26 @@ All notable user-facing changes to Blueline. Kept from v0.17.0 onward
 [Keep a Changelog](https://keepachangelog.com/); versions match `app/package.json`
 and the GitHub release tags.
 
+## [Unreleased] — 0.20.0
+
+Canvas-editing overhaul (in progress; 0.20.0-dev test builds).
+
+### Added
+- **Direct-manipulation image controls** — a selected image shows a selection frame with
+  8 resize handles. **Move** mode: drag to reposition, drag a corner to resize the box.
+  **Crop** mode (toolbar toggle): drag to pan the photo, drag a corner to zoom it inside
+  the box. Replaces the old competing move/crop buttons and ± Size/Zoom controls.
+- **Add elements** in live edit — text box, heading, rectangle/tint block, divider — from
+  the canvas tool palette. New elements are freely positioned and edit/drag like any other.
+
+### Fixed
+- Restored the **all-images variant shuttle** (cycle every generated image's variants at a
+  glance), now in Live edit where the change is immediately visible.
+
+### Changed
+- First automated **regression tests** for the live-edit Inspector (alignment strip, variant
+  shuttle), so those controls can't silently disappear again.
+
 ## [0.19.0]
 
 ### Added
