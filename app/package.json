@@ -13,7 +13,8 @@
     "electron:smoke": "npm run build && npm run electron:compile && PRESSCHECK_SMOKE=1 electron .",
     "package": "npm run build && npm run electron:compile && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac",
     "package:signed": "npm run build && npm run electron:compile && electron-builder --mac",
-    "release:publish": "npm run build && npm run electron:compile && electron-builder --mac --publish always"
+    "release:publish": "npm run build && npm run electron:compile && electron-builder --mac --publish always",
+    "test": "vitest run"
   },
   "dependencies": {
     "@codemirror/lang-html": "^6.4.11",
@@ -39,6 +40,9 @@
   },
   "devDependencies": {
     "@electron/notarize": "^3.1.1",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^7.0.0",
+    "@testing-library/react": "^16.3.2",
     "@types/diff": "^7.0.2",
     "@types/node": "^26.1.1",
     "@types/react": "^19.0.0",
@@ -47,8 +51,10 @@
     "electron": "^43.1.1",
     "electron-builder": "^26.15.3",
     "esbuild": "^0.28.1",
+    "jsdom": "^29.1.1",
     "typescript": "^5.7.0",
-    "vite": "^6.0.0"
+    "vite": "^6.0.0",
+    "vitest": "^4.1.10"
   },
   "allowScripts": {
     "electron@43.1.1": true,
