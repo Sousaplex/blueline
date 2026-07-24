@@ -5,9 +5,9 @@ All notable user-facing changes to Blueline. Kept from v0.17.0 onward
 [Keep a Changelog](https://keepachangelog.com/); versions match `app/package.json`
 and the GitHub release tags.
 
-## [Unreleased] — 0.20.0
+## [0.20.0]
 
-Canvas-editing overhaul (in progress; 0.20.0-dev test builds).
+Canvas-editing overhaul.
 
 ### Added
 - **Direct-manipulation image controls** — a selected image shows a selection frame with
