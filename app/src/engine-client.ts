@@ -232,6 +232,7 @@ export interface EngineClient {
   /** Assign a data-pc-id to an untagged element (path = strict body>nth-child chain). */
   tagElement(path: string, pcId: string): Promise<void>;
   deleteElement(pcId: string): Promise<void>;
+  insertElement(kind: "text" | "heading" | "rect" | "divider"): Promise<{ id: string }>;
   moveElement(pcId: string, direction: "up" | "down"): Promise<void>;
   moveElementBefore(pcId: string, beforePcId: string, after?: boolean): Promise<void>;
   getPageSource(): Promise<string>;
@@ -471,6 +472,12 @@ export class BrowserEngineClient implements EngineClient {
 
   tagElement(path: string, pcId: string) { return post("/api/element/tag", { path, pcId }); }
   deleteElement(pcId: string) { return post("/api/element/delete", { pcId }); }
+  async insertElement(kind: "text" | "heading" | "rect" | "divider"): Promise<{ id: string }> {
+    const res = await fetch("/api/element/insert", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind }) });
+    const payload = await res.json();
+    if (!res.ok) throw new Error(payload.error ?? "insert failed");
+    return { id: payload.id };
+  }
   moveElement(pcId: string, direction: "up" | "down") { return post("/api/element/move", { pcId, direction }); }
   moveElementBefore(pcId: string, beforePcId: string, after?: boolean) {
     return post("/api/element/move", { pcId, beforePcId, after });

@@ -166,6 +166,43 @@ export function deleteElement(project: Project, pcId: string): void {
   save(project, dom.document);
 }
 
+export type InsertKind = "text" | "heading" | "rect" | "divider";
+
+/** Insert a new, freely-positioned element the generation didn't create, and return its
+ *  data-pc-id so the editor can select it. It's appended (position:absolute) to the page
+ *  root — which is anchored position:relative — so left/top mm are relative to the page in
+ *  both the live preview and the print PDF. The human then drags/edits it like any element. */
+export function insertElement(project: Project, kind: InsertKind, xMm = 15, yMm = 15): string {
+  const { dom } = loadDom(project);
+  const doc = dom.document;
+  let n = 1;
+  let id = `${kind}-${n}`;
+  while (doc.querySelector(`[data-pc-id="${id}"]`)) id = `${kind}-${++n}`;
+  const el: any = doc.createElement("div");
+  el.setAttribute("data-pc-id", id);
+  const base = `position:absolute;left:${xMm}mm;top:${yMm}mm;`;
+  if (kind === "text") {
+    el.setAttribute("style", `${base}font-size:11pt;line-height:1.4;color:#111;max-width:80mm;`);
+    el.textContent = "Text";
+  } else if (kind === "heading") {
+    el.setAttribute("style", `${base}font-size:22pt;font-weight:700;line-height:1.15;color:#111;max-width:120mm;`);
+    el.textContent = "Heading";
+  } else if (kind === "rect") {
+    el.setAttribute("style", `${base}width:40mm;height:25mm;background:#e5e7eb;border:1px solid #cbd5e1;border-radius:2mm;`);
+  } else {
+    // divider
+    el.setAttribute("style", `${base}width:60mm;height:0;border-top:2px solid #111;`);
+  }
+  const root: any = doc.querySelector("[data-pc-id]") ?? doc.body;
+  // Guarantee a positioning context so left/top are relative to the page root.
+  if (root.tagName !== "BODY" && !/position\s*:/i.test(root.getAttribute("style") || "")) {
+    root.setAttribute("style", `position:relative;${root.getAttribute("style") || ""}`);
+  }
+  root.appendChild(el);
+  save(project, doc);
+  return id;
+}
+
 /** Swap an element with its previous/next sibling in document flow. */
 export function moveElement(project: Project, pcId: string, direction: "up" | "down"): void {
   const { dom } = loadDom(project);

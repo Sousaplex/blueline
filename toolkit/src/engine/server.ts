@@ -17,6 +17,8 @@ import { gitClone, gitConnect, gitDisconnect, gitStatus, gitSync } from "./git-s
 import { generateImages } from "./images.ts";
 import {
   deleteElement,
+  insertElement,
+  type InsertKind,
   tagElement,
   getElementStyle,
   listEditable,
@@ -1197,6 +1199,17 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
         sys("delete_element", `${project.slug}: ${body.pcId}`);
         bridge.broadcast({ type: "files_changed", project: project.slug });
         return json(res, 200, { ok: true });
+      }
+      if (req.method === "POST" && url.pathname === "/api/element/insert") {
+        const body = await readBody(req);
+        const kind = String(body.kind) as InsertKind;
+        if (!["text", "heading", "rect", "divider"].includes(kind)) return json(res, 400, { error: "bad kind" });
+        const project = bridge.requireProject();
+        snapshotPage(project);
+        const id = insertElement(project, kind, Number(body.xMm) || 15, Number(body.yMm) || 15);
+        sys("insert_element", `${project.slug}: ${kind} → ${id}`);
+        bridge.broadcast({ type: "files_changed", project: project.slug });
+        return json(res, 200, { ok: true, id });
       }
       if (req.method === "POST" && url.pathname === "/api/element/move") {
         const body = await readBody(req);

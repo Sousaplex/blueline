@@ -3,7 +3,7 @@ import { search, searchKeymap } from "@codemirror/search";
 import { keymap } from "@codemirror/view";
 import { oneDark } from "@codemirror/theme-one-dark";
 import CodeMirror from "@uiw/react-codemirror";
-import { ChevronLeft, ChevronRight, Code2, Crop, Grid3x3, History, Loader2, Maximize, Minus, MousePointerClick, Move, Plus, Redo2, RefreshCw, Save, Sparkles, Undo2, X, ZoomIn, ZoomOut } from "lucide-react";
+import { ChevronLeft, ChevronRight, Code2, Crop, Grid3x3, Heading, History, Loader2, Maximize, Minus, MousePointerClick, Move, Plus, Redo2, RefreshCw, Save, Sparkles, Square, Type, Undo2, X, ZoomIn, ZoomOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -510,6 +510,14 @@ export function PreviewPane({
   const doRedo = () => {
     clearSelectionsRef.current();
     void client.redoPage().then(({ changed }) => announceHistory("Redo", changed)).catch(() => {});
+  };
+  // Add a new element the generation didn't create. It lands at the page's top-left as a
+  // freely-positioned block; the live reload flashes it and the user drags/edits from there.
+  const addElement = (kind: "text" | "heading" | "rect" | "divider") => {
+    void client.insertElement(kind).then(({ id }) => {
+      pendingFlashRef.current = [id];
+      setDirty(true);
+    });
   };
   const doUndoRef = useRef(doUndo);
   doUndoRef.current = doUndo;
@@ -1158,6 +1166,19 @@ export function PreviewPane({
                 onClick={() => setShowGrid(!showGrid)}
               >
                 <Grid3x3 />
+              </Button>
+              <div className="my-0.5 h-px w-5 bg-border" />
+              <Button variant="ghost" size="icon-sm" title="Add a text box" aria-label="Add text" onClick={() => addElement("text")}>
+                <Type />
+              </Button>
+              <Button variant="ghost" size="icon-sm" title="Add a heading" aria-label="Add heading" onClick={() => addElement("heading")}>
+                <Heading />
+              </Button>
+              <Button variant="ghost" size="icon-sm" title="Add a rectangle / tint block" aria-label="Add rectangle" onClick={() => addElement("rect")}>
+                <Square />
+              </Button>
+              <Button variant="ghost" size="icon-sm" title="Add a divider line" aria-label="Add divider" onClick={() => addElement("divider")}>
+                <Minus />
               </Button>
               <div className="my-0.5 h-px w-5 bg-border" />
             </>
