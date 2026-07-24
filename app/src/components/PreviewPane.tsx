@@ -214,7 +214,7 @@ export function PreviewPane({
     setNudge(null);
     setActiveImage(null);
     setImgTool(null);
-    setImgDragMode("crop");
+    setImgDragMode("move");
     onSelect(null);
     setLiveKey(cacheKeyRef.current); // catch up on any renders frozen during the edit
   };
@@ -293,31 +293,6 @@ export function PreviewPane({
   const liveImg = (id: string) =>
     iframeRef.current?.contentDocument?.querySelector<HTMLImageElement>(`img[data-image-id="${id}"]`) ?? null;
 
-  /** Resize the crop box (displayed image size) by a factor; live + persist. */
-  const imgResize = (id: string, factor: number) => {
-    const img = liveImg(id);
-    const frame = img?.parentElement as HTMLElement | null;
-    if (!img || !frame) return;
-    const r = frame.getBoundingClientRect(); // iframe-internal px → mm (parent zoom doesn't apply inside)
-    const w = Math.max(5, Math.min(400, (r.width / MM_TO_PX) * factor));
-    const h = Math.max(5, Math.min(400, (r.height / MM_TO_PX) * factor));
-    frame.style.width = `${w.toFixed(1)}mm`;
-    frame.style.height = `${h.toFixed(1)}mm`;
-    frame.style.overflow = "hidden";
-    anchorImgToolRef.current(img, id);
-    void client.setImageStyle(id, { frameWidthMm: w, frameHeightMm: h }).then(() => setDirty(true));
-  };
-
-  /** Zoom the image WITHIN its crop (scale the img); live + persist. */
-  const imgZoomStep = (id: string, delta: number) => {
-    const img = liveImg(id);
-    if (!img) return;
-    const m = /scale\(([\d.]+)\)/.exec(img.style.transform || "");
-    const z = Math.max(1, Math.min(3, +(((m ? Number(m[1]) : 1) + delta)).toFixed(2)));
-    img.style.objectFit = "cover";
-    img.style.transform = z === 1 ? "" : `scale(${z})`;
-    void client.setImageStyle(id, { zoom: z }).then(() => setDirty(true));
-  };
 
   const parseTranslateMm = (frame: HTMLElement): [number, number] => {
     const m = /translate\(\s*(-?[\d.]+)mm\s*,\s*(-?[\d.]+)mm\s*\)/.exec(frame.style.transform || "");
@@ -337,6 +312,34 @@ export function PreviewPane({
     const iframe = iframeRef.current;
     if (!img || !frame || !iframe) return;
     const z = zoomValRef.current;
+
+    // In CROP mode a handle SCALES the photo within the mask (zoom), driven by the
+    // cursor's distance from the mask center. In MOVE mode it resizes the mask (below).
+    if (imgDragModeRef.current === "crop") {
+      const fr0 = frame.getBoundingClientRect();
+      const ir0 = iframe.getBoundingClientRect();
+      const cx = ir0.left + (fr0.left + fr0.width / 2) * z;
+      const cy = ir0.top + (fr0.top + fr0.height / 2) * z;
+      const startDist = Math.hypot(e.clientX - cx, e.clientY - cy) || 1;
+      const m = /scale\(([\d.]+)\)/.exec(img.style.transform || "");
+      const startZoom = m ? Number(m[1]) : 1;
+      img.style.objectFit = "cover";
+      const onMoveZ = (ev: MouseEvent) => {
+        const d = Math.hypot(ev.clientX - cx, ev.clientY - cy);
+        const zoom = Math.max(1, Math.min(3, +(startZoom * (d / startDist)).toFixed(2)));
+        img.style.transform = zoom === 1 ? "" : `scale(${zoom})`;
+      };
+      const onUpZ = () => {
+        window.removeEventListener("mousemove", onMoveZ);
+        window.removeEventListener("mouseup", onUpZ);
+        const m2 = /scale\(([\d.]+)\)/.exec(img.style.transform || "");
+        void client.setImageStyle(id, { zoom: m2 ? Number(m2[1]) : 1 }).then(() => setDirty(true));
+      };
+      window.addEventListener("mousemove", onMoveZ);
+      window.addEventListener("mouseup", onUpZ);
+      return;
+    }
+
     const perMm = MM_TO_PX * z; // screen px per mm
     const fr = frame.getBoundingClientRect(); // iframe-internal px
     const ir = iframe.getBoundingClientRect();
@@ -1003,7 +1006,7 @@ export function PreviewPane({
         } else {
           img.classList.add("pc-active");
           setActiveImage(id);
-          setImgDragMode("crop");
+          setImgDragMode("move");
           anchorImgToolRef.current(img, id);
           onSelect({ kind: "image", id, tag: "IMG" });
         }
@@ -1302,16 +1305,22 @@ export function PreviewPane({
 
       {mode === "live" && imgTool && activeImage === imgTool.id && runState === "idle" && (() => {
         const slot = project.images.find((s) => s.id === imgTool.id);
-        const modeBtn = (m: "move" | "crop", Icon: typeof Move, title: string) => (
+        // Segmented Move/Crop toggle. The gestures are the same in both modes — drag the
+        // body, drag a handle — but the MODE decides what they do, so nothing competes:
+        //   Move: body drags the box · handles resize the mask
+        //   Crop: body pans the photo · handles zoom the photo inside the mask
+        const modeBtn = (m: "move" | "crop", Icon: typeof Move, label: string, title: string) => (
           <button
             title={title}
             onClick={() => setImgDragMode(m)}
             className={cn(
-              "rounded p-1 transition-colors",
-              imgDragMode === m ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent",
+              "flex items-center gap-1 rounded px-2 py-1 text-[11px] transition-colors",
+              imgDragMode === m
+                ? "bg-background font-medium text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
             )}
           >
-            <Icon className="size-3.5" />
+            <Icon className="size-3.5" /> {label}
           </button>
         );
         const iconBtn = (Icon: typeof Plus, title: string, onClick: () => void, disabled = false) => (
@@ -1330,17 +1339,11 @@ export function PreviewPane({
             style={{ top: imgTool.top - 8, left: imgTool.left + imgTool.width / 2 }}
             onMouseDown={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center gap-0.5 rounded-lg border bg-background/95 p-1 shadow-xl backdrop-blur">
-              {modeBtn("move", Move, "Drag to move the image")}
-              {modeBtn("crop", Crop, "Drag to pan inside the crop")}
-              <div className="mx-0.5 h-4 w-px bg-border" />
-              <span className="pl-0.5 text-[10px] text-muted-foreground">Size</span>
-              {iconBtn(Minus, "Smaller", () => imgResize(imgTool.id, 0.91))}
-              {iconBtn(Plus, "Larger", () => imgResize(imgTool.id, 1.1))}
-              <div className="mx-0.5 h-4 w-px bg-border" />
-              <span className="pl-0.5 text-[10px] text-muted-foreground">Zoom</span>
-              {iconBtn(ZoomOut, "Zoom out within crop", () => imgZoomStep(imgTool.id, -0.15))}
-              {iconBtn(ZoomIn, "Zoom in within crop", () => imgZoomStep(imgTool.id, 0.15))}
+            <div className="flex items-center gap-1 rounded-lg border bg-background/95 p-1 shadow-xl backdrop-blur">
+              <div className="flex items-center rounded-md bg-muted/50 p-0.5">
+                {modeBtn("move", Move, "Move", "Move: drag to move the box · corners resize it")}
+                {modeBtn("crop", Crop, "Crop", "Crop: drag to pan the photo · corners zoom it")}
+              </div>
               {slot && slot.variants.length > 1 && (
                 <>
                   <div className="mx-0.5 h-4 w-px bg-border" />

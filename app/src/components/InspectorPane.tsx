@@ -290,7 +290,10 @@ export function InspectorPane({
               </Button>
               <input ref={uploadInput} type="file" accept="image/*" hidden onChange={onUpload} />
             </div>
-            <p className="text-muted-foreground">Use the toolbar on the image to move it, resize the box, zoom within the crop, or pan the crop by dragging.</p>
+            <p className="text-muted-foreground">
+              <strong className="text-foreground">Move</strong>: drag the image to reposition it; drag a corner to resize the box.{" "}
+              <strong className="text-foreground">Crop</strong> (toolbar): drag to pan the photo; drag a corner to zoom it inside the box.
+            </p>
           </div>
         )}
 
