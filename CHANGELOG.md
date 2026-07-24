@@ -5,6 +5,13 @@ All notable user-facing changes to Blueline. Kept from v0.17.0 onward
 [Keep a Changelog](https://keepachangelog.com/); versions match `app/package.json`
 and the GitHub release tags.
 
+## [Unreleased] — 0.19.0
+
+### Added
+- **Configurable run concurrency** — the number of projects that generate at once is now a
+  setting (Settings → Runs), default raised from 2 to **3**, adjustable 1–10. Raising it lets
+  queued runs start immediately.
+
 ## [0.18.1]
 
 Batch of fixes and features from the first round of test-user feedback.

@@ -16,12 +16,26 @@ export interface BluelineConfig {
   render: { format: string; printBackground: boolean; preferCSSPageSize: boolean };
   webFetch: { maxFetchesPerRun: number; maxContentChars: number };
   webSearch: { model: string; maxSearchesPerRun: number; apiKeyEnv?: string };
+  runs: { maxConcurrent: number }; // how many project generations run at once (clamped 1–10)
 }
 
-const DEFAULTS: Pick<BluelineConfig, "webFetch" | "webSearch"> = {
+/** Concurrency bounds — the setting is clamped to this range everywhere it's read. */
+export const MIN_CONCURRENT_RUNS = 1;
+export const MAX_CONCURRENT_RUNS_CAP = 10;
+export const DEFAULT_CONCURRENT_RUNS = 3;
+
+const DEFAULTS: Pick<BluelineConfig, "webFetch" | "webSearch" | "runs"> = {
   webFetch: { maxFetchesPerRun: 10, maxContentChars: 20_000 },
   webSearch: { model: "gemini-3.5-flash", maxSearchesPerRun: 5, apiKeyEnv: "GEMINI_API_KEY" },
+  runs: { maxConcurrent: DEFAULT_CONCURRENT_RUNS },
 };
+
+/** Clamp any stored/incoming concurrency to the safe range, tolerating junk values. */
+export function clampConcurrency(n: unknown): number {
+  const v = Math.round(Number(n));
+  if (!Number.isFinite(v)) return DEFAULT_CONCURRENT_RUNS;
+  return Math.max(MIN_CONCURRENT_RUNS, Math.min(MAX_CONCURRENT_RUNS_CAP, v));
+}
 
 // Code root = ../../.. from this file (toolkit/src/engine/config.ts). In the
 // packaged app this is <app>/Contents/Resources — read-only, code + defaults.

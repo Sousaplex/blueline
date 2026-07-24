@@ -36,6 +36,7 @@ export function SettingsDialog({ client }: { client: EngineClient }) {
   const [maxRounds, setMaxRounds] = useState(6);
   const [imagesModel, setImagesModel] = useState("");
   const [variantsPerPrompt, setVariantsPerPrompt] = useState(2);
+  const [maxConcurrent, setMaxConcurrent] = useState(3);
   const [setup, setSetup] = useState<SetupState | null>(null);
   const [geminiKey, setGeminiKey] = useState("");
   const [moonshotKey, setMoonshotKey] = useState("");
@@ -54,6 +55,7 @@ export function SettingsDialog({ client }: { client: EngineClient }) {
         setMaxRounds(s.config.reviewer.maxRounds);
         setImagesModel(s.config.images.model);
         setVariantsPerPrompt(s.config.images.variantsPerPrompt);
+        setMaxConcurrent(s.config.runs?.maxConcurrent ?? 3);
       })
       .catch((e) => setError(String(e)));
     setGeminiKey("");
@@ -76,6 +78,7 @@ export function SettingsDialog({ client }: { client: EngineClient }) {
         designer: { provider, model, thinkingLevel: thinking }, // apiKeyEnv is derived from the provider engine-side
         reviewer: { model: reviewerModel, maxRounds },
         images: { model: imagesModel, variantsPerPrompt },
+        runs: { maxConcurrent: Math.max(1, Math.min(10, Math.round(maxConcurrent) || 3)) },
       });
       setOpen(false);
     } catch (e) {
@@ -244,6 +247,28 @@ export function SettingsDialog({ client }: { client: EngineClient }) {
                     onChange={(e) => setVariantsPerPrompt(Number(e.target.value))}
                   />
                 </div>
+              </div>
+            </section>
+
+            <Separator />
+
+            <section className="space-y-3">
+              <h4 className="text-sm font-medium">Runs</h4>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Concurrent generations</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={maxConcurrent}
+                    onChange={(e) => setMaxConcurrent(Number(e.target.value))}
+                  />
+                </div>
+                <p className="self-center text-xs text-muted-foreground">
+                  How many projects generate at once (1–10). The rest queue. Higher uses more API
+                  quota in parallel — 3 is a good default.
+                </p>
               </div>
             </section>
           </div>

@@ -1,6 +1,6 @@
 // Engine bridge: HTTP + WebSocket server the viewer (and the MCP server) talk to.
 // Viewing and running are decoupled: each project gets its own Pi session and
-// event buffer, up to MAX_CONCURRENT_RUNS execute in parallel, extras queue FIFO.
+// event buffer, up to the `runs.maxConcurrent` setting execute in parallel, extras queue FIFO.
 //
 // Usage: npm run serve -- [projects/<slug>] [--port 7717]
 import { createHash } from "node:crypto";
@@ -9,7 +9,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statS
 import { dirname, extname, join, normalize, resolve } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { WebSocketServer, type WebSocket } from "ws";
-import { DATA_ROOT, REPO_ROOT, applyApiKeys, loadConfig, saveApiKeys, type BluelineConfig } from "./config.ts";
+import { DATA_ROOT, REPO_ROOT, applyApiKeys, clampConcurrency, loadConfig, saveApiKeys, type BluelineConfig } from "./config.ts";
 import { resetLedger, takeLedger } from "./cost-ledger.ts";
 import { textCost } from "./pricing.ts";
 import { draftBrief } from "./brief-draft.ts";
@@ -58,8 +58,6 @@ const MIME: Record<string, string> = {
   ".pdf": "application/pdf",
   ".woff2": "font/woff2",
 };
-
-const MAX_CONCURRENT_RUNS = 2;
 
 interface WireEvent {
   type: string;
@@ -219,8 +217,13 @@ class Bridge {
     return pc;
   }
 
+  /** Live concurrency limit from settings, always clamped to the safe range. */
+  private maxConcurrentRuns(): number {
+    return clampConcurrency(this.config.runs?.maxConcurrent);
+  }
+
   private pumpQueue(): void {
-    while (this.runningCount() < MAX_CONCURRENT_RUNS && this.runQueue.length) {
+    while (this.runningCount() < this.maxConcurrentRuns() && this.runQueue.length) {
       const slug = this.runQueue.shift()!;
       if (this.runStates.get(slug) !== "queued") continue;
       void this.startRun(slug);
@@ -296,7 +299,7 @@ class Bridge {
     if (!existsSync(join(this.workspace.projectsDir, target, "brief.md"))) {
       throw new Error(`"${target}" has no brief.md yet`);
     }
-    if (this.runningCount() >= MAX_CONCURRENT_RUNS) {
+    if (this.runningCount() >= this.maxConcurrentRuns()) {
       this.runStates.set(target, "queued");
       this.runQueue.push(target);
       this.broadcast({ type: "run_state", project: target, state: "queued" });
@@ -432,7 +435,7 @@ class Bridge {
     const current: Record<string, unknown> = existsSync(configPath)
       ? JSON.parse(readFileSync(configPath, "utf8"))
       : { ...this.config };
-    for (const key of ["designer", "reviewer", "images", "render", "webFetch"] as const) {
+    for (const key of ["designer", "reviewer", "images", "render", "webFetch", "runs"] as const) {
       if (patch[key]) current[key] = { ...(current[key] as object | undefined), ...patch[key] };
     }
     writeFileSync(configPath, JSON.stringify(current, null, 2) + "\n");
@@ -444,6 +447,8 @@ class Bridge {
         this.sessions.delete(slug);
       }
     }
+    // If the concurrency limit just went up, let any queued runs start immediately.
+    this.pumpQueue();
     this.broadcast({ type: "settings_changed" });
   }
 

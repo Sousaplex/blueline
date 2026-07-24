@@ -100,6 +100,7 @@ export interface EngineSettings {
     designer: { provider: string; model: string; thinkingLevel?: string; apiKeyEnv?: string };
     reviewer: { provider: string; model: string; maxRounds: number; apiKeyEnv?: string };
     images: { provider: string; model: string; variantsPerPrompt: number; apiKeyEnv?: string };
+    runs?: { maxConcurrent: number };
   };
   registry: { id: string; models: string[] }[];
   suggestions: { reviewer: string[]; images: string[] };
@@ -109,6 +110,7 @@ export type SettingsPatch = {
   designer?: Partial<EngineSettings["config"]["designer"]>;
   reviewer?: Partial<EngineSettings["config"]["reviewer"]>;
   images?: Partial<EngineSettings["config"]["images"]>;
+  runs?: { maxConcurrent: number };
 };
 
 export type RunState = "idle" | "queued" | "running";
