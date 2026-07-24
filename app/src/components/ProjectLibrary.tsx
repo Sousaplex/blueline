@@ -79,7 +79,9 @@ export function ProjectLibrary({
   }, [projects, query]);
 
   return (
-    <div className="flex min-h-0 flex-col gap-3">
+    // flex-1 so we fill the parent's height — without it the overflow-y-auto list below
+    // has no bounded height and never scrolls (its height just grows with content).
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
       <div className="relative">
         <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input

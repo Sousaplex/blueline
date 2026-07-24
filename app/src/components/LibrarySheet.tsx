@@ -67,7 +67,7 @@ export function LibrarySheet({
               {workspaceRoot}
             </SheetDescription>
           </SheetHeader>
-          <div className="min-h-0 flex-1 px-4">
+          <div className="flex min-h-0 flex-1 flex-col px-4">
             <ProjectLibrary
               projects={projects}
               currentSlug={currentSlug}
@@ -76,23 +76,32 @@ export function LibrarySheet({
               onDelete={setPendingDelete}
             />
           </div>
-          <div className="flex items-center gap-2 border-t p-4">
-            <Button
-              size="sm"
-              onClick={() => {
-                setOpen(false);
-                onNewProject();
-              }}
-            >
-              <Plus data-slot="icon" /> New project
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => act(() => client.chooseWorkspace(), true)}>
-              <FolderOpen data-slot="icon" /> Workspace…
-            </Button>
-            <GitSyncDialog client={client} />
-            <div className="flex-1" />
+          {/* Two rows so nothing overflows the 384px sheet (Close project used to spill
+              off the right edge when all four actions shared one non-wrapping row). */}
+          <div className="flex flex-col gap-2 border-t p-4">
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                onClick={() => {
+                  setOpen(false);
+                  onNewProject();
+                }}
+              >
+                <Plus data-slot="icon" /> New project
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => act(() => client.chooseWorkspace(), true)}>
+                <FolderOpen data-slot="icon" /> Workspace…
+              </Button>
+              <GitSyncDialog client={client} />
+            </div>
             {currentSlug && (
-              <Button size="sm" variant="ghost" title="Close the current project and go to the library home" onClick={() => act(() => client.closeProject(), true)}>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="justify-start text-muted-foreground"
+                title="Close the current project and go to the library home"
+                onClick={() => act(() => client.closeProject(), true)}
+              >
                 <X data-slot="icon" /> Close project
               </Button>
             )}

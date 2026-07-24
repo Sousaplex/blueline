@@ -519,7 +519,8 @@ export function PreviewPane({
         .map((id) => doc.querySelector<HTMLElement>(`[data-pc-id="${id}"]`))
         .filter((el): el is HTMLElement => Boolean(el));
       if (targets.length) {
-        targets[0].scrollIntoView({ behavior: "smooth", block: "center" });
+        // Flash the changed element in place. We deliberately do NOT scrollIntoView —
+        // yanking the canvas on every undo/redo was jarring; the highlight is enough.
         targets.forEach((el) => el.classList.add("pc-flash"));
         setTimeout(() => targets.forEach((el) => el.classList.remove("pc-flash")), 1800);
       }
@@ -1181,36 +1182,10 @@ export function PreviewPane({
         </div>
       )}
 
-      {mode === "proof" && project.images.length > 0 && viewRound == null && (
-        <div className="flex shrink-0 items-center gap-6 overflow-x-auto border-t px-4 py-2">
-          {project.images.map((slot) => (
-            <div key={slot.id} className="flex items-center gap-1.5 text-xs">
-              <span className="font-mono text-muted-foreground">{slot.id}</span>
-              <Button
-                variant="outline"
-                size="icon-sm"
-                className="size-6"
-                disabled={!slot.current || slot.current <= Math.min(...slot.variants)}
-                onClick={() => void actions.selectVariant(slot.id, slot.current! - 1).then(() => setDirty(true))}
-              >
-                <ChevronLeft />
-              </Button>
-              <span className="tabular-nums">
-                v{slot.current ?? "?"} / {slot.variants.length}
-              </span>
-              <Button
-                variant="outline"
-                size="icon-sm"
-                className="size-6"
-                disabled={!slot.current || slot.current >= Math.max(...slot.variants)}
-                onClick={() => void actions.selectVariant(slot.id, slot.current! + 1).then(() => setDirty(true))}
-              >
-                <ChevronRight />
-              </Button>
-            </div>
-          ))}
-        </div>
-      )}
+      {/* The per-image variant shuttle lives on the live-edit floating toolbar (below),
+          where changes are visible immediately. It used to also render as a bottom strip
+          in proof mode, but there a variant change can't update the static proof without a
+          re-render, so it read as "doing nothing" — removed. */}
 
       {mode === "live" && imgTool && activeImage === imgTool.id && runState === "idle" && (() => {
         const slot = project.images.find((s) => s.id === imgTool.id);
