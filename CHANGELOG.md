@@ -5,6 +5,14 @@ All notable user-facing changes to Blueline. Kept from v0.17.0 onward
 [Keep a Changelog](https://keepachangelog.com/); versions match `app/package.json`
 and the GitHub release tags.
 
+## [0.20.1]
+
+### Fixed
+- **Image editing responsiveness.** The move/pan drag was bound to iframe-internal events, so
+  it broke the moment the cursor left the image, and it re-rendered React on every frame
+  (laggy). Rewrote all image manipulation — move, pan, resize, scale — to drag in the parent
+  window with direct-DOM updates: smooth, and it no longer breaks when you drag off the image.
+
 ## [0.20.0]
 
 Canvas-editing overhaul.

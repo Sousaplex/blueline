@@ -105,6 +105,10 @@ export function PreviewPane({
   // Screen-space rect of the selected image's mask frame (position:fixed coords), used to
   // draw the selection overlay + resize handles and to anchor the floating toolbar.
   const [imgTool, setImgTool] = useState<{ id: string; top: number; left: number; width: number; height: number } | null>(null);
+  // Refs to the overlay + toolbar DOM nodes so a drag can reposition them by writing style
+  // directly (no per-frame React re-render — that was the jank). setState only on drag end.
+  const imgOverlayRef = useRef<HTMLDivElement>(null);
+  const imgToolbarRef = useRef<HTMLDivElement>(null);
   const [nudge, setNudge] = useState<NudgeState | null>(null);
   const [source, setSource] = useState<string | null>(null);
   const [sourceDirty, setSourceDirty] = useState(false);
@@ -271,6 +275,31 @@ export function PreviewPane({
   const anchorImgToolRef = useRef(anchorImgTool);
   anchorImgToolRef.current = anchorImgTool;
 
+  /** Screen-space rect of a mask frame (position:fixed coords). */
+  const frameScreenRect = (frame: HTMLElement): { top: number; left: number; width: number; height: number } => {
+    const iframe = iframeRef.current!;
+    const ir = iframe.getBoundingClientRect();
+    const z = zoomValRef.current;
+    const b = frame.getBoundingClientRect();
+    return { top: ir.top + b.top * z, left: ir.left + b.left * z, width: b.width * z, height: b.height * z };
+  };
+  /** Reposition the overlay + toolbar by writing style directly — used DURING a drag so the
+   *  frame tracks the cursor at 60fps without a React re-render. setImgTool syncs on mouseup. */
+  const positionImgOverlayDirect = (r: { top: number; left: number; width: number; height: number }) => {
+    const o = imgOverlayRef.current;
+    if (o) {
+      o.style.top = `${r.top}px`;
+      o.style.left = `${r.left}px`;
+      o.style.width = `${r.width}px`;
+      o.style.height = `${r.height}px`;
+    }
+    const t = imgToolbarRef.current;
+    if (t) {
+      t.style.top = `${r.top - 8}px`;
+      t.style.left = `${r.left + r.width / 2}px`;
+    }
+  };
+
   // Keep the image toolbar glued to its image as the canvas scrolls or zooms.
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -371,11 +400,12 @@ export function PreviewPane({
       frame.style.width = `${w.toFixed(1)}mm`;
       frame.style.height = `${hh.toFixed(1)}mm`;
       frame.style.transform = tx || ty ? `translate(${tx.toFixed(1)}mm, ${ty.toFixed(1)}mm)` : "";
-      anchorImgToolRef.current(img, id);
+      positionImgOverlayDirect(frameScreenRect(frame));
     };
     const onUp = () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      anchorImgToolRef.current(img, id); // sync React state to the final rect
       const fr2 = frame.getBoundingClientRect();
       const [tx, ty] = parseTranslateMm(frame);
       void client
@@ -386,6 +416,63 @@ export function PreviewPane({
           translateYMm: ty,
         })
         .then(() => setDirty(true));
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
+  /** Drag the body of the selected image: Move mode translates the mask box, Crop mode pans
+   *  the photo inside it. Parent-coordinate math + window listeners so the drag survives the
+   *  cursor leaving the image/iframe, and direct-DOM overlay updates so it's smooth. */
+  const startImgBodyDrag = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const id = activeImageRef.current;
+    if (!id) return;
+    const img = liveImg(id);
+    const frame = img?.parentElement as HTMLElement | null;
+    if (!img || !frame) return;
+    const z = zoomValRef.current;
+    const sx = e.clientX;
+    const sy = e.clientY;
+
+    if (imgDragModeRef.current === "crop") {
+      const m = /([\d.]+)%\s+([\d.]+)%/.exec(img.style.objectPosition || "50% 50%");
+      const [posX, posY] = m ? [Number(m[1]), Number(m[2])] : [50, 50];
+      const rect = frame.getBoundingClientRect();
+      const wScreen = rect.width * z || 1;
+      const hScreen = rect.height * z || 1;
+      img.style.objectFit = "cover";
+      const onMove = (ev: MouseEvent) => {
+        const nx = Math.min(100, Math.max(0, posX - ((ev.clientX - sx) / wScreen) * 100));
+        const ny = Math.min(100, Math.max(0, posY - ((ev.clientY - sy) / hScreen) * 100));
+        img.style.objectPosition = `${nx.toFixed(1)}% ${ny.toFixed(1)}%`;
+      };
+      const onUp = () => {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+        void client.setImageStyle(id, { objectPosition: img.style.objectPosition }).then(() => setDirty(true));
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+      return;
+    }
+
+    // Move mode: translate the mask box.
+    const perMm = MM_TO_PX * z;
+    const [tx0, ty0] = parseTranslateMm(frame);
+    const onMove = (ev: MouseEvent) => {
+      const tx = tx0 + (ev.clientX - sx) / perMm;
+      const ty = ty0 + (ev.clientY - sy) / perMm;
+      frame.style.transform = `translate(${tx.toFixed(1)}mm, ${ty.toFixed(1)}mm)`;
+      positionImgOverlayDirect(frameScreenRect(frame));
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      anchorImgToolRef.current(img, id);
+      const [tx, ty] = parseTranslateMm(frame);
+      void client.setImageStyle(id, { translateXMm: tx, translateYMm: ty }).then(() => setDirty(true));
     };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
@@ -980,28 +1067,14 @@ export function PreviewPane({
       applyDeltaRef.current(captureBases(), d[0], d[1]);
     });
 
-    // Image slots: click selects (Inspector shows controls); drag pans object-position.
+    // Image slots: click selects. The parent overlay + toolbar then own move/crop/resize/
+    // scale — all in the parent window so a drag survives the cursor leaving the image and
+    // never re-renders React per frame.
     doc.querySelectorAll<HTMLImageElement>("img[data-image-id]").forEach((img) => {
       const id = img.getAttribute("data-image-id")!;
-      const frame = img.parentElement as HTMLElement | null;
-      type Drag =
-        | { mode: "crop"; x: number; y: number; posX: number; posY: number; moved: boolean }
-        | { mode: "move"; x: number; y: number; tx: number; ty: number; moved: boolean };
-      let drag: Drag | null = null;
-
-      const parsePos = (): [number, number] => {
-        const m = /([\d.]+)%\s+([\d.]+)%/.exec(img.style.objectPosition || "50% 50%");
-        return m ? [Number(m[1]), Number(m[2])] : [50, 50];
-      };
-      const parseTranslate = (): [number, number] => {
-        const m = /translate\(\s*(-?[\d.]+)mm\s*,\s*(-?[\d.]+)mm\s*\)/.exec(frame?.style.transform || "");
-        return m ? [Number(m[1]), Number(m[2])] : [0, 0];
-      };
-
       img.addEventListener("click", (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
-        if (drag?.moved) return; // click after a drag = end of the gesture, not a select toggle
         doc.querySelectorAll(".pc-nudge-active").forEach((other) => other.classList.remove("pc-nudge-active"));
         nudgeRef.current = null;
         extraIdsRef.current = [];
@@ -1018,51 +1091,6 @@ export function PreviewPane({
           anchorImgToolRef.current(img, id);
           onSelect({ kind: "image", id, tag: "IMG" });
         }
-      });
-
-      img.addEventListener("mousedown", (ev) => {
-        if (activeImageRef.current !== id) return;
-        ev.preventDefault();
-        if (imgDragModeRef.current === "move") {
-          const [tx, ty] = parseTranslate();
-          drag = { mode: "move", x: ev.clientX, y: ev.clientY, tx, ty, moved: false };
-        } else {
-          const [posX, posY] = parsePos();
-          drag = { mode: "crop", x: ev.clientX, y: ev.clientY, posX, posY, moved: false };
-        }
-      });
-      doc.addEventListener("mousemove", (ev) => {
-        if (!drag || activeImageRef.current !== id) return;
-        if (drag.mode === "crop") {
-          const rect = img.getBoundingClientRect();
-          const dx = ((ev.clientX - drag.x) / rect.width) * 100;
-          const dy = ((ev.clientY - drag.y) / rect.height) * 100;
-          if (Math.abs(dx) + Math.abs(dy) > 1) drag.moved = true;
-          const nx = Math.min(100, Math.max(0, drag.posX - dx));
-          const ny = Math.min(100, Math.max(0, drag.posY - dy));
-          img.style.objectFit = "cover";
-          img.style.objectPosition = `${nx.toFixed(1)}% ${ny.toFixed(1)}%`;
-        } else if (frame) {
-          // Move the whole crop box: translate in mm (screen-px delta ÷ zoomed px/mm).
-          const perMm = MM_TO_PX * zoomValRef.current;
-          if (Math.abs(ev.clientX - drag.x) + Math.abs(ev.clientY - drag.y) > 2) drag.moved = true;
-          const nx = drag.tx + (ev.clientX - drag.x) / perMm;
-          const ny = drag.ty + (ev.clientY - drag.y) / perMm;
-          frame.style.transform = `translate(${nx.toFixed(1)}mm, ${ny.toFixed(1)}mm)`;
-          anchorImgToolRef.current(img, id);
-        }
-      });
-      doc.addEventListener("mouseup", () => {
-        if (!drag || activeImageRef.current !== id) return;
-        if (drag.moved) {
-          if (drag.mode === "crop") {
-            void client.setImageStyle(id, { objectPosition: img.style.objectPosition }).then(() => setDirty(true));
-          } else {
-            const [tx, ty] = parseTranslate();
-            void client.setImageStyle(id, { translateXMm: tx, translateYMm: ty }).then(() => setDirty(true));
-          }
-        }
-        drag = null;
       });
     });
   };
@@ -1296,15 +1324,21 @@ export function PreviewPane({
         </div>
       )}
 
-      {/* Selection overlay for the active image: a frame + 8 resize handles over the mask
-          box. The frame itself is pointer-events-none so dragging the image body still pans
-          (existing in-iframe handler); only the handles capture events, for mask resize. */}
+      {/* Selection overlay for the active image. The BODY captures move (Move mode) / pan
+          (Crop mode); the 8 HANDLES capture resize (Move) / scale (Crop). Everything drags in
+          the parent window with direct-DOM updates — smooth, and it doesn't break when the
+          cursor leaves the image. */}
       {mode === "live" && imgTool && activeImage === imgTool.id && runState === "idle" && (
         <div
+          ref={imgOverlayRef}
           className="pointer-events-none fixed z-40"
           style={{ top: imgTool.top, left: imgTool.left, width: imgTool.width, height: imgTool.height }}
         >
-          <div className="absolute inset-0 border-2 border-emerald-500/90" />
+          <div
+            className="pointer-events-auto absolute inset-0 border-2 border-emerald-500/90"
+            style={{ cursor: imgDragMode === "crop" ? "grab" : "move" }}
+            onMouseDown={startImgBodyDrag}
+          />
           {IMG_HANDLES.map((h) => {
             const p = handlePos(h);
             return (
@@ -1386,6 +1420,7 @@ export function PreviewPane({
         );
         return (
           <div
+            ref={imgToolbarRef}
             className="fixed z-50 -translate-x-1/2 -translate-y-full"
             style={{ top: imgTool.top - 8, left: imgTool.left + imgTool.width / 2 }}
             onMouseDown={(e) => e.stopPropagation()}
