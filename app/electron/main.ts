@@ -230,16 +230,30 @@ app.whenReady().then(async () => {
       app.exit(0);
     }
 
-    // Auto-update: check the GitHub Releases feed, download a newer signed build in
-    // the background, and notify the user to restart. Never during smoke or dev.
+    // Auto-update: check the GitHub Releases feed and TELL the user a new version is
+    // available — no silent download. The renderer shows a prompt; the download only
+    // starts when the user approves (update-download), and installs on their command
+    // (update-install). Never during smoke or dev.
     if (PACKAGED && !SMOKE) {
       const { autoUpdater } = electronUpdater;
-      autoUpdater.autoDownload = true;
+      autoUpdater.autoDownload = false; // wait for explicit user approval
+      autoUpdater.autoInstallOnAppQuit = false;
+      const toRenderer = (channel: string, payload: unknown) => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
+      };
       autoUpdater.on("error", (e) => console.log("[updater] error:", String(e)));
-      autoUpdater.on("update-available", (i) => console.log("[updater] update available:", i.version));
-      autoUpdater.on("update-downloaded", (i) => console.log("[updater] downloaded:", i.version, "— will install on quit"));
-      // checkForUpdatesAndNotify handles the "restart to update?" native notification.
-      autoUpdater.checkForUpdatesAndNotify().catch((e) => console.log("[updater] check failed:", String(e)));
+      autoUpdater.on("update-available", (i) => {
+        console.log("[updater] update available:", i.version);
+        toRenderer("update-available", { version: i.version });
+      });
+      autoUpdater.on("download-progress", (p) => toRenderer("update-progress", { percent: Math.round(p.percent) }));
+      autoUpdater.on("update-downloaded", (i) => {
+        console.log("[updater] downloaded:", i.version);
+        toRenderer("update-downloaded", { version: i.version });
+      });
+      ipcMain.handle("update-download", () => autoUpdater.downloadUpdate());
+      ipcMain.handle("update-install", () => autoUpdater.quitAndInstall());
+      autoUpdater.checkForUpdates().catch((e) => console.log("[updater] check failed:", String(e)));
     }
   } catch (err) {
     smokeLog("[blueline] startup failed: " + String(err));

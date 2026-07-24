@@ -190,6 +190,11 @@ declare global {
       openPath(path: string): Promise<void>;
       setApiKeys(keys: Record<string, string>): Promise<string[]>;
       keychainAvailable(): Promise<boolean>;
+      downloadUpdate(): Promise<void>;
+      installUpdate(): Promise<void>;
+      onUpdateAvailable(cb: (version: string) => void): () => void;
+      onUpdateProgress(cb: (percent: number) => void): () => void;
+      onUpdateDownloaded(cb: (version: string) => void): () => void;
       isElectron: true;
     };
   }

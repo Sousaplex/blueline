@@ -5,7 +5,7 @@ All notable user-facing changes to Blueline. Kept from v0.17.0 onward
 [Keep a Changelog](https://keepachangelog.com/); versions match `app/package.json`
 and the GitHub release tags.
 
-## [Unreleased] — 0.19.0
+## [0.19.0]
 
 ### Added
 - **Configurable run concurrency** — the number of projects that generate at once is now a
@@ -14,6 +14,11 @@ and the GitHub release tags.
 - **About dialog** — click the app logo (or version) to see the version and the full changelog.
 - **Frameless window chrome** — the OS title bar is hidden; the app's top bar carries the
   window (Spotify/VS Code style) with the traffic lights inset over it.
+
+### Changed
+- **Updates now ask before downloading.** Instead of silently downloading in the background,
+  the app notifies you that a new version is available and downloads only when you click
+  **Download**, then installs only when you click **Restart**.
 
 ## [0.18.1]
 

@@ -8,4 +8,23 @@ contextBridge.exposeInMainWorld("blueline", {
   chooseDirectory: (): Promise<string | null> => ipcRenderer.invoke("choose-directory"),
   setApiKeys: (keys: Record<string, string>): Promise<string[]> => ipcRenderer.invoke("set-api-keys", keys),
   keychainAvailable: (): Promise<boolean> => ipcRenderer.invoke("keychain-available"),
+  // Auto-update: the renderer subscribes to availability/progress and drives the
+  // download/install on the user's approval (no silent updates).
+  downloadUpdate: (): Promise<void> => ipcRenderer.invoke("update-download"),
+  installUpdate: (): Promise<void> => ipcRenderer.invoke("update-install"),
+  onUpdateAvailable: (cb: (version: string) => void): (() => void) => {
+    const h = (_e: unknown, p: { version: string }) => cb(p.version);
+    ipcRenderer.on("update-available", h);
+    return () => ipcRenderer.removeListener("update-available", h);
+  },
+  onUpdateProgress: (cb: (percent: number) => void): (() => void) => {
+    const h = (_e: unknown, p: { percent: number }) => cb(p.percent);
+    ipcRenderer.on("update-progress", h);
+    return () => ipcRenderer.removeListener("update-progress", h);
+  },
+  onUpdateDownloaded: (cb: (version: string) => void): (() => void) => {
+    const h = (_e: unknown, p: { version: string }) => cb(p.version);
+    ipcRenderer.on("update-downloaded", h);
+    return () => ipcRenderer.removeListener("update-downloaded", h);
+  },
 });

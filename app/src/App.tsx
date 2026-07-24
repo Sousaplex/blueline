@@ -210,6 +210,40 @@ export function App() {
     }
   }, []);
 
+  // Auto-update: notify (never silently download). The user approves the download,
+  // then approves the restart. Wired to the main-process electron-updater events.
+  useEffect(() => {
+    const bl = typeof window !== "undefined" ? window.blueline : undefined;
+    if (!bl?.onUpdateAvailable) return;
+    const offs = [
+      bl.onUpdateAvailable((version) =>
+        toast(`Blueline ${version} is available`, {
+          description: "A new version is ready to download.",
+          duration: Infinity,
+          action: {
+            label: "Download",
+            onClick: () => {
+              void bl.downloadUpdate();
+              toast.loading("Downloading update…", { id: "bl-update-dl", duration: Infinity });
+            },
+          },
+        }),
+      ),
+      bl.onUpdateProgress((percent) =>
+        toast.loading(`Downloading update… ${percent}%`, { id: "bl-update-dl", duration: Infinity }),
+      ),
+      bl.onUpdateDownloaded((version) => {
+        toast.dismiss("bl-update-dl");
+        toast.success(`Blueline ${version} ready`, {
+          description: "Restart to finish updating.",
+          duration: Infinity,
+          action: { label: "Restart now", onClick: () => void bl.installUpdate() },
+        });
+      }),
+    ];
+    return () => offs.forEach((off) => off());
+  }, []);
+
   if (bridgeError) {
     return (
       <div className="flex h-screen flex-col items-center justify-center gap-3 text-center">
