@@ -11,6 +11,9 @@ and the GitHub release tags.
 - **Configurable run concurrency** — the number of projects that generate at once is now a
   setting (Settings → Runs), default raised from 2 to **3**, adjustable 1–10. Raising it lets
   queued runs start immediately.
+- **About dialog** — click the app logo (or version) to see the version and the full changelog.
+- **Frameless window chrome** — the OS title bar is hidden; the app's top bar carries the
+  window (Spotify/VS Code style) with the traffic lights inset over it.
 
 ## [0.18.1]
 

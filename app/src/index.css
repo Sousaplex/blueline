@@ -160,3 +160,22 @@
 ::-webkit-scrollbar-corner {
   background: transparent;
 }
+
+/* Frameless title bar (Electron titleBarStyle: hiddenInset). The app's top bars
+   become the window drag handle; interactive controls opt back out so they stay
+   clickable, and the left edge is padded to clear the macOS traffic lights. Gated
+   on .frameless (set only in the packaged app), so the browser dev server is
+   unaffected. -webkit-app-region is a no-op outside Electron anyway. */
+.frameless header {
+  -webkit-app-region: drag;
+  padding-left: 88px;
+}
+.frameless header button,
+.frameless header a,
+.frameless header input,
+.frameless header select,
+.frameless header [role="button"],
+.frameless header [role="tab"],
+.frameless header [role="combobox"] {
+  -webkit-app-region: no-drag;
+}

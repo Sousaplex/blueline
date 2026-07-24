@@ -1,8 +1,13 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import pkg from "./package.json" with { type: "json" };
+
+// Inline CHANGELOG.md (repo root) into the bundle so the About dialog can render it
+// with no runtime file dependency — works identically in dev and the packaged app.
+const changelog = readFileSync(fileURLToPath(new URL("../CHANGELOG.md", import.meta.url)), "utf8");
 
 // The bridge (toolkit: npm run serve) owns /api, /files, /ws. Proxying them here
 // makes the live-preview iframe same-origin so inline copy editing can reach
@@ -13,6 +18,7 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
     __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+    __CHANGELOG__: JSON.stringify(changelog),
   },
   plugins: [react(), tailwindcss()],
   resolve: {

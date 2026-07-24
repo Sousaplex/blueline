@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import logo from "./assets/logo.png";
 import { AgentPane, type FeedItem } from "./components/AgentPane";
 import { DocumentTabs } from "./components/DocumentTabs";
+import { AboutDialog } from "./components/AboutDialog";
 import { HomeScreen } from "./components/HomeScreen";
 import { InspectorPane } from "./components/InspectorPane";
 import { LeftPane } from "./components/LeftPane";
@@ -199,6 +200,16 @@ export function App() {
     [client],
   );
 
+  const [aboutOpen, setAboutOpen] = useState(false);
+  // In the packaged app the OS title bar is hidden (titleBarStyle: hiddenInset), so
+  // mark the root frameless — global CSS then makes the top bars draggable and pads
+  // them to clear the traffic lights. No-op in the browser dev server.
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.blueline) {
+      document.documentElement.classList.add("frameless");
+    }
+  }, []);
+
   if (bridgeError) {
     return (
       <div className="flex h-screen flex-col items-center justify-center gap-3 text-center">
@@ -236,11 +247,24 @@ export function App() {
     <div className="flex h-screen flex-col bg-background text-foreground">
       <Toaster position="bottom-center" theme={currentTheme()} toastOptions={{ style: { fontSize: "13px" } }} />
       <header className="relative flex h-12 shrink-0 items-center gap-3 border-b px-4">
-        <img src={logo} alt="" className="size-6" />
+        <button
+          type="button"
+          onClick={() => setAboutOpen(true)}
+          title="About Blueline"
+          aria-label="About Blueline"
+          className="-m-1 rounded p-1 hover:bg-accent"
+        >
+          <img src={logo} alt="" className="size-6" />
+        </button>
         <span className="text-sm font-semibold tracking-tight">Blueline</span>
-        <span className="font-mono text-[10px] text-muted-foreground" title={`built ${__BUILD_TIME__}`}>
+        <button
+          type="button"
+          onClick={() => setAboutOpen(true)}
+          title={`built ${__BUILD_TIME__} — click for changelog`}
+          className="font-mono text-[10px] text-muted-foreground hover:text-foreground"
+        >
           v{__APP_VERSION__}
-        </span>
+        </button>
         {running && (
           <div className="absolute inset-x-0 bottom-0 h-0.5 overflow-hidden">
             <div className="pc-indeterminate h-full w-1/3 rounded-full bg-blue-500" />
@@ -300,6 +324,7 @@ export function App() {
         <ThemeToggle />
         <SettingsDialog client={client} />
         <NewProjectDialog client={client} open={newProjectOpen} onOpenChange={setNewProjectOpen} />
+        <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
       </header>
       <DocumentTabs
         projects={projects}

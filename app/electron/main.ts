@@ -185,6 +185,12 @@ app.whenReady().then(async () => {
       height: 900,
       title: "Blueline",
       show: true,
+      // Frameless-inset chrome (Spotify/VS Code/Claude look): no OS title bar, the
+      // traffic lights float over our own top bar. App.tsx makes the header a drag
+      // region and pads its left edge to clear the lights. macOS-only styling; on
+      // other platforms this falls back to a standard frame.
+      titleBarStyle: "hiddenInset",
+      trafficLightPosition: { x: 16, y: 16 },
       webPreferences: {
         preload: join(__dirname, "preload.cjs"),
         contextIsolation: true,
