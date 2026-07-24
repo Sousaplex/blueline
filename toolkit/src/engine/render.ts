@@ -48,6 +48,13 @@ export class PlaywrightBackend implements RenderBackend {
         await Promise.all(Array.from(document.images).map((img) => img.decode().catch(() => {})));
         if (document.fonts && document.fonts.ready) await document.fonts.ready;
       })()`);
+      // Chromium's PDF path rasterizes `box-shadow` blur as a HARD solid offset
+      // rectangle (not a soft gradient), so any shadow becomes a phantom "solid square"
+      // behind the element in the proof/export — visible in the PDF but not in the
+      // on-screen live iframe (which paints the blur correctly). Shadows don't belong
+      // in print anyway; strip them so the deliverable is clean. The designer prompt
+      // tells the agent to use borders/tints/offset blocks for depth instead.
+      await page.addStyleTag({ content: "*, *::before, *::after { box-shadow: none !important; }" });
       await page.pdf({
         path: outPath,
         printBackground: opts.printBackground ?? true,

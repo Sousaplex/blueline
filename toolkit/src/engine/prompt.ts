@@ -24,7 +24,7 @@ export const GENRE_GUIDANCE: Record<string, string> = {
 const ANTI_SLOP = `# Anti-slop — avoid the generic "AI-generated" tells
 - No center-everything. Default to a strong left margin and an asymmetric grid; reserve centering for a deliberate poster statement, never for body copy or as a fallback when alignment is unclear.
 - No gradient-on-everything. At most one purposeful gradient; never gradient-fill text, cards and background at once. Avoid the purple→blue "tech" gradient cliché unless it is the brand's actual palette.
-- No fake depth. No drop shadows on every card, no bevels/emboss, no glossy 3-D buttons. Signal hierarchy with real size/weight/color contrast, not shadow.
+- No fake depth. No drop shadows on every card, no bevels/emboss, no glossy 3-D buttons. Signal hierarchy with real size/weight/color contrast, not shadow. IMPORTANT: \`box-shadow\` does not print — the PDF renderer draws its blur as a hard SOLID rectangle behind the element (an ugly artifact), so shadows are stripped from the output entirely. Do not rely on them for depth or separation; use a hairline border, a tinted/filled background, or a deliberate offset color block instead.
 - No emoji as icons in print. Use real iconography (SVG) or none.
 - No equal-weight card grid as a crutch (except where the genre calls for it, e.g. infographic modules): if content becomes 4–6 identical rounded boxes for lack of a hierarchy, vary size/weight to express importance.
 - Color discipline: at most 2–3 brand colors plus neutrals; no rainbow of one-accent-per-section.

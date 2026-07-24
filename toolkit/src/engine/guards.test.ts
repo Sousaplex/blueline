@@ -139,7 +139,7 @@ test("project meta defaults are safe on legacy projects and clamp settings", () 
   const p = tempProject();
   const meta = p.meta();
   assert.equal(meta.displayName, p.slug);
-  assert.deepEqual(meta.settings, { pageSize: "A4", orientation: "portrait", pages: 1, widthMm: null, heightMm: null });
+  assert.deepEqual(meta.settings, { pageSize: "A4", orientation: "portrait", pages: 1, widthMm: null, heightMm: null, docType: "one-pager" });
   p.updateMeta({ displayName: "Nice Name", series: "s", settings: { pages: 999 } as any });
   const updated = p.meta();
   assert.equal(updated.displayName, "Nice Name");
@@ -246,7 +246,7 @@ test("templates: save from project, list, instantiate into a new project", () =>
   const { dir } = ws.createProject("invoice-master", "# Brief: monthly invoice");
   const base = new Project(dir, ws);
   writeFileSync(base.pageHtml, `<html><body><table data-pc-id="line-items"><tr><td>item</td></tr></table></body></html>`);
-  base.updateMeta({ settings: { pageSize: "Letter", orientation: "portrait", pages: 2 } });
+  base.updateMeta({ settings: { pageSize: "Letter", orientation: "portrait", pages: 2 } as any });
 
   const info = saveTemplate(base, "Invoice", "Standard client invoice");
   assert.equal(info.slug, "invoice");

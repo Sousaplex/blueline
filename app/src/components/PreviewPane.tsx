@@ -494,6 +494,11 @@ export function PreviewPane({
     syncGrid(); // iframe reloads drop injected overlays — restore the grid if it's on
     const style = doc.createElement("style");
     style.textContent = `
+      /* box-shadow is stripped from the print/export PDF (Chromium renders its blur as a
+         hard solid rectangle artifact), so strip it in live edit too — keeps the preview
+         true WYSIWYG with the deliverable. The editor's own drop-indicator shadows below
+         use a higher-specificity class selector, so they survive this reset. */
+      * { box-shadow: none !important; }
       [data-pc-id]:hover { outline: 2px dashed rgba(245,158,11,.7); outline-offset: 2px; cursor: move; }
       .pc-nudge-active { outline: 2px solid rgba(245,158,11,1) !important; outline-offset: 2px; cursor: move !important; }
       [data-pc-id][contenteditable] { outline: 2px solid rgba(120,120,255,.95) !important; outline-offset: 2px; cursor: text !important; }

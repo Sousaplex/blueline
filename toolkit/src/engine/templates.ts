@@ -47,6 +47,10 @@ function readInfo(dir: string, slug: string): TemplateInfo {
       pageSize: stored.settings?.pageSize?.trim() || DEFAULT_SETTINGS.pageSize,
       orientation: stored.settings?.orientation === "landscape" ? "landscape" : "portrait",
       pages: Math.max(1, Math.min(24, Number(stored.settings?.pages) || DEFAULT_SETTINGS.pages)),
+      // Carry custom dimensions + genre so a Custom-size / typed template isn't reset to A4.
+      widthMm: typeof stored.settings?.widthMm === "number" ? stored.settings.widthMm : null,
+      heightMm: typeof stored.settings?.heightMm === "number" ? stored.settings.heightMm : null,
+      docType: stored.settings?.docType ?? DEFAULT_SETTINGS.docType,
     },
     sourceProject: stored.sourceProject ?? null,
     createdAt: stored.createdAt ?? "",

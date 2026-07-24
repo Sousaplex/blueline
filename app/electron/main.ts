@@ -147,6 +147,11 @@ async function exportPdf(targetPath?: string): Promise<string | null> {
         if (document.fonts && document.fonts.ready) await document.fonts.ready;
       })()`,
     );
+    // Chromium's PDF path draws `box-shadow` blur as a HARD solid offset rectangle,
+    // producing phantom "solid square" artifacts behind shadowed elements (visible in
+    // the export but not the on-screen preview). Strip shadows so the deliverable is
+    // clean — matches the Playwright render path and the designer prompt guidance.
+    await printWin.webContents.insertCSS("*, *::before, *::after { box-shadow: none !important; }");
     await new Promise((r) => setTimeout(r, 150)); // small paint settle
     const pdf = await printWin.webContents.printToPDF({
       printBackground: true,

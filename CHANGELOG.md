@@ -33,9 +33,13 @@ Batch of fixes and features from the first round of test-user feedback.
 - **Close/delete a document** from its tab (X, with confirm).
 
 ### Fixed
+- **No more "solid square" artifacts in the PDF.** Chromium's PDF renderer draws CSS
+  `box-shadow` blur as a hard solid rectangle behind the element — showing up as phantom
+  colored squares in the proof/export but not in the (correctly-blurred) live preview.
+  Shadows are now stripped from the print output (and from live edit, to stay WYSIWYG),
+  and the designer is told to use borders/tints/offset blocks for depth instead.
 - **WebP images no longer drop out of the exported/proof PDF** (the renderer now waits for
-  images to decode before printing). This also removes a class of phantom "box" artifacts
-  that appeared in the proof but not in live edit.
+  images to decode before printing).
 - Image variant shuttle now updates the live canvas while an image is selected.
 
 ### Changed
