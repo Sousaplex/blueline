@@ -27,9 +27,11 @@ export default defineConfig({
   server: {
     port: 5177,
     proxy: {
-      "/api": "http://localhost:7717",
-      "/files": "http://localhost:7717",
-      "/ws": { target: "ws://localhost:7717", ws: true },
+      // Bridge port is configurable so a dev renderer can point at a throwaway bridge
+      // (e.g. BRIDGE_PORT=7799) instead of the default 7717 the packaged app uses.
+      "/api": `http://localhost:${process.env.BRIDGE_PORT ?? "7717"}`,
+      "/files": `http://localhost:${process.env.BRIDGE_PORT ?? "7717"}`,
+      "/ws": { target: `ws://localhost:${process.env.BRIDGE_PORT ?? "7717"}`, ws: true },
     },
   },
 });

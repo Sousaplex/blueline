@@ -19,6 +19,24 @@ const PX_TO_MM = 25.4 / 96;
 const MM_TO_PX = 96 / 25.4;
 const ZOOM_STEPS = [0.25, 0.33, 0.5, 0.67, 0.8, 1, 1.25, 1.5, 2, 3];
 
+// 8 resize handles for the image-mask selection overlay. l/r/t/b flag which edges the
+// handle moves; the OPPOSITE edge stays anchored (Figma-style).
+type ImgHandle = { k: string; l?: boolean; r?: boolean; t?: boolean; b?: boolean; cur: string };
+const IMG_HANDLES: ImgHandle[] = [
+  { k: "nw", l: true, t: true, cur: "nwse-resize" },
+  { k: "n", t: true, cur: "ns-resize" },
+  { k: "ne", r: true, t: true, cur: "nesw-resize" },
+  { k: "e", r: true, cur: "ew-resize" },
+  { k: "se", r: true, b: true, cur: "nwse-resize" },
+  { k: "s", b: true, cur: "ns-resize" },
+  { k: "sw", l: true, b: true, cur: "nesw-resize" },
+  { k: "w", l: true, cur: "ew-resize" },
+];
+const handlePos = (h: ImgHandle): { left: string; top: string } => ({
+  left: h.l ? "0%" : h.r ? "100%" : "50%",
+  top: h.t ? "0%" : h.b ? "100%" : "50%",
+});
+
 interface NudgeState {
   pcId: string;
   x: number; // translate mm
@@ -84,7 +102,9 @@ export function PreviewPane({
   const [imgDragMode, setImgDragMode] = useState<"crop" | "move">("crop");
   const imgDragModeRef = useRef<"crop" | "move">("crop");
   imgDragModeRef.current = imgDragMode;
-  const [imgTool, setImgTool] = useState<{ id: string; top: number; left: number } | null>(null);
+  // Screen-space rect of the selected image's mask frame (position:fixed coords), used to
+  // draw the selection overlay + resize handles and to anchor the floating toolbar.
+  const [imgTool, setImgTool] = useState<{ id: string; top: number; left: number; width: number; height: number } | null>(null);
   const [nudge, setNudge] = useState<NudgeState | null>(null);
   const [source, setSource] = useState<string | null>(null);
   const [sourceDirty, setSourceDirty] = useState(false);
@@ -243,9 +263,10 @@ export function PreviewPane({
     const iframe = iframeRef.current;
     if (!iframe) return;
     const ir = iframe.getBoundingClientRect();
-    const r = imgEl.getBoundingClientRect(); // iframe-internal px
     const z = zoomValRef.current;
-    setImgTool({ id, top: ir.top + r.top * z, left: ir.left + (r.left + r.width / 2) * z });
+    // Bound the mask FRAME (the visible crop box), not the img (which may overflow it).
+    const box = (imgEl.parentElement ?? imgEl).getBoundingClientRect(); // iframe-internal px
+    setImgTool({ id, top: ir.top + box.top * z, left: ir.left + box.left * z, width: box.width * z, height: box.height * z });
   };
   const anchorImgToolRef = useRef(anchorImgTool);
   anchorImgToolRef.current = anchorImgTool;
@@ -296,6 +317,75 @@ export function PreviewPane({
     img.style.objectFit = "cover";
     img.style.transform = z === 1 ? "" : `scale(${z})`;
     void client.setImageStyle(id, { zoom: z }).then(() => setDirty(true));
+  };
+
+  const parseTranslateMm = (frame: HTMLElement): [number, number] => {
+    const m = /translate\(\s*(-?[\d.]+)mm\s*,\s*(-?[\d.]+)mm\s*\)/.exec(frame.style.transform || "");
+    return m ? [Number(m[1]), Number(m[2])] : [0, 0];
+  };
+
+  /** Drag a mask-frame resize handle. Works in screen coords: 1mm = MM_TO_PX×zoom screen px.
+   *  The edge opposite the handle stays anchored; left/top handles also shift the frame's
+   *  translate so that anchor holds. Live-updates the frame, persists on mouseup. */
+  const startImgResize = (e: React.MouseEvent, h: ImgHandle) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const id = activeImageRef.current;
+    if (!id) return;
+    const img = liveImg(id);
+    const frame = img?.parentElement as HTMLElement | null;
+    const iframe = iframeRef.current;
+    if (!img || !frame || !iframe) return;
+    const z = zoomValRef.current;
+    const perMm = MM_TO_PX * z; // screen px per mm
+    const fr = frame.getBoundingClientRect(); // iframe-internal px
+    const ir = iframe.getBoundingClientRect();
+    const startW = fr.width / MM_TO_PX;
+    const startH = fr.height / MM_TO_PX;
+    const [tx0, ty0] = parseTranslateMm(frame);
+    // Anchor edges (screen coords) captured at drag start.
+    const boxL = ir.left + fr.left * z;
+    const boxT = ir.top + fr.top * z;
+    const boxR = boxL + fr.width * z;
+    const boxB = boxT + fr.height * z;
+    frame.style.overflow = "hidden";
+    img.style.objectFit = "cover";
+    const onMove = (ev: MouseEvent) => {
+      let w = startW;
+      let hh = startH;
+      let tx = tx0;
+      let ty = ty0;
+      if (h.r) w = Math.max(5, (ev.clientX - boxL) / perMm);
+      else if (h.l) {
+        w = Math.max(5, (boxR - ev.clientX) / perMm);
+        tx = tx0 + (ev.clientX - boxL) / perMm;
+      }
+      if (h.b) hh = Math.max(5, (ev.clientY - boxT) / perMm);
+      else if (h.t) {
+        hh = Math.max(5, (boxB - ev.clientY) / perMm);
+        ty = ty0 + (ev.clientY - boxT) / perMm;
+      }
+      frame.style.width = `${w.toFixed(1)}mm`;
+      frame.style.height = `${hh.toFixed(1)}mm`;
+      frame.style.transform = tx || ty ? `translate(${tx.toFixed(1)}mm, ${ty.toFixed(1)}mm)` : "";
+      anchorImgToolRef.current(img, id);
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      const fr2 = frame.getBoundingClientRect();
+      const [tx, ty] = parseTranslateMm(frame);
+      void client
+        .setImageStyle(id, {
+          frameWidthMm: fr2.width / MM_TO_PX,
+          frameHeightMm: fr2.height / MM_TO_PX,
+          translateXMm: tx,
+          translateYMm: ty,
+        })
+        .then(() => setDirty(true));
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
   };
 
   /** Shared zoom shortcuts: ⌘/Ctrl +, -, 0 (fit), 1 (100%). Returns true when handled. */
@@ -1182,6 +1272,29 @@ export function PreviewPane({
         </div>
       )}
 
+      {/* Selection overlay for the active image: a frame + 8 resize handles over the mask
+          box. The frame itself is pointer-events-none so dragging the image body still pans
+          (existing in-iframe handler); only the handles capture events, for mask resize. */}
+      {mode === "live" && imgTool && activeImage === imgTool.id && runState === "idle" && (
+        <div
+          className="pointer-events-none fixed z-40"
+          style={{ top: imgTool.top, left: imgTool.left, width: imgTool.width, height: imgTool.height }}
+        >
+          <div className="absolute inset-0 border-2 border-emerald-500/90" />
+          {IMG_HANDLES.map((h) => {
+            const p = handlePos(h);
+            return (
+              <div
+                key={h.k}
+                onMouseDown={(e) => startImgResize(e, h)}
+                className="pointer-events-auto absolute size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-[2px] border border-emerald-600 bg-white shadow-sm dark:bg-neutral-900"
+                style={{ left: p.left, top: p.top, cursor: h.cur }}
+              />
+            );
+          })}
+        </div>
+      )}
+
       {/* The per-image variant shuttle lives on the live-edit floating toolbar (below),
           where changes are visible immediately. It used to also render as a bottom strip
           in proof mode, but there a variant change can't update the static proof without a
@@ -1214,7 +1327,7 @@ export function PreviewPane({
         return (
           <div
             className="fixed z-50 -translate-x-1/2 -translate-y-full"
-            style={{ top: imgTool.top - 8, left: imgTool.left }}
+            style={{ top: imgTool.top - 8, left: imgTool.left + imgTool.width / 2 }}
             onMouseDown={(e) => e.stopPropagation()}
           >
             <div className="flex items-center gap-0.5 rounded-lg border bg-background/95 p-1 shadow-xl backdrop-blur">
