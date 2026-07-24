@@ -43,6 +43,11 @@ the change on top of it.)
 - **WebP images no longer drop out of the exported/proof PDF** (the renderer now waits for
   images to decode before printing).
 - Image variant shuttle now updates the live canvas while an image is selected.
+- Library panel: "Close project" no longer overflows the sheet, and the project list
+  scrolls again.
+- Undo/redo no longer yanks the canvas to the changed element — it flashes in place instead.
+- The variant-shuttle strip no longer appears in Proof mode (where it couldn't take effect
+  without a re-render); variant switching stays on the live-edit image toolbar.
 
 ### Changed
 - Document tabs restyled to look like real file tabs; the "processing" state is an animated
