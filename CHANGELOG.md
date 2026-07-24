@@ -5,9 +5,11 @@ All notable user-facing changes to Blueline. Kept from v0.17.0 onward
 [Keep a Changelog](https://keepachangelog.com/); versions match `app/package.json`
 and the GitHub release tags.
 
-## [Unreleased] — 0.18.0
+## [0.18.1]
 
 Batch of fixes and features from the first round of test-user feedback.
+(Supersedes the internal 0.18.0 test build; the box-shadow PDF fix below is
+the change on top of it.)
 
 ### Added
 - **Estimated cost per run** — after each generation the agent feed shows a "Run cost ~$X"
