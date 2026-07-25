@@ -208,6 +208,10 @@ export function PreviewPane({
   };
   const applyDeltaRef = useRef(applyDeltaToSelection);
   applyDeltaRef.current = applyDeltaToSelection;
+  const captureBasesRef = useRef(captureBases);
+  captureBasesRef.current = captureBases;
+  const onRequestDeleteRef = useRef(onRequestDelete);
+  onRequestDeleteRef.current = onRequestDelete;
 
   const clearSelections = () => {
     const doc = iframeRef.current?.contentDocument;
@@ -453,26 +457,31 @@ export function PreviewPane({
     const boxR = boxL + fr.width * z;
     const boxB = boxT + fr.height * z;
     frame.style.overflow = "hidden";
+    void tx0;
+    void ty0;
     dragWithCapture(
       e,
       (ev) => {
+        // Desired size from the cursor, measured against the FIXED (opposite) edge.
         let w = startW;
         let hh = startH;
-        let tx = tx0;
-        let ty = ty0;
         if (h.r) w = Math.max(5, (ev.clientX - boxL) / perMm);
-        else if (h.l) {
-          w = Math.max(5, (boxR - ev.clientX) / perMm);
-          tx = tx0 + (ev.clientX - boxL) / perMm;
-        }
+        else if (h.l) w = Math.max(5, (boxR - ev.clientX) / perMm);
         if (h.b) hh = Math.max(5, (ev.clientY - boxT) / perMm);
-        else if (h.t) {
-          hh = Math.max(5, (boxB - ev.clientY) / perMm);
-          ty = ty0 + (ev.clientY - boxT) / perMm;
-        }
+        else if (h.t) hh = Math.max(5, (boxB - ev.clientY) / perMm);
         frame.style.width = `${w.toFixed(1)}mm`;
         frame.style.height = `${hh.toFixed(1)}mm`;
-        frame.style.transform = tx || ty ? `translate(${tx.toFixed(1)}mm, ${ty.toFixed(1)}mm)` : "";
+        // Measure-and-pin: after the size change (which may reflow the frame in flow layouts),
+        // move the frame so its FIXED corner sits exactly where it started. Anchor can't drift.
+        const fixX = h.l ? boxR : boxL;
+        const fixY = h.t ? boxB : boxT;
+        const rect = frameScreenRect(frame);
+        const curFixX = h.l ? rect.left + rect.width : rect.left;
+        const curFixY = h.t ? rect.top + rect.height : rect.top;
+        const [ctx, cty] = parseTranslateMm(frame);
+        const ntx = ctx + (fixX - curFixX) / perMm;
+        const nty = cty + (fixY - curFixY) / perMm;
+        frame.style.transform = ntx || nty ? `translate(${ntx.toFixed(1)}mm, ${nty.toFixed(1)}mm)` : "";
         positionImgOverlayDirect(frameScreenRect(frame));
       },
       () => {
@@ -555,7 +564,33 @@ export function PreviewPane({
 
   useEffect(() => {
     if (mode === "code") return;
-    const onKey = (ev: KeyboardEvent) => void handleZoomKeyRef.current(ev);
+    const onKey = (ev: KeyboardEvent) => {
+      if (handleZoomKeyRef.current(ev)) return;
+      // Nudge/Delete when focus is on the PARENT app (the iframe has its own copy of this for
+      // when IT is focused). A keydown only reaches one document, so no double-firing. Skip
+      // while typing in a field.
+      if (mode !== "live") return;
+      const t = ev.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      const n = nudgeRef.current;
+      if (!n) return;
+      if (ev.key === "Delete" || ev.key === "Backspace") {
+        ev.preventDefault();
+        onRequestDeleteRef.current([n.pcId, ...extraIdsRef.current]);
+        return;
+      }
+      const step = ev.shiftKey ? 2 : 0.5;
+      const deltas: Record<string, [number, number]> = {
+        ArrowLeft: [-step, 0],
+        ArrowRight: [step, 0],
+        ArrowUp: [0, -step],
+        ArrowDown: [0, step],
+      };
+      const d = deltas[ev.key];
+      if (!d) return;
+      ev.preventDefault();
+      applyDeltaRef.current(captureBasesRef.current(), d[0], d[1]);
+    };
     window.addEventListener("keydown", onKey);
     const canvas = canvasRef.current;
     const onWheel = (ev: WheelEvent) => {
@@ -1406,9 +1441,11 @@ export function PreviewPane({
               <div
                 key={h.k}
                 onPointerDown={(e) => startImgResize(e, h)}
-                className="pointer-events-auto absolute size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-[2px] border border-emerald-600 bg-white shadow-sm dark:bg-neutral-900"
+                className="pointer-events-auto absolute flex size-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center"
                 style={{ left: p.left, top: p.top, cursor: h.cur }}
-              />
+              >
+                <div className="size-2.5 rounded-[2px] border border-emerald-600 bg-white shadow-sm dark:bg-neutral-900" />
+              </div>
             );
           })}
         </div>

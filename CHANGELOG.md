@@ -5,6 +5,20 @@ All notable user-facing changes to Blueline. Kept from v0.17.0 onward
 [Keep a Changelog](https://keepachangelog.com/); versions match `app/package.json`
 and the GitHub release tags.
 
+## [0.20.3]
+
+### Fixed
+- **Image resize anchors correctly.** Dragging a corner handle now pins the opposite corner
+  even on layouts where the frame reflows, and the handles have a bigger grab target so you
+  hit the handle (resize) instead of the body (move).
+- **Nudge works again.** Arrow-key nudging is now handled at the app level too, so it fires
+  whether keyboard focus is on the canvas or the app chrome (it was iframe-focus-only).
+- **No delete confirmation.** Deleting an element happens immediately — ⌘Z restores it.
+
+### Tests
+- Engine coverage for the add-element and layered-image ops (part of hardening against the
+  live-edit regressions).
+
 ## [0.20.2]
 
 ### Fixed

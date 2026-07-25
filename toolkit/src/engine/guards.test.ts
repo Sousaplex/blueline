@@ -65,8 +65,32 @@ test("review requires a rendered proof before reviewing", async () => {
 });
 
 const { safeRelPath, pageDims } = await import("./project.ts");
-const { setElementStyle, getElementStyle } = await import("./page-edit.ts");
+const { setElementStyle, getElementStyle, insertElement, setImageStyle } = await import("./page-edit.ts");
 const { snapshotPage, undoPage, redoPage, historyDepth } = await import("./undo.ts");
+
+test("insertElement adds a positioned, on-top, legible element and returns a fresh id", () => {
+  const p = tempProject();
+  writeFileSync(p.pageHtml, `<html><body><div data-pc-id="page">x</div></body></html>`);
+  assert.equal(insertElement(p, "text"), "text-1");
+  const html = readFileSync(p.pageHtml, "utf8");
+  assert.match(html, /data-pc-id="text-1"/);
+  assert.match(html, /position:absolute/);
+  assert.match(html, /z-index:50/); // sits on top of existing content
+  assert.match(html, /background:rgba\(255,255,255/); // legible chip → visible on any background
+  assert.equal(insertElement(p, "text"), "text-2"); // ids don't collide
+});
+
+test("setImageStyle layered model decouples the image from the crop frame", () => {
+  const p = tempProject();
+  writeFileSync(p.pageHtml, `<html><body><div class="frame"><img data-image-id="hero" src="x.png"></div></body></html>`);
+  setImageStyle(p, "hero", { frameWidthMm: 50, frameHeightMm: 40, imgWidthMm: 80, imgLeftMm: -5, imgTopMm: -3 });
+  const html = readFileSync(p.pageHtml, "utf8");
+  assert.match(html, /overflow:\s*hidden/); // frame is a fixed crop window
+  assert.match(html, /position:\s*absolute/); // image is a free layer
+  assert.match(html, /width:\s*80\.0mm/);
+  assert.match(html, /left:\s*-5\.0mm/);
+  assert.doesNotMatch(html, /object-fit/); // the coupled cover behaviour is cleared
+});
 
 test("pageDims resolves named sizes, slide presets, orientation and custom", () => {
   const base = { pages: 1, widthMm: null, heightMm: null };

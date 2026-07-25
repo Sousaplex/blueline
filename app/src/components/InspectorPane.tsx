@@ -27,16 +27,6 @@ import {
   Image as ImageIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { EngineClient, ProjectState } from "../engine-client";
@@ -107,7 +97,6 @@ export function InspectorPane({
   const [textDraft, setTextDraft] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<string[] | null>(null);
   const uploadInput = useRef<HTMLInputElement>(null);
 
   const selId = selection && selection.kind !== "multi" ? selection.id : null;
@@ -118,11 +107,6 @@ export function InspectorPane({
     setError(null);
   }, [selId, selText]);
 
-  // Delete key pressed in the preview → same confirm dialog as the button.
-  useEffect(() => {
-    if (deleteRequestIds?.length) setConfirmDelete(deleteRequestIds);
-  }, [deleteRequestIds]);
-
   const act = (label: string, fn: () => Promise<unknown>) => {
     setBusy(label);
     setError(null);
@@ -130,6 +114,31 @@ export function InspectorPane({
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setBusy(null));
   };
+
+  // Delete right away — no confirmation popup; ⌘Z restores it.
+  const doDelete = (ids: string[]) => {
+    act("delete", async () => {
+      let failed = 0;
+      for (const id of ids) {
+        try {
+          await client.deleteElement(id);
+        } catch {
+          failed++;
+        }
+      }
+      onDeselect();
+      if (failed === ids.length) throw new Error("Nothing was deleted — the elements may already be gone.");
+    });
+  };
+
+  // Delete key pressed in the preview → delete immediately.
+  useEffect(() => {
+    if (deleteRequestIds?.length) {
+      doDelete(deleteRequestIds);
+      onDeleteHandled();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deleteRequestIds]);
 
   if (!selection) {
     return (
@@ -191,7 +200,7 @@ export function InspectorPane({
         )}
         {(isMulti || selection.kind !== "image") && (
           <Button variant="ghost" size="icon-sm" className="size-6" title={isMulti ? "Delete selected elements" : "Delete element"} disabled={busy !== null}
-            onClick={() => setConfirmDelete(isMulti ? selection.ids : [selection.id])}>
+            onClick={() => doDelete(isMulti ? selection.ids : [selection.id])}>
             <Trash2 className="text-destructive" />
           </Button>
         )}
@@ -300,48 +309,6 @@ export function InspectorPane({
         {error && <p className="break-words text-destructive">{error}</p>}
       </div>
 
-      <AlertDialog open={confirmDelete !== null} onOpenChange={(o) => { if (!o) { setConfirmDelete(null); onDeleteHandled(); } }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {confirmDelete && confirmDelete.length > 1
-                ? `Delete ${confirmDelete.length} elements from the page?`
-                : `Delete “${confirmDelete?.[0]}” from the page?`}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              Removes {confirmDelete && confirmDelete.length > 1 ? "the elements and everything inside them" : "the element and everything inside it"} from
-              page.html. Undo (⌘Z) brings it straight back, and earlier review rounds keep their archived copies.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-white hover:bg-destructive/90"
-              onClick={() => {
-                const ids = confirmDelete!;
-                setConfirmDelete(null);
-                onDeleteHandled();
-                act("delete", async () => {
-                  // Deleting a parent removes nested selections with it — tolerate
-                  // per-id misses instead of aborting the rest of the set.
-                  let failed = 0;
-                  for (const id of ids) {
-                    try {
-                      await client.deleteElement(id);
-                    } catch {
-                      failed++;
-                    }
-                  }
-                  onDeselect();
-                  if (failed === ids.length) throw new Error("Nothing was deleted — the elements may already be gone.");
-                });
-              }}
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }
