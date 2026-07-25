@@ -180,18 +180,21 @@ export function insertElement(project: Project, kind: InsertKind, xMm = 15, yMm 
   while (doc.querySelector(`[data-pc-id="${id}"]`)) id = `${kind}-${++n}`;
   const el: any = doc.createElement("div");
   el.setAttribute("data-pc-id", id);
-  const base = `position:absolute;left:${xMm}mm;top:${yMm}mm;`;
+  // z-index keeps the new element on TOP of existing content, and text/heading get a
+  // translucent light chip so they're legible on ANY background (a dark #111 label on a
+  // dark panel was invisible — read as "add didn't work"). The user restyles from there.
+  const base = `position:absolute;left:${xMm}mm;top:${yMm}mm;z-index:50;`;
   if (kind === "text") {
-    el.setAttribute("style", `${base}font-size:11pt;line-height:1.4;color:#111;max-width:80mm;`);
+    el.setAttribute("style", `${base}font-size:11pt;line-height:1.4;color:#111;background:rgba(255,255,255,0.92);padding:2mm 3mm;border-radius:1mm;max-width:80mm;`);
     el.textContent = "Text";
   } else if (kind === "heading") {
-    el.setAttribute("style", `${base}font-size:22pt;font-weight:700;line-height:1.15;color:#111;max-width:120mm;`);
+    el.setAttribute("style", `${base}font-size:22pt;font-weight:700;line-height:1.15;color:#111;background:rgba(255,255,255,0.92);padding:2mm 3mm;border-radius:1mm;max-width:120mm;`);
     el.textContent = "Heading";
   } else if (kind === "rect") {
-    el.setAttribute("style", `${base}width:40mm;height:25mm;background:#e5e7eb;border:1px solid #cbd5e1;border-radius:2mm;`);
+    el.setAttribute("style", `${base}width:40mm;height:25mm;background:#e5e7eb;border:1px solid #94a3b8;border-radius:2mm;`);
   } else {
     // divider
-    el.setAttribute("style", `${base}width:60mm;height:0;border-top:2px solid #111;`);
+    el.setAttribute("style", `${base}width:60mm;height:0;border-top:2px solid #64748b;`);
   }
   const root: any = doc.querySelector("[data-pc-id]") ?? doc.body;
   // Guarantee a positioning context so left/top are relative to the page root.

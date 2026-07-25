@@ -365,10 +365,37 @@ export function PreviewPane({
       .then(() => setDirty(true));
   };
 
-  /** Drag a mask-frame resize handle. Works in screen coords: 1mm = MM_TO_PX×zoom screen px.
-   *  The edge opposite the handle stays anchored; left/top handles also shift the frame's
-   *  translate so that anchor holds. Live-updates the frame, persists on mouseup. */
-  const startImgResize = (e: React.MouseEvent, h: ImgHandle) => {
+  /** Run a drag using POINTER CAPTURE. Capturing the pointer routes every pointermove/up to
+   *  the grabbed element even when the cursor is over the live-edit iframe — without it, a
+   *  release over the iframe is swallowed and the drag "sticks" (moves then freezes). */
+  const dragWithCapture = (e: React.PointerEvent, onMove: (ev: PointerEvent) => void, onEnd: () => void) => {
+    const el = e.currentTarget as HTMLElement;
+    const pid = e.pointerId;
+    try {
+      el.setPointerCapture(pid);
+    } catch {
+      /* ignore */
+    }
+    const move = (ev: PointerEvent) => onMove(ev);
+    const end = () => {
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", end);
+      el.removeEventListener("pointercancel", end);
+      try {
+        el.releasePointerCapture(pid);
+      } catch {
+        /* ignore */
+      }
+      onEnd();
+    };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", end);
+    el.addEventListener("pointercancel", end);
+  };
+
+  /** Drag a mask-frame resize handle. Screen coords: 1mm = MM_TO_PX×zoom screen px. The edge
+   *  opposite the handle stays anchored; left/top handles also shift the frame's translate. */
+  const startImgResize = (e: React.PointerEvent, h: ImgHandle) => {
     e.preventDefault();
     e.stopPropagation();
     const id = activeImageRef.current;
@@ -395,23 +422,21 @@ export function PreviewPane({
       const ih0 = img.naturalWidth && img.naturalHeight ? iw0 * (img.naturalHeight / img.naturalWidth) : iw0;
       const icx = il0 + iw0 / 2;
       const icy = it0 + ih0 / 2;
-      const onMoveZ = (ev: MouseEvent) => {
-        const factor = Math.max(0.2, Math.min(8, Math.hypot(ev.clientX - cx, ev.clientY - cy) / startDist));
-        const iw = iw0 * factor;
-        const ih = ih0 * factor;
-        img.style.width = `${iw.toFixed(1)}mm`;
-        img.style.left = `${(icx - iw / 2).toFixed(1)}mm`;
-        img.style.top = `${(icy - ih / 2).toFixed(1)}mm`;
-      };
-      const onUpZ = () => {
-        window.removeEventListener("mousemove", onMoveZ);
-        window.removeEventListener("mouseup", onUpZ);
-        void client
-          .setImageStyle(id, { imgWidthMm: numMm(img.style.width), imgLeftMm: numMm(img.style.left), imgTopMm: numMm(img.style.top) })
-          .then(() => setDirty(true));
-      };
-      window.addEventListener("mousemove", onMoveZ);
-      window.addEventListener("mouseup", onUpZ);
+      dragWithCapture(
+        e,
+        (ev) => {
+          const factor = Math.max(0.2, Math.min(8, Math.hypot(ev.clientX - cx, ev.clientY - cy) / startDist));
+          const iw = iw0 * factor;
+          const ih = ih0 * factor;
+          img.style.width = `${iw.toFixed(1)}mm`;
+          img.style.left = `${(icx - iw / 2).toFixed(1)}mm`;
+          img.style.top = `${(icy - ih / 2).toFixed(1)}mm`;
+        },
+        () =>
+          void client
+            .setImageStyle(id, { imgWidthMm: numMm(img.style.width), imgLeftMm: numMm(img.style.left), imgTopMm: numMm(img.style.top) })
+            .then(() => setDirty(true)),
+      );
       return;
     }
 
@@ -423,55 +448,51 @@ export function PreviewPane({
     const startW = fr.width / MM_TO_PX;
     const startH = fr.height / MM_TO_PX;
     const [tx0, ty0] = parseTranslateMm(frame);
-    // Anchor edges (screen coords) captured at drag start.
     const boxL = ir.left + fr.left * z;
     const boxT = ir.top + fr.top * z;
     const boxR = boxL + fr.width * z;
     const boxB = boxT + fr.height * z;
     frame.style.overflow = "hidden";
-    const onMove = (ev: MouseEvent) => {
-      let w = startW;
-      let hh = startH;
-      let tx = tx0;
-      let ty = ty0;
-      if (h.r) w = Math.max(5, (ev.clientX - boxL) / perMm);
-      else if (h.l) {
-        w = Math.max(5, (boxR - ev.clientX) / perMm);
-        tx = tx0 + (ev.clientX - boxL) / perMm;
-      }
-      if (h.b) hh = Math.max(5, (ev.clientY - boxT) / perMm);
-      else if (h.t) {
-        hh = Math.max(5, (boxB - ev.clientY) / perMm);
-        ty = ty0 + (ev.clientY - boxT) / perMm;
-      }
-      frame.style.width = `${w.toFixed(1)}mm`;
-      frame.style.height = `${hh.toFixed(1)}mm`;
-      frame.style.transform = tx || ty ? `translate(${tx.toFixed(1)}mm, ${ty.toFixed(1)}mm)` : "";
-      positionImgOverlayDirect(frameScreenRect(frame));
-    };
-    const onUp = () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-      anchorImgToolRef.current(img, id); // sync React state to the final rect
-      const fr2 = frame.getBoundingClientRect();
-      const [tx, ty] = parseTranslateMm(frame);
-      void client
-        .setImageStyle(id, {
-          frameWidthMm: fr2.width / MM_TO_PX,
-          frameHeightMm: fr2.height / MM_TO_PX,
-          translateXMm: tx,
-          translateYMm: ty,
-        })
-        .then(() => setDirty(true));
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    dragWithCapture(
+      e,
+      (ev) => {
+        let w = startW;
+        let hh = startH;
+        let tx = tx0;
+        let ty = ty0;
+        if (h.r) w = Math.max(5, (ev.clientX - boxL) / perMm);
+        else if (h.l) {
+          w = Math.max(5, (boxR - ev.clientX) / perMm);
+          tx = tx0 + (ev.clientX - boxL) / perMm;
+        }
+        if (h.b) hh = Math.max(5, (ev.clientY - boxT) / perMm);
+        else if (h.t) {
+          hh = Math.max(5, (boxB - ev.clientY) / perMm);
+          ty = ty0 + (ev.clientY - boxT) / perMm;
+        }
+        frame.style.width = `${w.toFixed(1)}mm`;
+        frame.style.height = `${hh.toFixed(1)}mm`;
+        frame.style.transform = tx || ty ? `translate(${tx.toFixed(1)}mm, ${ty.toFixed(1)}mm)` : "";
+        positionImgOverlayDirect(frameScreenRect(frame));
+      },
+      () => {
+        anchorImgToolRef.current(img, id);
+        const fr2 = frame.getBoundingClientRect();
+        const [tx, ty] = parseTranslateMm(frame);
+        void client
+          .setImageStyle(id, {
+            frameWidthMm: fr2.width / MM_TO_PX,
+            frameHeightMm: fr2.height / MM_TO_PX,
+            translateXMm: tx,
+            translateYMm: ty,
+          })
+          .then(() => setDirty(true));
+      },
+    );
   };
 
-  /** Drag the body of the selected image: Move mode translates the mask box, Crop mode pans
-   *  the photo inside it. Parent-coordinate math + window listeners so the drag survives the
-   *  cursor leaving the image/iframe, and direct-DOM overlay updates so it's smooth. */
-  const startImgBodyDrag = (e: React.MouseEvent) => {
+  /** Drag the body of the selected image: Move translates the box, Crop pans the photo. */
+  const startImgBodyDrag = (e: React.PointerEvent) => {
     e.preventDefault();
     e.stopPropagation();
     const id = activeImageRef.current;
@@ -483,45 +504,39 @@ export function PreviewPane({
     const sx = e.clientX;
     const sy = e.clientY;
 
-    // CROP mode: pan the image LAYER within the fixed crop window (drag the photo, it
-    // follows the cursor). Moves left/top in mm; the frame stays put.
     if (imgDragModeRef.current === "crop") {
       ensureImgLayered(id, img, frame);
       const perMm = MM_TO_PX * z;
       const il0 = numMm(img.style.left) || 0;
       const it0 = numMm(img.style.top) || 0;
-      const onMove = (ev: MouseEvent) => {
-        img.style.left = `${(il0 + (ev.clientX - sx) / perMm).toFixed(1)}mm`;
-        img.style.top = `${(it0 + (ev.clientY - sy) / perMm).toFixed(1)}mm`;
-      };
-      const onUp = () => {
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
-        void client.setImageStyle(id, { imgLeftMm: numMm(img.style.left), imgTopMm: numMm(img.style.top) }).then(() => setDirty(true));
-      };
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
+      dragWithCapture(
+        e,
+        (ev) => {
+          img.style.left = `${(il0 + (ev.clientX - sx) / perMm).toFixed(1)}mm`;
+          img.style.top = `${(it0 + (ev.clientY - sy) / perMm).toFixed(1)}mm`;
+        },
+        () => void client.setImageStyle(id, { imgLeftMm: numMm(img.style.left), imgTopMm: numMm(img.style.top) }).then(() => setDirty(true)),
+      );
       return;
     }
 
-    // Move mode: translate the mask box.
+    // Move mode: translate the box.
     const perMm = MM_TO_PX * z;
     const [tx0, ty0] = parseTranslateMm(frame);
-    const onMove = (ev: MouseEvent) => {
-      const tx = tx0 + (ev.clientX - sx) / perMm;
-      const ty = ty0 + (ev.clientY - sy) / perMm;
-      frame.style.transform = `translate(${tx.toFixed(1)}mm, ${ty.toFixed(1)}mm)`;
-      positionImgOverlayDirect(frameScreenRect(frame));
-    };
-    const onUp = () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-      anchorImgToolRef.current(img, id);
-      const [tx, ty] = parseTranslateMm(frame);
-      void client.setImageStyle(id, { translateXMm: tx, translateYMm: ty }).then(() => setDirty(true));
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    dragWithCapture(
+      e,
+      (ev) => {
+        const tx = tx0 + (ev.clientX - sx) / perMm;
+        const ty = ty0 + (ev.clientY - sy) / perMm;
+        frame.style.transform = `translate(${tx.toFixed(1)}mm, ${ty.toFixed(1)}mm)`;
+        positionImgOverlayDirect(frameScreenRect(frame));
+      },
+      () => {
+        anchorImgToolRef.current(img, id);
+        const [tx, ty] = parseTranslateMm(frame);
+        void client.setImageStyle(id, { translateXMm: tx, translateYMm: ty }).then(() => setDirty(true));
+      },
+    );
   };
 
   /** Shared zoom shortcuts: ⌘/Ctrl +, -, 0 (fit), 1 (100%). Returns true when handled. */
@@ -1383,14 +1398,14 @@ export function PreviewPane({
           <div
             className="pointer-events-auto absolute inset-0 border-2 border-emerald-500/90"
             style={{ cursor: imgDragMode === "crop" ? "grab" : "move" }}
-            onMouseDown={startImgBodyDrag}
+            onPointerDown={startImgBodyDrag}
           />
           {IMG_HANDLES.map((h) => {
             const p = handlePos(h);
             return (
               <div
                 key={h.k}
-                onMouseDown={(e) => startImgResize(e, h)}
+                onPointerDown={(e) => startImgResize(e, h)}
                 className="pointer-events-auto absolute size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-[2px] border border-emerald-600 bg-white shadow-sm dark:bg-neutral-900"
                 style={{ left: p.left, top: p.top, cursor: h.cur }}
               />
