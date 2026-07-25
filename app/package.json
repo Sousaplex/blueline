@@ -1,6 +1,6 @@
 {
   "name": "blueline-app",
-  "version": "0.20.1-dev",
+  "version": "0.20.2",
   "private": true,
   "type": "module",
   "scripts": {

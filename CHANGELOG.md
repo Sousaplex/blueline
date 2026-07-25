@@ -5,13 +5,18 @@ All notable user-facing changes to Blueline. Kept from v0.17.0 onward
 [Keep a Changelog](https://keepachangelog.com/); versions match `app/package.json`
 and the GitHub release tags.
 
-## [0.20.1]
+## [0.20.2]
 
 ### Fixed
+- **Image drag no longer sticks.** Releasing the mouse over the live-edit canvas could leave a
+  drag "stuck" to the cursor (moves then freezes) because the release landed on the iframe and
+  the parent never saw it. All image drags now use pointer capture, so release always ends them.
+- **Added elements are visible.** Inserted text/headings were dark-on-dark on some designs
+  (looked like nothing happened). They now get a legible chip and sit on top.
 - **Image editing responsiveness.** The move/pan drag was bound to iframe-internal events, so
   it broke the moment the cursor left the image, and it re-rendered React on every frame
   (laggy). Rewrote all image manipulation — move, pan, resize, scale — to drag in the parent
-  window with direct-DOM updates: smooth, and it no longer breaks when you drag off the image.
+  window with direct-DOM updates.
 
 ### Changed
 - **Figma-style image model.** The image is now a free layer inside a crop-window container,
