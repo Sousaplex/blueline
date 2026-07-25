@@ -1353,40 +1353,8 @@ export function PreviewPane({
         </div>
       )}
 
-      {/* All-images variant shuttle: cycle every generated image's variants at a glance,
-          without hunting/selecting each one. Lives in LIVE edit (not proof) so a change
-          updates the canvas immediately. The selected image also has this on its toolbar. */}
-      {mode === "live" && project.images.length > 0 && viewRound == null && (
-        <div className="flex shrink-0 items-center gap-4 overflow-x-auto border-t px-4 py-2">
-          <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Images</span>
-          {project.images.map((slot) => (
-            <div key={slot.id} className="flex items-center gap-1.5 text-xs">
-              <span className="max-w-32 truncate font-mono text-muted-foreground" title={slot.id}>{slot.id}</span>
-              <Button
-                variant="outline"
-                size="icon-sm"
-                className="size-6"
-                title="Previous variant"
-                disabled={slot.variants.length < 2 || !slot.current || slot.current <= Math.min(...slot.variants)}
-                onClick={() => void actions.selectVariant(slot.id, slot.current! - 1)}
-              >
-                <ChevronLeft />
-              </Button>
-              <span className="tabular-nums">v{slot.current ?? "?"}/{slot.variants.length}</span>
-              <Button
-                variant="outline"
-                size="icon-sm"
-                className="size-6"
-                title="Next variant"
-                disabled={slot.variants.length < 2 || !slot.current || slot.current >= Math.max(...slot.variants)}
-                onClick={() => void actions.selectVariant(slot.id, slot.current! + 1)}
-              >
-                <ChevronRight />
-              </Button>
-            </div>
-          ))}
-        </div>
-      )}
+      {/* Variant shuttling lives on the selected image's toolbar + the Inspector — no
+          persistent bottom strip (that was clutter). */}
 
       {mode === "live" && imgTool && activeImage === imgTool.id && runState === "idle" && (() => {
         const slot = project.images.find((s) => s.id === imgTool.id);
