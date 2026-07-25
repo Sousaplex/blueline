@@ -327,6 +327,43 @@ export function PreviewPane({
     const m = /translate\(\s*(-?[\d.]+)mm\s*,\s*(-?[\d.]+)mm\s*\)/.exec(frame.style.transform || "");
     return m ? [Number(m[1]), Number(m[2])] : [0, 0];
   };
+  const numMm = (v: string): number => Number((/(-?[\d.]+)mm/.exec(v || "") || [])[1] ?? NaN);
+
+  /** Convert an image to the decoupled "crop window + free image layer" model (Figma-style),
+   *  if it isn't already: the frame becomes a fixed-size crop window (overflow hidden), and
+   *  the image becomes an absolutely-positioned layer sized to COVER it — so it looks
+   *  identical, but resizing the frame now crops instead of rescaling the photo. Idempotent. */
+  const ensureImgLayered = (id: string, img: HTMLImageElement, frame: HTMLElement) => {
+    if (getComputedStyle(img).position === "absolute" && img.style.width.includes("mm")) return;
+    const fr = frame.getBoundingClientRect(); // iframe-internal px
+    const frameW = fr.width / MM_TO_PX;
+    const frameH = fr.height / MM_TO_PX;
+    const nW = img.naturalWidth || fr.width;
+    const nH = img.naturalHeight || fr.height;
+    const aspect = nW / nH || 1;
+    const imgW = Math.max(frameW, frameH * aspect); // cover
+    const imgH = imgW / aspect;
+    const left = (frameW - imgW) / 2;
+    const top = (frameH - imgH) / 2;
+    const fs = frame.style;
+    if (getComputedStyle(frame).position === "static") fs.position = "relative";
+    fs.overflow = "hidden";
+    fs.width = `${frameW.toFixed(1)}mm`;
+    fs.height = `${frameH.toFixed(1)}mm`;
+    const is = img.style;
+    is.objectFit = "";
+    is.objectPosition = "";
+    is.transform = "";
+    is.position = "absolute";
+    is.maxWidth = "none";
+    is.height = "auto";
+    is.width = `${imgW.toFixed(1)}mm`;
+    is.left = `${left.toFixed(1)}mm`;
+    is.top = `${top.toFixed(1)}mm`;
+    void client
+      .setImageStyle(id, { frameWidthMm: frameW, frameHeightMm: frameH, imgWidthMm: imgW, imgLeftMm: left, imgTopMm: top })
+      .then(() => setDirty(true));
+  };
 
   /** Drag a mask-frame resize handle. Works in screen coords: 1mm = MM_TO_PX×zoom screen px.
    *  The edge opposite the handle stays anchored; left/top handles also shift the frame's
@@ -342,33 +379,44 @@ export function PreviewPane({
     if (!img || !frame || !iframe) return;
     const z = zoomValRef.current;
 
-    // In CROP mode a handle SCALES the photo within the mask (zoom), driven by the
-    // cursor's distance from the mask center. In MOVE mode it resizes the mask (below).
+    ensureImgLayered(id, img, frame);
+
+    // CROP mode: a handle SCALES the image LAYER (its width, aspect kept) around its own
+    // centre, driven by the cursor's distance from the frame centre. The crop window is fixed.
     if (imgDragModeRef.current === "crop") {
       const fr0 = frame.getBoundingClientRect();
       const ir0 = iframe.getBoundingClientRect();
       const cx = ir0.left + (fr0.left + fr0.width / 2) * z;
       const cy = ir0.top + (fr0.top + fr0.height / 2) * z;
       const startDist = Math.hypot(e.clientX - cx, e.clientY - cy) || 1;
-      const m = /scale\(([\d.]+)\)/.exec(img.style.transform || "");
-      const startZoom = m ? Number(m[1]) : 1;
-      img.style.objectFit = "cover";
+      const iw0 = numMm(img.style.width) || fr0.width / MM_TO_PX;
+      const il0 = numMm(img.style.left) || 0;
+      const it0 = numMm(img.style.top) || 0;
+      const ih0 = img.naturalWidth && img.naturalHeight ? iw0 * (img.naturalHeight / img.naturalWidth) : iw0;
+      const icx = il0 + iw0 / 2;
+      const icy = it0 + ih0 / 2;
       const onMoveZ = (ev: MouseEvent) => {
-        const d = Math.hypot(ev.clientX - cx, ev.clientY - cy);
-        const zoom = Math.max(1, Math.min(3, +(startZoom * (d / startDist)).toFixed(2)));
-        img.style.transform = zoom === 1 ? "" : `scale(${zoom})`;
+        const factor = Math.max(0.2, Math.min(8, Math.hypot(ev.clientX - cx, ev.clientY - cy) / startDist));
+        const iw = iw0 * factor;
+        const ih = ih0 * factor;
+        img.style.width = `${iw.toFixed(1)}mm`;
+        img.style.left = `${(icx - iw / 2).toFixed(1)}mm`;
+        img.style.top = `${(icy - ih / 2).toFixed(1)}mm`;
       };
       const onUpZ = () => {
         window.removeEventListener("mousemove", onMoveZ);
         window.removeEventListener("mouseup", onUpZ);
-        const m2 = /scale\(([\d.]+)\)/.exec(img.style.transform || "");
-        void client.setImageStyle(id, { zoom: m2 ? Number(m2[1]) : 1 }).then(() => setDirty(true));
+        void client
+          .setImageStyle(id, { imgWidthMm: numMm(img.style.width), imgLeftMm: numMm(img.style.left), imgTopMm: numMm(img.style.top) })
+          .then(() => setDirty(true));
       };
       window.addEventListener("mousemove", onMoveZ);
       window.addEventListener("mouseup", onUpZ);
       return;
     }
 
+    // FRAME (Move) mode: a handle resizes the CROP WINDOW. The image layer stays fixed, so
+    // you reveal/hide more of it — a true crop, not a rescale.
     const perMm = MM_TO_PX * z; // screen px per mm
     const fr = frame.getBoundingClientRect(); // iframe-internal px
     const ir = iframe.getBoundingClientRect();
@@ -381,7 +429,6 @@ export function PreviewPane({
     const boxR = boxL + fr.width * z;
     const boxB = boxT + fr.height * z;
     frame.style.overflow = "hidden";
-    img.style.objectFit = "cover";
     const onMove = (ev: MouseEvent) => {
       let w = startW;
       let hh = startH;
@@ -436,22 +483,21 @@ export function PreviewPane({
     const sx = e.clientX;
     const sy = e.clientY;
 
+    // CROP mode: pan the image LAYER within the fixed crop window (drag the photo, it
+    // follows the cursor). Moves left/top in mm; the frame stays put.
     if (imgDragModeRef.current === "crop") {
-      const m = /([\d.]+)%\s+([\d.]+)%/.exec(img.style.objectPosition || "50% 50%");
-      const [posX, posY] = m ? [Number(m[1]), Number(m[2])] : [50, 50];
-      const rect = frame.getBoundingClientRect();
-      const wScreen = rect.width * z || 1;
-      const hScreen = rect.height * z || 1;
-      img.style.objectFit = "cover";
+      ensureImgLayered(id, img, frame);
+      const perMm = MM_TO_PX * z;
+      const il0 = numMm(img.style.left) || 0;
+      const it0 = numMm(img.style.top) || 0;
       const onMove = (ev: MouseEvent) => {
-        const nx = Math.min(100, Math.max(0, posX - ((ev.clientX - sx) / wScreen) * 100));
-        const ny = Math.min(100, Math.max(0, posY - ((ev.clientY - sy) / hScreen) * 100));
-        img.style.objectPosition = `${nx.toFixed(1)}% ${ny.toFixed(1)}%`;
+        img.style.left = `${(il0 + (ev.clientX - sx) / perMm).toFixed(1)}mm`;
+        img.style.top = `${(it0 + (ev.clientY - sy) / perMm).toFixed(1)}mm`;
       };
       const onUp = () => {
         window.removeEventListener("mousemove", onMove);
         window.removeEventListener("mouseup", onUp);
-        void client.setImageStyle(id, { objectPosition: img.style.objectPosition }).then(() => setDirty(true));
+        void client.setImageStyle(id, { imgLeftMm: numMm(img.style.left), imgTopMm: numMm(img.style.top) }).then(() => setDirty(true));
       };
       window.addEventListener("mousemove", onMove);
       window.addEventListener("mouseup", onUp);

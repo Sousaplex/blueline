@@ -124,6 +124,10 @@ export interface ImageStyle {
   frameHeightMm?: number;
   translateXMm?: number;
   translateYMm?: number;
+  // Decoupled crop-window + image-layer model (Figma-style).
+  imgWidthMm?: number;
+  imgLeftMm?: number;
+  imgTopMm?: number;
 }
 
 export interface SystemEvent {

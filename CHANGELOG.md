@@ -13,6 +13,14 @@ and the GitHub release tags.
   (laggy). Rewrote all image manipulation — move, pan, resize, scale — to drag in the parent
   window with direct-DOM updates: smooth, and it no longer breaks when you drag off the image.
 
+### Changed
+- **Figma-style image model.** The image is now a free layer inside a crop-window container,
+  decoupled: **Move** — drag moves the box, corner handles resize the **crop window** (the photo
+  stays put, you reveal more/less — a true crop, no rescale). **Crop** (toolbar) — drag pans the
+  photo, corner handles scale the photo inside the window. Replaces the old `object-fit`/zoom
+  approach that rescaled the photo whenever you resized the box.
+- Removed the persistent bottom variant strip (shuttling stays on the image toolbar + Inspector).
+
 ## [0.20.0]
 
 Canvas-editing overhaul.

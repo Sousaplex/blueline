@@ -262,27 +262,60 @@ export function setImageStyle(
     frameHeightMm?: number;
     translateXMm?: number;
     translateYMm?: number;
+    // Decoupled "crop window + free image layer" model (Figma-style): the frame is a fixed
+    // crop window and the image is an absolutely-positioned layer inside it with its own
+    // size (imgWidthMm) and offset (imgLeftMm/imgTopMm). Resizing the frame then crops
+    // rather than rescaling the photo. When these are set the coupled object-fit/zoom props
+    // are cleared.
+    imgWidthMm?: number;
+    imgLeftMm?: number;
+    imgTopMm?: number;
   },
 ): void {
   const { dom } = loadDom(project);
   const img = dom.document.querySelector(`img[data-image-id="${imageId}"]`);
   if (!img) throw new Error(`page.html has no <img data-image-id="${imageId}">`);
 
-  mergeStyle(img, (existing) => {
-    existing.set("object-fit", "cover");
-    if (style.objectPosition) {
-      if (!/^[\d.]+%\s+[\d.]+%$/.test(style.objectPosition)) throw new Error("objectPosition must be 'X% Y%'");
-      existing.set("object-position", style.objectPosition);
+  const layered = style.imgWidthMm !== undefined || style.imgLeftMm !== undefined || style.imgTopMm !== undefined;
+  const frame = (img as any).parentElement;
+
+  if (layered) {
+    // Image becomes a free layer inside the crop window: absolute-positioned, sized by width
+    // (height auto keeps aspect), offset by left/top. Clear the old coupled props.
+    if (frame) {
+      mergeStyle(frame, (existing) => {
+        const pos = existing.get("position");
+        if (!pos || pos === "static") existing.set("position", "relative");
+        existing.set("overflow", "hidden");
+      });
     }
-    if (style.zoom !== undefined) {
-      const z = Math.min(Math.max(Number(style.zoom), 1), 3);
-      if (z === 1) existing.delete("transform");
-      else existing.set("transform", `scale(${z.toFixed(2)})`);
-    }
-  });
+    mergeStyle(img, (existing) => {
+      existing.delete("object-fit");
+      existing.delete("object-position");
+      existing.delete("transform");
+      existing.set("position", "absolute");
+      existing.set("max-width", "none");
+      existing.set("height", "auto");
+      if (style.imgWidthMm !== undefined) existing.set("width", `${Math.max(1, Number(style.imgWidthMm)).toFixed(1)}mm`);
+      if (style.imgLeftMm !== undefined) existing.set("left", `${Number(style.imgLeftMm).toFixed(1)}mm`);
+      if (style.imgTopMm !== undefined) existing.set("top", `${Number(style.imgTopMm).toFixed(1)}mm`);
+    });
+  } else {
+    mergeStyle(img, (existing) => {
+      existing.set("object-fit", "cover");
+      if (style.objectPosition) {
+        if (!/^[\d.]+%\s+[\d.]+%$/.test(style.objectPosition)) throw new Error("objectPosition must be 'X% Y%'");
+        existing.set("object-position", style.objectPosition);
+      }
+      if (style.zoom !== undefined) {
+        const z = Math.min(Math.max(Number(style.zoom), 1), 3);
+        if (z === 1) existing.delete("transform");
+        else existing.set("transform", `scale(${z.toFixed(2)})`);
+      }
+    });
+  }
 
   // Frame = the crop container that clips the image (its direct parent by convention).
-  const frame = (img as any).parentElement;
   const touchesFrame =
     style.frameWidthMm !== undefined ||
     style.frameHeightMm !== undefined ||
