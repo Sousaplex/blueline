@@ -5,6 +5,207 @@ All notable user-facing changes to Blueline. Kept from v0.17.0 onward
 [Keep a Changelog](https://keepachangelog.com/); versions match `app/package.json`
 and the GitHub release tags.
 
+## [0.27.0]
+
+Shareable project files, and a fix for silent update failures.
+
+### Added
+- **Two new file types for sharing and backup.** Export a **`.blueline`** file (one finished
+  document, self-contained with its images — hand someone the deliverable) or a **`.blueproject`**
+  (the whole family of variants/series plus the brand assets and sources they use — hand off the
+  working set). Both are in the "+" menu next to the document tabs. **Import** either one from the
+  Home screen — it expands back into your workspace, merging shared brand/sources and reconnecting
+  variant lineage. Each file is stamped with the Blueline version that made it.
+
+### Fixed
+- **Updates no longer fail silently.** If an update can't install, you now see *why* instead of the
+  app just closing. The most common cause — running Blueline from the DMG or Downloads instead of
+  **Applications** — is now detected and explained, and the app reliably relaunches itself after a
+  successful update.
+
+## [0.26.0]
+
+The agent can download real logos and photos now — no more generated stand-ins.
+
+### Added
+- **Download real images.** The agent has a new `fetch_image` ability: when a company's real
+  logo or product photo lives on their website, it downloads the actual file (into the brand
+  library for logos, sources for photos) and places that, instead of generating a look-alike.
+  `web_fetch mode=brand` now hands the agent the logo's URL and tells it to grab the real file.
+
+### Fixed
+- **Conversation export now captures tool calls.** The export introduced in 0.24.0 was recording
+  runs but showing zero tool calls (it read an older internal message shape). It now captures
+  every tool call, its arguments, and results — so an exported `.json` actually shows what the
+  agent did.
+
+## [0.25.0]
+
+Let the content decide the page count — ideal for formatting a document or letter.
+
+### Added
+- **Auto page count.** Next to the page-count field (in a project and in the New-project dialog)
+  there's now an **Auto** toggle. With it on, you don't pick a number — the agent uses as many
+  pages as the content needs and the reviewer stops enforcing a fixed count. Perfect for "take
+  this markdown and format it nicely on our letterhead": the text flows across however many
+  pages it takes, with the letterhead/header repeated on each page and clean breaks (no stranded
+  headings, no split tables). You can also just ask in chat ("make it fit the content" / "as many
+  pages as it needs") and the agent flips it on. Slide decks stay fixed-count.
+
+## [0.24.0]
+
+See what the agent actually did — export a project's full conversation and watch context usage.
+
+### Added
+- **Export conversation** (download icon in the Agent panel). Downloads the project's complete
+  agent history across every run — every prompt, tool call **with its arguments**, tool result,
+  and the model's reasoning — plus the system prompt, as one JSON file you can hand off for
+  analysis (e.g. to see exactly which pages a brandbook fetch reached and what came back). In
+  the desktop app it opens a Save dialog; in the browser it downloads directly.
+- **Context-usage meter** in the Agent panel header. While the agent works it shows how full the
+  model's context window is (percent + tokens), so you can tell when a long run is nearing the
+  limit and a compaction is coming.
+
+## [0.23.0]
+
+Smaller/faster app, deeper agent sandboxing, and an end-to-end test net.
+
+### Changed
+- **Leaner, faster app.** The download and disk footprint drop substantially (build-time-only
+  dependencies are no longer shipped, app resources are packed into an archive), and launch is
+  quicker — the Chromium check is skipped once it's cached and no longer re-transpiles the
+  engine on every start path. An offline first launch no longer hangs.
+
+### Security
+- **The agent can only write inside its own project folder.** Its file-write/edit tools are
+  now hard-confined, so a prompt-injection hidden in fetched web content can't make it write
+  outside the project (e.g. into your home or login items).
+- **Web fetches are re-checked on every redirect hop**, not just the first URL — a public link
+  that redirects to a private/internal address is now blocked mid-chain.
+
+### Tests
+- **End-to-end harness** (`npm run test:e2e`): boots the real app on a real engine over a
+  fixture project in headless Chromium and verifies the live-edit surface — compile stage,
+  click-to-select (text + image), the Layers panel, and adding an element — the interaction
+  layer that unit tests can't reach.
+
+## [0.22.1]
+
+Reliability pass — editor performance and engine race conditions.
+
+### Fixed
+- **Dragging elements is smoother.** A block drag now updates only the canvas during the
+  gesture and syncs the rest once on release, instead of re-rendering the whole app on every
+  mouse move.
+- **Undo is safe around agent runs.** Undo/redo are refused while the agent is generating (they
+  would have clobbered its in-progress edits), and a stale-measurement race that could bake an
+  out-of-date image layout over a fresh edit is now guarded.
+- **No more duplicate agent sessions or double-starts.** Rapid Run clicks or a chat-and-run in
+  quick succession can no longer spin up two sessions (duplicate feed events) or two runs.
+- **Compile failures are surfaced** in the System tab instead of being silently swallowed.
+- **Esc deselects** even when keyboard focus is on the app chrome (not just the canvas).
+
+### Security
+- Request bodies are size-capped; uploaded source files are served with `nosniff` and forced
+  to download unless they're a known-safe image/text/pdf (an uploaded `.html`/`.svg` can no
+  longer execute on the bridge origin).
+
+## [0.22.0]
+
+Agent source/brand curation, web crawl, a security-hardening pass, and live-edit fixes.
+
+### Added
+- **The agent can now curate your source library and brand home.** Three new design-agent
+  tools (also driven by chat, e.g. "read this website and put the key info in sources"):
+  - `write_source` — distill research (typically after `web_fetch`) into a structured
+    markdown doc in the workspace `context/` library, with source URL + date cited.
+  - `write_brand` — author or update brand guideline docs in `brand/` (voice & tone,
+    palette hexes, typography, logo usage, do/don'ts). Text docs only — logos, fonts and
+    photos can never be overwritten.
+  - `organize_sources` — rename/move library files within or between `context/` and
+    `brand/` (`context/notes.md` → `context/acme/product-notes.md`). Never overwrites; a
+    batch is validated in full before any file moves.
+  The Sources and Brand panels update live as the agent writes. MCP gains a matching
+  `organize_sources` tool (new bridge endpoint `/api/sources/move`); outside these tools
+  the workspace dirs remain read-only to the agent.
+- **`web_fetch` crawl mode.** One call reads a page plus a few short-path same-domain pages
+  (about/pricing/etc.) — pairs with `write_source` for "read this site and summarize it."
+  Same-domain only, budget-capped, each hop re-validated against the SSRF guard.
+
+### Fixed
+- **Inspector position edits show up immediately.** Typing an X/Y value or hitting "Reset
+  position" now moves the element on the canvas at once (it used to persist silently and only
+  appear after you deselected).
+- **Edits no longer silently vanish on a save hiccup.** If the engine can't save a change it
+  now surfaces an error toast instead of dropping it (the change used to revert on next reload).
+- **Undo can't be corrupted by a just-finished drag.** A pending debounced move-save is now
+  cancelled when you deselect, undo, or delete — so an undo right after a drag stays undone.
+- **Uploading an image variant is undoable** (⌘Z), like every other page change.
+- **Reordering from the Inspector's ↑↓** now takes effect immediately (it deselects first, the
+  same way the Layers panel already did).
+
+### Security (internal hardening)
+- **The local engine bridge is now loopback-only and same-origin-gated.** It binds
+  `127.0.0.1` (not all interfaces), drops the wildcard CORS header, and rejects any request
+  whose Origin/Host isn't local — so a website you visit or another device on your network
+  can no longer read your workspace, start runs, or drive git.
+- **Generated pages can't run scripts.** The live-edit iframe is sandboxed (no script
+  execution) and `page.html` is served with a `script-src 'none'` CSP; the print/export
+  window renders with JavaScript disabled and OS sandboxing. A malicious snippet in an
+  AI-authored page can no longer reach the app or the network.
+- **`git clone` URL hardening** — rejects `ext::`/option-injection URLs and pins transports.
+- **Opening a project by absolute path is confined** to the workspace's projects folder;
+  `open-path` (from the UI) only opens documents/folders, never launches apps.
+
+## [0.21.1]
+
+### Fixed
+- **"Preparing image for editing…" no longer loops.** Projects made before 0.21 now get their
+  images normalized once, automatically, when you open Live edit — instead of a re-render
+  firing on every gesture (which never landed because the selected image froze the canvas).
+- **Images can be deleted.** Select an image and press Delete/Backspace, or use the new trash
+  button on the image toolbar (⌘Z restores it).
+- **Layer reordering works for images**, and **⌘] / ⌘[** now bring the selected element
+  forward / send it backward (image or text/box) — matching the Layers panel arrows.
+
+## [0.21.0]
+
+Image editing, rebuilt from the foundation up (see `docs/layer-model.md`).
+
+### Changed
+- **Images are now real, directly-editable objects.** Every image is normalized once, up
+  front, from the browser's true measurements into a stable *frame + photo layer* — instead
+  of the old approach that guessed geometry mid-drag and fought the page's flex/grid layout
+  (the reason resize/move kept breaking). One coherent gesture model, no Move/Crop toggle:
+  - **Drag** the image to move it on the page.
+  - **Corner** handle resizes it proportionally (bigger/smaller on the page).
+  - **Edge** handle crops/reveals that one side — so you can finally size an image
+    horizontally or vertically on its own.
+  - **⌥/⌘ + corner** stretches it freely (non-proportional).
+  - **Double-click** to adjust the photo inside the frame (drag to pan, corners to zoom),
+    Esc to finish.
+
+### Added
+- **Contextual property panel.** Selecting any text/box element shows editable properties —
+  font family, size, bold/italic, alignment, text + fill color, corner radius, box width,
+  and exact position — with a **mm ⇄ px** toggle. Changes apply live and persist.
+- **Layers panel.** The right rail lists every element in the document (with its z-index);
+  click to select it on the canvas, and reorder with the ↑/↓ controls.
+- **Chat moved to a floating button.** The agent chat is now a bottom-right button that opens
+  on demand, freeing the rail for the property + layers panels.
+- A `compile` step after every render bakes images into the editable layer form (idempotent,
+  pixel-identical to the rendered proof). Existing projects convert automatically on their
+  next render.
+
+### Changed
+- **Added elements are cleaner.** A new box is a real sharp-cornered box (no forced rounded
+  corners), and new text is plain text — restyle either from the property panel.
+
+### Tests
+- New pure-geometry unit suite (anchor invariants, edge-crop, aspect-lock, zoom round-trips)
+  and compiler tests (layout variants + idempotency) — the interaction layer that kept
+  silently regressing is now covered.
+
 ## [0.20.3]
 
 ### Fixed

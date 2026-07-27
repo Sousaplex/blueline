@@ -1,5 +1,6 @@
 // render: projects/<slug>/page.html -> projects/<slug>/out/proof.pdf
 // Thin CLI wrapper over the engine render backend.
+import { compilePage } from "../engine/compile.ts";
 import { loadConfig } from "../engine/config.ts";
 import { Project } from "../engine/project.ts";
 import { PlaywrightBackend } from "../engine/render.ts";
@@ -11,6 +12,7 @@ const project = new Project(projectDir);
 const backend = new PlaywrightBackend();
 try {
   await backend.renderPdf(project.pageHtml, project.proofPdf, loadConfig().render);
+  await compilePage(project, backend).catch(() => {});
   console.log(`wrote ${project.proofPdf}`);
 } finally {
   await backend.close();

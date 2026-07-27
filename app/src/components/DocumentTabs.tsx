@@ -3,7 +3,7 @@
 // This is the primary way to hop between variations; the Library stays the
 // whole-workspace browser.
 import { useState } from "react";
-import { FilePlus2, GitBranch, Layers, Loader2, Plus, Sparkles, X } from "lucide-react";
+import { FilePlus2, FileArchive, GitBranch, Layers, Loader2, Package, Plus, Sparkles, X } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -63,6 +63,8 @@ export function DocumentTabs({
   onNewSeries,
   onBranch,
   onNewProject,
+  onExportFile,
+  onExportProject,
 }: {
   projects: ProjectListing[];
   currentSlug: string;
@@ -73,6 +75,8 @@ export function DocumentTabs({
   onNewSeries: () => void;
   onBranch: () => void;
   onNewProject: () => void;
+  onExportFile: () => void;
+  onExportProject: () => void;
 }) {
   const family = familyOf(projects, currentSlug);
   const [confirmDelete, setConfirmDelete] = useState<ProjectListing | null>(null);
@@ -140,6 +144,15 @@ export function DocumentTabs({
           <DropdownMenuItem onClick={onNewSeries} disabled={!hasPage}>
             <Layers /> Make a series from this…
             <span className="ml-auto text-[10px] text-muted-foreground">same design, N subjects</span>
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={onExportFile} disabled={!hasPage}>
+            <FileArchive /> Export this document
+            <span className="ml-auto text-[10px] text-muted-foreground">.blueline</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={onExportProject}>
+            <Package /> Export whole project
+            <span className="ml-auto text-[10px] text-muted-foreground">.blueproject</span>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={onNewProject}>

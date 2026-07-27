@@ -1,13 +1,16 @@
 import { createHash } from "node:crypto";
 import { lookup } from "node:dns/promises";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isIP } from "node:net";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { BluelineConfig } from "./config.ts";
-import type { Project } from "./project.ts";
+import { safeRelPath, type Project } from "./project.ts";
 import type { RenderBackend } from "./render.ts";
 
-export type FetchMode = "markdown" | "screenshot" | "brand";
+export type FetchMode = "markdown" | "screenshot" | "brand" | "crawl";
+
+/** Modest crawl: the entry page + a few short-path same-domain pages (about/pricing/etc.). */
+const CRAWL_MAX_PAGES = 4;
 
 export interface FetchResult {
   mode: FetchMode;
@@ -49,6 +52,23 @@ async function assertSafeUrl(raw: string): Promise<URL> {
   return url;
 }
 
+/** Re-validate EVERY navigation (initial load AND each redirect hop) against the SSRF rules.
+ *  assertSafeUrl is otherwise only a pre-flight check, so a public URL that 3xx-redirects to
+ *  169.254.169.254 or 127.0.0.1 would slip through — Playwright re-resolves DNS and follows it.
+ *  Subresources (images/css) are left alone: their bytes never reach the agent as content. */
+async function guardNavigations(page: any): Promise<void> {
+  await page.route("**/*", async (route: any) => {
+    const req = route.request();
+    if (!req.isNavigationRequest()) return route.continue();
+    try {
+      await assertSafeUrl(req.url());
+      return route.continue();
+    } catch {
+      return route.abort("blockedbyclient");
+    }
+  });
+}
+
 function budgetFile(project: Project): string {
   return join(project.fetchedDir, ".budget.json");
 }
@@ -85,6 +105,40 @@ function htmlToMarkdown(html: string, baseUrl: string, cap: number): string {
 import { createRequire } from "node:module";
 const require_ = createRequire(import.meta.url);
 
+/** Same-domain links from a page, shortest-path first (nav pages before deep ones), assets
+ *  and off-domain links dropped. Used by crawl mode to pick which pages to follow. */
+function sameDomainLinks(html: string, base: URL): string[] {
+  const { parseHTML } = require_("linkedom");
+  const { document } = parseHTML(html, { location: { href: base.href } });
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const a of [...document.querySelectorAll("a[href]")] as any[]) {
+    let u: URL;
+    try {
+      u = new URL(a.getAttribute("href"), base.href);
+    } catch {
+      continue;
+    }
+    if (u.protocol !== "https:" && u.protocol !== "http:") continue;
+    if (u.hostname !== base.hostname) continue;
+    u.hash = "";
+    if (/\.(pdf|png|jpe?g|gif|svg|webp|zip|mp4|css|js|ico|woff2?|xml|rss)($|\?)/i.test(u.pathname)) continue;
+    if (u.href === base.href || seen.has(u.href)) continue;
+    seen.add(u.href);
+    out.push(u.href);
+  }
+  return out.sort((a, b) => a.length - b.length);
+}
+
+async function fetchPageMarkdown(backend: RenderBackend, url: URL, cap: number): Promise<string> {
+  const html = await backend.withPage(async (page) => {
+    await guardNavigations(page);
+    await page.goto(url.href, { waitUntil: "networkidle", timeout: 15_000 });
+    return page.content();
+  });
+  return htmlToMarkdown(html, url.href, cap);
+}
+
 function rgbToHex(rgb: string): string | null {
   const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/.exec(rgb);
   if (!m) return null;
@@ -100,6 +154,7 @@ async function extractBrand(
   screenshotPath: string,
 ): Promise<string> {
   const raw = await backend.withPage(async (page) => {
+    await guardNavigations(page);
     await page.goto(url.href, { waitUntil: "networkidle", timeout: 20_000 });
     const data = await page.evaluate(() => {
       const colorCount = new Map<string, number>();
@@ -144,7 +199,9 @@ async function extractBrand(
     "",
     `Font stacks: ${raw.fonts.join(" | ") || "(none detected)"}`,
     raw.themeColor ? `Theme color: ${raw.themeColor}` : "",
-    raw.logo ? `Logo image: ${raw.logo} (web_fetch mode=screenshot it, or reference its style)` : "Logo: not detected",
+    raw.logo
+      ? `Logo image URL: ${raw.logo}\n  → DOWNLOAD the real logo: fetch_image({ url: "${raw.logo}", into: "brand" }), then use_image it. Do NOT gen_images a logo.`
+      : "Logo: not detected",
     raw.ogImage ? `Social/og image: ${raw.ogImage}` : "",
     "",
     `Homepage screenshot saved to: ${screenshotPath} — use the read tool to view it for layout/mood.`,
@@ -175,7 +232,12 @@ export async function fetchWeb(
   consumeBudget(project, config.webFetch.maxFetchesPerRun);
 
   if (mode === "screenshot") {
-    await backend.screenshot(url.href, cachePath);
+    // Guarded page (redirect-safe) rather than backend.screenshot, which does its own goto.
+    await backend.withPage(async (page) => {
+      await guardNavigations(page);
+      await page.goto(url.href, { waitUntil: "networkidle", timeout: 15_000 });
+      await page.screenshot({ path: cachePath, fullPage: true });
+    });
     return { mode, value: cachePath, cached: false };
   }
 
@@ -185,11 +247,110 @@ export async function fetchWeb(
     return { mode, value: report, cached: false };
   }
 
+  if (mode === "crawl") {
+    // Entry page + up to CRAWL_MAX_PAGES-1 short-path same-domain pages, each budgeted and
+    // re-validated through assertSafeUrl. Per-page cap is halved so the combined doc stays
+    // manageable. Stops early when the per-run fetch budget is exhausted.
+    const perCap = Math.max(2000, Math.floor(config.webFetch.maxContentChars / 2));
+    consumeBudget(project, config.webFetch.maxFetchesPerRun);
+    const entryHtml = await backend.withPage(async (page) => {
+      await guardNavigations(page);
+      await page.goto(url.href, { waitUntil: "networkidle", timeout: 15_000 });
+      return page.content();
+    });
+    const parts = [`# Crawl of ${url.hostname}`, `\n## ${url.href}\n\n${htmlToMarkdown(entryHtml, url.href, perCap)}`];
+    const followed: string[] = [];
+    for (const link of sameDomainLinks(entryHtml, url).slice(0, CRAWL_MAX_PAGES - 1)) {
+      try {
+        const lu = await assertSafeUrl(link);
+        consumeBudget(project, config.webFetch.maxFetchesPerRun);
+        parts.push(`\n## ${lu.href}\n\n${await fetchPageMarkdown(backend, lu, perCap)}`);
+        followed.push(lu.href);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (/budget/.test(msg)) break; // out of fetches — stop, keep what we have
+        parts.push(`\n## ${link}\n\n[skipped: ${msg}]`);
+      }
+    }
+    const combined = `${parts.join("\n")}\n\n---\n_Crawled ${followed.length + 1} page(s) on ${url.hostname}._`;
+    writeFileSync(cachePath, combined);
+    return { mode, value: combined, cached: false };
+  }
+
   const html = await backend.withPage(async (page) => {
+    await guardNavigations(page);
     await page.goto(url.href, { waitUntil: "networkidle", timeout: 15_000 });
     return page.content();
   });
   const md = htmlToMarkdown(html, url.href, config.webFetch.maxContentChars);
   writeFileSync(cachePath, md);
   return { mode, value: md, cached: false };
+}
+
+const IMAGE_EXT: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/webp": "webp",
+  "image/gif": "gif",
+  "image/svg+xml": "svg",
+  "image/avif": "avif",
+};
+const MAX_ASSET_BYTES = 20 * 1024 * 1024;
+
+export interface AssetResult {
+  /** Path relative to the destination area root (brand/ or context/). */
+  path: string;
+  bytes: number;
+  contentType: string;
+}
+
+/**
+ * Download a real image asset (logo, product photo) from a URL into the workspace — brand/ for
+ * logos, context/ for photography — so the agent can PLACE the real image via use_image instead
+ * of generating a fake one. Goes through the guarded backend page (same SSRF re-validation on
+ * every redirect hop as the other fetch modes), verifies the response is actually an image, and
+ * caps the size. Returns the saved relative path.
+ */
+export async function fetchAsset(
+  project: Project,
+  backend: RenderBackend,
+  config: BluelineConfig,
+  rawUrl: string,
+  into: "brand" | "context",
+  relPath?: string,
+): Promise<AssetResult> {
+  const url = await assertSafeUrl(rawUrl);
+  consumeBudget(project, config.webFetch.maxFetchesPerRun);
+
+  const { buf, contentType } = await backend.withPage(async (page) => {
+    await guardNavigations(page); // re-checks every redirect hop against the SSRF rules
+    const resp = await page.goto(url.href, { waitUntil: "commit", timeout: 20_000 });
+    if (!resp) throw new Error(`No response from ${url.href}`);
+    if (!resp.ok()) throw new Error(`Fetch failed: HTTP ${resp.status()} for ${url.href}`);
+    const contentType = (resp.headers()["content-type"] ?? "").split(";")[0].trim().toLowerCase();
+    const body = await resp.body();
+    return { buf: body, contentType };
+  });
+
+  const ext = IMAGE_EXT[contentType];
+  if (!ext) {
+    throw new Error(
+      `That URL is not an image (content-type: ${contentType || "unknown"}). fetch_image only downloads ` +
+        `images (png/jpeg/webp/gif/svg). For a page's text use web_fetch mode=markdown.`,
+    );
+  }
+  if (buf.length > MAX_ASSET_BYTES) {
+    throw new Error(`Image is too large (${(buf.length / 1e6).toFixed(1)}MB, limit 20MB).`);
+  }
+
+  // Name it from the caller's path or the URL basename; force a correct image extension.
+  let name = (relPath && relPath.trim()) || decodeURIComponent(url.pathname.split("/").filter(Boolean).pop() || "asset");
+  if (!/\.(png|jpe?g|webp|gif|svg|avif)$/i.test(name)) name = `${name.replace(/\.[^./]*$/, "")}.${ext}`;
+  const rel = safeRelPath(name); // throws on traversal / absolute paths
+  const dir = into === "brand" ? project.workspace.brandDir : project.workspace.contextDir;
+  const abs = join(dir, rel);
+  mkdirSync(dirname(abs), { recursive: true });
+  writeFileSync(abs, buf);
+  return { path: rel, bytes: buf.length, contentType };
 }

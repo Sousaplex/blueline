@@ -12,13 +12,15 @@
     "viewer": "tsx src/commands/viewer.ts",
     "test": "node --import tsx --test src/engine/*.test.ts",
     "serve": "tsx src/engine/server.ts",
-    "mcp": "tsx src/mcp/server.ts"
+    "mcp": "tsx src/mcp/server.ts",
+    "test:e2e": "npm --prefix ../app run build && node e2e/live-edit.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.80.10",
     "@google/genai": "^1.0.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@mozilla/readability": "^0.6.0",
+    "fflate": "^0.8.3",
     "linkedom": "^0.18.13",
     "pdf-to-img": "^6.2.0",
     "playwright": "^1.50.0",

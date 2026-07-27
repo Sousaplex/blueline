@@ -1,5 +1,5 @@
-import { FolderOpen, Plus } from "lucide-react";
-import { useState } from "react";
+import { FolderOpen, Plus, Upload } from "lucide-react";
+import { useRef, useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,10 +30,34 @@ export function HomeScreen({
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const act = (fn: () => Promise<unknown>) => {
     setError(null);
     void fn().catch((e) => setError(e instanceof Error ? e.message : String(e)));
+  };
+
+  const importBase64 = (base64: string) => act(() => client.importArchive(base64));
+
+  const handleImport = () => {
+    // Electron: native Open dialog (with the .blueline/.blueproject filter). Browser: file input.
+    if (window.blueline?.openArchiveFile) {
+      act(async () => {
+        const picked = await window.blueline!.openArchiveFile();
+        if (picked) await client.importArchive(picked.base64);
+      });
+    } else {
+      fileRef.current?.click();
+    }
+  };
+
+  const onFilePicked = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-picking the same file
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => importBase64(String(reader.result).split(",")[1] ?? "");
+    reader.readAsDataURL(file);
   };
 
   return (
@@ -51,6 +75,10 @@ export function HomeScreen({
         <Button size="sm" variant="outline" onClick={() => act(() => client.chooseWorkspace())}>
           <FolderOpen data-slot="icon" /> Change workspace
         </Button>
+        <Button size="sm" variant="outline" onClick={handleImport} title="Import a .blueline or .blueproject file">
+          <Upload data-slot="icon" /> Import
+        </Button>
+        <input ref={fileRef} type="file" accept=".blueline,.blueproject" hidden onChange={onFilePicked} />
         <Button size="sm" onClick={() => setNewProjectOpen(true)}>
           <Plus data-slot="icon" /> New project
         </Button>

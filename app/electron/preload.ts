@@ -3,6 +3,11 @@ import { contextBridge, ipcRenderer } from "electron";
 contextBridge.exposeInMainWorld("blueline", {
   isElectron: true as const,
   exportPdf: (): Promise<string | null> => ipcRenderer.invoke("export-pdf"),
+  saveTextFile: (defaultName: string, content: string): Promise<string | null> =>
+    ipcRenderer.invoke("save-text-file", defaultName, content),
+  saveBinaryFile: (defaultName: string, base64: string): Promise<string | null> =>
+    ipcRenderer.invoke("save-binary-file", defaultName, base64),
+  openArchiveFile: (): Promise<{ name: string; base64: string } | null> => ipcRenderer.invoke("open-archive-file"),
   revealInFinder: (path: string): Promise<void> => ipcRenderer.invoke("reveal-in-finder", path),
   openPath: (path: string): Promise<void> => ipcRenderer.invoke("open-path", path),
   chooseDirectory: (): Promise<string | null> => ipcRenderer.invoke("choose-directory"),
@@ -26,5 +31,10 @@ contextBridge.exposeInMainWorld("blueline", {
     const h = (_e: unknown, p: { version: string }) => cb(p.version);
     ipcRenderer.on("update-downloaded", h);
     return () => ipcRenderer.removeListener("update-downloaded", h);
+  },
+  onUpdateError: (cb: (message: string) => void): (() => void) => {
+    const h = (_e: unknown, p: { message: string }) => cb(p.message);
+    ipcRenderer.on("update-error", h);
+    return () => ipcRenderer.removeListener("update-error", h);
   },
 });

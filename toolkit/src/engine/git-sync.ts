@@ -119,8 +119,18 @@ export async function gitDisconnect(root: string, opts?: { wipeHistory?: boolean
 
 /** Clone a shared workspace repo to `dest` (which must not exist yet). */
 export async function gitClone(url: string, dest: string): Promise<void> {
+  const u = url.trim();
+  // Same shape check as gitConnect, applied here too: without it, `ext::sh -c …` URLs or a
+  // leading `--upload-pack=` execute arbitrary commands. `--` stops option parsing, and the
+  // protocol pins block ext/file transports even if a hostile URL slips past the regex.
+  if (!/^(https:\/\/|git@)[\w.@:/~-]+$/.test(u)) throw new Error("That does not look like a git remote URL");
+  if (dest.startsWith("-")) throw new Error("Invalid destination");
   if (existsSync(dest)) throw new Error(`Destination already exists: ${dest}`);
-  await run("git", ["clone", url.trim(), dest], { timeout: 300_000, maxBuffer: 8 * 1024 * 1024 });
+  await run(
+    "git",
+    ["-c", "protocol.ext.allow=never", "-c", "protocol.file.allow=never", "clone", "--", u, dest],
+    { timeout: 300_000, maxBuffer: 8 * 1024 * 1024 },
+  );
 }
 
 export interface SyncResult {

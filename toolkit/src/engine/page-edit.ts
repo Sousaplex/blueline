@@ -183,15 +183,18 @@ export function insertElement(project: Project, kind: InsertKind, xMm = 15, yMm 
   // z-index keeps the new element on TOP of existing content, and text/heading get a
   // translucent light chip so they're legible on ANY background (a dark #111 label on a
   // dark panel was invisible — read as "add didn't work"). The user restyles from there.
+  // No forced rounded corners and no chip background: text is plain text, a rect is a real
+  // sharp box. The user restyles (color, fill, corners) from the contextual property panel —
+  // which is why these defaults are deliberately minimal.
   const base = `position:absolute;left:${xMm}mm;top:${yMm}mm;z-index:50;`;
   if (kind === "text") {
-    el.setAttribute("style", `${base}font-size:11pt;line-height:1.4;color:#111;background:rgba(255,255,255,0.92);padding:2mm 3mm;border-radius:1mm;max-width:80mm;`);
+    el.setAttribute("style", `${base}font-size:11pt;line-height:1.4;color:#111827;width:80mm;`);
     el.textContent = "Text";
   } else if (kind === "heading") {
-    el.setAttribute("style", `${base}font-size:22pt;font-weight:700;line-height:1.15;color:#111;background:rgba(255,255,255,0.92);padding:2mm 3mm;border-radius:1mm;max-width:120mm;`);
+    el.setAttribute("style", `${base}font-size:22pt;font-weight:700;line-height:1.15;color:#111827;width:120mm;`);
     el.textContent = "Heading";
   } else if (kind === "rect") {
-    el.setAttribute("style", `${base}width:40mm;height:25mm;background:#e5e7eb;border:1px solid #94a3b8;border-radius:2mm;`);
+    el.setAttribute("style", `${base}width:40mm;height:25mm;background:#e5e7eb;border:1px solid #94a3b8;`);
   } else {
     // divider
     el.setAttribute("style", `${base}width:60mm;height:0;border-top:2px solid #64748b;`);
@@ -206,11 +209,38 @@ export function insertElement(project: Project, kind: InsertKind, xMm = 15, yMm 
   return id;
 }
 
-/** Swap an element with its previous/next sibling in document flow. */
+/** Resolve a movable/deletable element by data-pc-id OR data-image-id (→ its slot/frame). */
+function resolveElement(doc: any, id: string): any {
+  const byPc = doc.querySelector(`[data-pc-id="${id}"]`);
+  if (byPc) return byPc;
+  const slot = doc.querySelector(`[data-img-slot="${id}"]`);
+  if (slot) return slot;
+  const img = doc.querySelector(`img[data-image-id="${id}"]`);
+  if (!img) return null;
+  // Walk up to a compiled slot wrapper; else use the img's immediate parent (crop frame).
+  let cur: any = img;
+  while (cur && cur.tagName !== "BODY") {
+    if (cur.getAttribute?.("data-img-slot")) return cur;
+    cur = cur.parentElement;
+  }
+  return img.parentElement && img.parentElement.children.length === 1 ? img.parentElement : img;
+}
+
+/** Delete an image (its compiled slot/frame/img block, or the bare img on legacy pages). */
+export function deleteImage(project: Project, imageId: string): void {
+  const { dom } = loadDom(project);
+  const el = resolveElement(dom.document, imageId);
+  if (!el) throw new Error(`No image with data-image-id="${imageId}"`);
+  if (el.tagName === "BODY" || el.tagName === "HTML") throw new Error("Cannot delete the page root");
+  el.remove();
+  save(project, dom.document);
+}
+
+/** Swap an element with its previous/next sibling in document flow (works for images too). */
 export function moveElement(project: Project, pcId: string, direction: "up" | "down"): void {
   const { dom } = loadDom(project);
-  const el = dom.document.querySelector(`[data-pc-id="${pcId}"]`);
-  if (!el) throw new Error(`No element with data-pc-id="${pcId}"`);
+  const el = resolveElement(dom.document, pcId);
+  if (!el) throw new Error(`No element for id="${pcId}"`);
   const parent = el.parentElement;
   if (!parent) throw new Error("Element has no parent");
   const sibling = direction === "up" ? el.previousElementSibling : el.nextElementSibling;
@@ -252,96 +282,100 @@ export function writePageSource(project: Project, html: string): void {
 const FRAME_MIN_MM = 5;
 const FRAME_MAX_MM = 400;
 
-/** Persist image geometry. IMG-level: object-position (pan) + scale (zoom within the
- *  crop). FRAME-level (the img's crop container): width/height (resize the displayed
- *  box) + translate (move the box on the page without reflowing siblings). */
-export function setImageStyle(
-  project: Project,
-  imageId: string,
-  style: {
-    objectPosition?: string;
-    zoom?: number;
-    frameWidthMm?: number;
-    frameHeightMm?: number;
-    translateXMm?: number;
-    translateYMm?: number;
-    // Decoupled "crop window + free image layer" model (Figma-style): the frame is a fixed
-    // crop window and the image is an absolutely-positioned layer inside it with its own
-    // size (imgWidthMm) and offset (imgLeftMm/imgTopMm). Resizing the frame then crops
-    // rather than rescaling the photo. When these are set the coupled object-fit/zoom props
-    // are cleared.
-    imgWidthMm?: number;
-    imgLeftMm?: number;
-    imgTopMm?: number;
-  },
-): void {
+
+/** CSS properties the human property panel may set inline on an element (safe subset). */
+const PROP_WHITELIST = new Set([
+  "font-size",
+  "font-family",
+  "font-weight",
+  "font-style",
+  "color",
+  "text-align",
+  "text-transform",
+  "line-height",
+  "letter-spacing",
+  "background",
+  "background-color",
+  "border",
+  "border-width",
+  "border-style",
+  "border-color",
+  "border-radius",
+  "width",
+  "height",
+  "padding",
+  "opacity",
+]);
+
+/** A CSS value is safe if it can't break out of the style attribute or smuggle a URL. */
+function safeCssValue(v: string): boolean {
+  return !/[;{}<>]/.test(v) && !/url\s*\(/i.test(v) && !/expression\s*\(/i.test(v) && v.length <= 120;
+}
+
+/**
+ * Set whitelisted inline style properties on a tagged element (the contextual property
+ * panel: font, color, weight, align, background, border, corners, width…). An empty-string
+ * value removes that property (revert to the stylesheet default).
+ */
+export function setElementProps(project: Project, pcId: string, props: Record<string, string>): void {
   const { dom } = loadDom(project);
-  const img = dom.document.querySelector(`img[data-image-id="${imageId}"]`);
-  if (!img) throw new Error(`page.html has no <img data-image-id="${imageId}">`);
-
-  const layered = style.imgWidthMm !== undefined || style.imgLeftMm !== undefined || style.imgTopMm !== undefined;
-  const frame = (img as any).parentElement;
-
-  if (layered) {
-    // Image becomes a free layer inside the crop window: absolute-positioned, sized by width
-    // (height auto keeps aspect), offset by left/top. Clear the old coupled props.
-    if (frame) {
-      mergeStyle(frame, (existing) => {
-        const pos = existing.get("position");
-        if (!pos || pos === "static") existing.set("position", "relative");
-        existing.set("overflow", "hidden");
-      });
+  const el = dom.document.querySelector(`[data-pc-id="${pcId}"]`);
+  if (!el) throw new Error(`No element with data-pc-id="${pcId}"`);
+  mergeStyle(el, (existing) => {
+    for (const [rawKey, rawVal] of Object.entries(props)) {
+      const key = rawKey.trim().toLowerCase();
+      if (!PROP_WHITELIST.has(key)) throw new Error(`Property not allowed: ${key}`);
+      const val = String(rawVal).trim();
+      if (!val) {
+        existing.delete(key);
+        continue;
+      }
+      if (!safeCssValue(val)) throw new Error(`Unsafe value for ${key}`);
+      existing.set(key, val);
     }
-    mergeStyle(img, (existing) => {
-      existing.delete("object-fit");
-      existing.delete("object-position");
-      existing.delete("transform");
-      existing.set("position", "absolute");
-      existing.set("max-width", "none");
-      existing.set("height", "auto");
-      if (style.imgWidthMm !== undefined) existing.set("width", `${Math.max(1, Number(style.imgWidthMm)).toFixed(1)}mm`);
-      if (style.imgLeftMm !== undefined) existing.set("left", `${Number(style.imgLeftMm).toFixed(1)}mm`);
-      if (style.imgTopMm !== undefined) existing.set("top", `${Number(style.imgTopMm).toFixed(1)}mm`);
-    });
-  } else {
-    mergeStyle(img, (existing) => {
-      existing.set("object-fit", "cover");
-      if (style.objectPosition) {
-        if (!/^[\d.]+%\s+[\d.]+%$/.test(style.objectPosition)) throw new Error("objectPosition must be 'X% Y%'");
-        existing.set("object-position", style.objectPosition);
-      }
-      if (style.zoom !== undefined) {
-        const z = Math.min(Math.max(Number(style.zoom), 1), 3);
-        if (z === 1) existing.delete("transform");
-        else existing.set("transform", `scale(${z.toFixed(2)})`);
-      }
+  });
+  save(project, dom.document);
+}
+
+export interface ImageGeometry {
+  frame?: { leftMm: number; topMm: number; widthMm: number; heightMm: number };
+  layer?: { widthMm: number; leftMm: number; topMm: number };
+}
+
+/**
+ * Atomic geometry write for a compiled image (data-img-frame + inner data-image-id layer;
+ * see docs/layer-model.md). `frame` positions/sizes the crop window; `layer` positions/sizes
+ * the photo inside it (height stays auto = aspect-locked). Either may be omitted.
+ */
+export function setImageGeometry(project: Project, imageId: string, geom: ImageGeometry): void {
+  const { dom } = loadDom(project);
+  const img: any = dom.document.querySelector(`img[data-image-id="${imageId}"]`);
+  if (!img) throw new Error(`page.html has no <img data-image-id="${imageId}">`);
+  const frame: any = dom.document.querySelector(`[data-img-frame="${imageId}"]`) ?? img.parentElement;
+
+  const clampPos = (v: number) => Math.max(-NUDGE_LIMIT_MM, Math.min(NUDGE_LIMIT_MM * 2, Number(v) || 0));
+  const clampSize = (v: number) => Math.max(FRAME_MIN_MM, Math.min(FRAME_MAX_MM, Number(v) || 0));
+
+  if (geom.frame && frame) {
+    mergeStyle(frame, (e) => {
+      e.set("position", "absolute");
+      e.set("left", `${clampPos(geom.frame!.leftMm).toFixed(1)}mm`);
+      e.set("top", `${clampPos(geom.frame!.topMm).toFixed(1)}mm`);
+      e.set("width", `${clampSize(geom.frame!.widthMm).toFixed(1)}mm`);
+      e.set("height", `${clampSize(geom.frame!.heightMm).toFixed(1)}mm`);
+      e.set("overflow", "hidden");
     });
   }
-
-  // Frame = the crop container that clips the image (its direct parent by convention).
-  const touchesFrame =
-    style.frameWidthMm !== undefined ||
-    style.frameHeightMm !== undefined ||
-    style.translateXMm !== undefined ||
-    style.translateYMm !== undefined;
-  if (frame && touchesFrame) {
-    const clampDim = (v: number) => Math.max(FRAME_MIN_MM, Math.min(FRAME_MAX_MM, Number(v) || 0));
-    const clampOff = (v: number) => Math.max(-NUDGE_LIMIT_MM, Math.min(NUDGE_LIMIT_MM, Number(v) || 0));
-    mergeStyle(frame, (existing) => {
-      if (style.frameWidthMm !== undefined) {
-        existing.set("width", `${clampDim(style.frameWidthMm).toFixed(1)}mm`);
-        existing.set("overflow", "hidden");
-      }
-      if (style.frameHeightMm !== undefined) {
-        existing.set("height", `${clampDim(style.frameHeightMm).toFixed(1)}mm`);
-        existing.set("overflow", "hidden");
-      }
-      if (style.translateXMm !== undefined || style.translateYMm !== undefined) {
-        const x = clampOff(style.translateXMm ?? 0);
-        const y = clampOff(style.translateYMm ?? 0);
-        if (x === 0 && y === 0) existing.delete("transform");
-        else existing.set("transform", `translate(${x.toFixed(1)}mm, ${y.toFixed(1)}mm)`);
-      }
+  if (geom.layer) {
+    mergeStyle(img, (e) => {
+      e.set("position", "absolute");
+      e.set("max-width", "none");
+      e.set("height", "auto");
+      // Photo may extend well past the frame (that's the crop) — allow a generous range.
+      const w = Math.max(1, Math.min(FRAME_MAX_MM * 4, Number(geom.layer!.widthMm) || 1));
+      e.set("width", `${w.toFixed(1)}mm`);
+      e.set("left", `${(Number(geom.layer!.leftMm) || 0).toFixed(1)}mm`);
+      e.set("top", `${(Number(geom.layer!.topMm) || 0).toFixed(1)}mm`);
     });
   }
   save(project, dom.document);

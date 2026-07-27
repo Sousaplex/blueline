@@ -113,11 +113,13 @@ export async function runReview(
     "",
     "MEASURED whitespace facts (computed from the rendered pixels — trust these over your own estimate):",
     describeWhitespace(whitespace),
-    "Any measured interior empty band taller than ~12% of the page is dead space unless it is",
-    "unmistakably deliberate framing; name it in issues with a concrete layout fix.",
+    settings.autoPages
+      ? "This is a FLOWING multi-page document: whitespace at the BOTTOM of a page before a deliberate break is correct typography, not dead space — do not flag it. Flag only MID-content dead bands and bad breaks (a heading stranded at a page bottom, a table row or figure/caption split across pages)."
+      : "Any measured interior empty band taller than ~12% of the page is dead space unless it is unmistakably deliberate framing; name it in issues with a concrete layout fix.",
     "",
-    `Required format: ${settings.pageSize} ${settings.orientation}, EXACTLY ${settings.pages} page(s).`,
-    `The rendered proof has ${pages.length} page(s) — a wrong page count is an automatic revise.`,
+    settings.autoPages
+      ? `Required format: ${settings.pageSize} ${settings.orientation}, page count AUTO. The proof has ${pages.length} page(s) — do NOT judge the number of pages; judge only that the content flows cleanly with no bad breaks.`
+      : `Required format: ${settings.pageSize} ${settings.orientation}, EXACTLY ${settings.pages} page(s). The rendered proof has ${pages.length} page(s) — a wrong page count is an automatic revise.`,
     `This is review round ${thisRun + 1} of at most ${config.reviewer.maxRounds} for this run (round ${completed + 1} in the project's history).`,
     ...(styleSpec
       ? [
@@ -161,7 +163,8 @@ export async function runReview(
   }
 
   // Hard gate: the wrong page count can never pass, no matter what the model says.
-  if (result.verdict === "pass" && pages.length !== settings.pages) {
+  // Skipped in auto-pages mode, where the count is content-driven by design.
+  if (!settings.autoPages && result.verdict === "pass" && pages.length !== settings.pages) {
     result.verdict = "revise";
     result.issues = [
       ...(result.issues ?? []),
@@ -179,7 +182,9 @@ export async function runReview(
   }
 
   // Hard gate: a giant interior dead band can never pass, no matter what the model says.
-  const catastrophic = catastrophicBands(whitespace);
+  // Skipped in auto-pages mode: a flowing document legitimately leaves the bottom of a page
+  // empty before a deliberate break, which this poster-oriented heuristic can't distinguish.
+  const catastrophic = settings.autoPages ? [] : catastrophicBands(whitespace);
   if (result.verdict === "pass" && catastrophic.length) {
     result.verdict = "revise";
     result.issues = [

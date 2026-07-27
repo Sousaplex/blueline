@@ -2,8 +2,8 @@
 // process, and provides true-WYSIWYG PDF export via printToPDF — the same
 // Chromium that renders the preview window.
 import { spawn, type ChildProcess } from "node:child_process";
-import { appendFileSync, cpSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { dirname, extname, join, resolve } from "node:path";
 import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
 import { keychainAvailable, loadCredentials, migrateEnvFile, saveCredentials } from "./credentials";
 import electronUpdater from "electron-updater";
@@ -41,6 +41,8 @@ const childEnv = (): NodeJS.ProcessEnv => ({
   ...process.env,
   ...(BLUELINE_HOME ? { BLUELINE_HOME } : {}),
   ...(PACKAGED ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
+  // Stamp archives (.blueline/.blueproject manifests) with the app version.
+  BLUELINE_VERSION: app.getVersion(),
   // Decrypt keychain-held API keys straight into the bridge child's env — the
   // bridge reads process.env, so no plaintext .env is needed in the packaged app.
   ...loadCredentials(),
@@ -59,19 +61,38 @@ const TSX_CLI = join(TOOLKIT_DIR, "node_modules", "tsx", "dist", "cli.mjs");
 /** Packaged first-run: make sure Playwright's Chromium exists (no-op when present).
  *  IMPORTANT: never open/close a temporary window for this — dropping to zero windows
  *  mid-startup fires window-all-closed and quits the app. Reuse the main window. */
+function chromiumInstalled(): boolean {
+  try {
+    const base = process.env.PLAYWRIGHT_BROWSERS_PATH || join(app.getPath("home"), "Library", "Caches", "ms-playwright");
+    return existsSync(base) && readdirSync(base).some((d) => d.startsWith("chromium"));
+  } catch {
+    return false;
+  }
+}
 async function ensureChromium(): Promise<void> {
   if (!PACKAGED) return;
-  smokeLog("[startup] ensuring chromium");
-  await new Promise<void>((resolvePromise, reject) => {
-    const child = spawn(
-      process.execPath,
-      [join(TOOLKIT_DIR, "node_modules", "playwright", "cli.js"), "install", "chromium"],
-      { cwd: TOOLKIT_DIR, stdio: "inherit", env: childEnv() },
-    );
-    child.on("exit", (code) => (code === 0 ? resolvePromise() : reject(new Error(`playwright install exited ${code}`))));
-    child.on("error", reject);
-  });
-  smokeLog("[startup] chromium ready");
+  // Skip the ~1s no-op spawn on every launch once Chromium is cached.
+  if (chromiumInstalled()) {
+    smokeLog("[startup] chromium present");
+    return;
+  }
+  smokeLog("[startup] installing chromium (first run)");
+  try {
+    await new Promise<void>((resolvePromise, reject) => {
+      const child = spawn(
+        process.execPath,
+        [join(TOOLKIT_DIR, "node_modules", "playwright", "cli.js"), "install", "chromium"],
+        { cwd: TOOLKIT_DIR, stdio: "inherit", env: childEnv() },
+      );
+      child.on("exit", (code) => (code === 0 ? resolvePromise() : reject(new Error(`playwright install exited ${code}`))));
+      child.on("error", reject);
+    });
+    smokeLog("[startup] chromium ready");
+  } catch (err) {
+    // Non-fatal: an offline first launch shouldn't brick the app — it opens, and the first
+    // render/export surfaces a clear error instead of a hung splash.
+    smokeLog("[startup] chromium install failed (offline?): " + (err instanceof Error ? err.message : String(err)));
+  }
 }
 
 const SPLASH_URL =
@@ -136,7 +157,14 @@ async function exportPdf(targetPath?: string): Promise<string | null> {
     outPath = picked.filePath;
   }
 
-  const printWin = new BrowserWindow({ show: false, webPreferences: { offscreen: true } });
+  // Renders agent-authored HTML: OS-sandboxed, isolated, no popups. The page's own
+  // scripts are already blocked by the bridge's CSP on /files/* (script-src 'none');
+  // executeJavaScript below is embedder-injected and unaffected by that CSP.
+  const printWin = new BrowserWindow({
+    show: false,
+    webPreferences: { offscreen: true, sandbox: true, contextIsolation: true },
+  });
+  printWin.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   try {
     await printWin.loadURL(`${BRIDGE_URL}/files/page.html`);
     // Wait for images to DECODE (webp decodes lazily and would otherwise drop from the
@@ -199,7 +227,9 @@ app.whenReady().then(async () => {
       },
     });
     mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-      void shell.openExternal(url);
+      // Web links only. file:// or custom schemes (macOS hands those to whatever app
+      // registered them) must never be launchable by rendered/agent content.
+      if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
       return { action: "deny" };
     });
     await mainWindow.loadURL(SPLASH_URL);
@@ -241,7 +271,12 @@ app.whenReady().then(async () => {
       const toRenderer = (channel: string, payload: unknown) => {
         if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
       };
-      autoUpdater.on("error", (e) => console.log("[updater] error:", String(e)));
+      // Surface errors to the UI — console.log is invisible in a packaged app, so a failed
+      // download/install used to look like "nothing happened".
+      autoUpdater.on("error", (e) => {
+        console.log("[updater] error:", String(e));
+        toRenderer("update-error", { message: e instanceof Error ? e.message : String(e) });
+      });
       autoUpdater.on("update-available", (i) => {
         console.log("[updater] update available:", i.version);
         toRenderer("update-available", { version: i.version });
@@ -251,9 +286,34 @@ app.whenReady().then(async () => {
         console.log("[updater] downloaded:", i.version);
         toRenderer("update-downloaded", { version: i.version });
       });
-      ipcMain.handle("update-download", () => autoUpdater.downloadUpdate());
-      ipcMain.handle("update-install", () => autoUpdater.quitAndInstall());
-      autoUpdater.checkForUpdates().catch((e) => console.log("[updater] check failed:", String(e)));
+      ipcMain.handle("update-download", async () => {
+        try {
+          await autoUpdater.downloadUpdate();
+        } catch (e) {
+          toRenderer("update-error", { message: e instanceof Error ? e.message : String(e) });
+        }
+      });
+      ipcMain.handle("update-install", () => {
+        // Squirrel.Mac can only swap an app that lives in /Applications. Running from the DMG
+        // or ~/Downloads is the #1 cause of "clicked Restart, app just closed, nothing changed".
+        if (process.platform === "darwin" && !app.isInApplicationsFolder()) {
+          toRenderer("update-error", {
+            message:
+              "Blueline must be in your Applications folder to update. Quit, drag Blueline into Applications, reopen from there, then update.",
+          });
+          return;
+        }
+        try {
+          // isForceRunAfter = true so the app RELAUNCHES after installing (default doesn't).
+          autoUpdater.quitAndInstall(false, true);
+        } catch (e) {
+          toRenderer("update-error", { message: e instanceof Error ? e.message : String(e) });
+        }
+      });
+      autoUpdater.checkForUpdates().catch((e) => {
+        console.log("[updater] check failed:", String(e));
+        toRenderer("update-error", { message: String(e) });
+      });
     }
   } catch (err) {
     smokeLog("[blueline] startup failed: " + String(err));
@@ -277,8 +337,46 @@ ipcMain.handle("set-api-keys", async (_e, keys: Record<string, string>): Promise
 ipcMain.handle("keychain-available", () => keychainAvailable());
 
 ipcMain.handle("export-pdf", async () => exportPdf());
+// Save arbitrary text (session export JSON/JSONL) via a native Save dialog, then return the path.
+ipcMain.handle("save-text-file", async (_e, defaultName: string, content: string) => {
+  const safe = String(defaultName).replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 200) || "blueline-export.txt";
+  const picked = await dialog.showSaveDialog(mainWindow!, {
+    defaultPath: join(app.getPath("downloads"), safe),
+  });
+  if (picked.canceled || !picked.filePath) return null;
+  writeFileSync(picked.filePath, String(content));
+  return picked.filePath;
+});
+// Save a binary blob (a .blueline/.blueproject archive, base64) via a native Save dialog.
+ipcMain.handle("save-binary-file", async (_e, defaultName: string, base64: string) => {
+  const safe = String(defaultName).replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 200) || "export.blueline";
+  const picked = await dialog.showSaveDialog(mainWindow!, { defaultPath: join(app.getPath("downloads"), safe) });
+  if (picked.canceled || !picked.filePath) return null;
+  writeFileSync(picked.filePath, Buffer.from(String(base64), "base64"));
+  return picked.filePath;
+});
+// Open a .blueline/.blueproject archive via a native Open dialog; returns {name, base64}.
+ipcMain.handle("open-archive-file", async () => {
+  const picked = await dialog.showOpenDialog(mainWindow!, {
+    properties: ["openFile"],
+    filters: [{ name: "Blueline", extensions: ["blueline", "blueproject"] }],
+  });
+  if (picked.canceled || !picked.filePaths[0]) return null;
+  const p = picked.filePaths[0];
+  return { name: p.split("/").pop(), base64: readFileSync(p).toString("base64") };
+});
 ipcMain.handle("reveal-in-finder", (_e, path: string) => shell.showItemInFolder(path));
-ipcMain.handle("open-path", (_e, path: string) => shell.openPath(path));
+// openPath LAUNCHES things (an .app bundle path executes it). The renderer only ever needs
+// to open exported documents/images or reveal folders — allowlist exactly that.
+const SAFE_OPEN_EXT = new Set([".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".html", ".md", ".txt"]);
+ipcMain.handle("open-path", (_e, path: string) => {
+  const p = String(path);
+  if (!existsSync(p)) return "not found";
+  if (/\.app(\/|$)/i.test(p)) return "refused";
+  const isDir = statSync(p).isDirectory();
+  if (!isDir && !SAFE_OPEN_EXT.has(extname(p).toLowerCase())) return "refused";
+  return shell.openPath(p);
+});
 
 ipcMain.handle("choose-directory", async () => {
   const picked = await dialog.showOpenDialog(mainWindow!, {

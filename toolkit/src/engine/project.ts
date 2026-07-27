@@ -12,7 +12,8 @@ export type DocType = (typeof DOC_TYPES)[number];
 export interface PageSettings {
   pageSize: string; // "A4" | "Letter" | "Slide 16:9" | "Custom" | …
   orientation: "portrait" | "landscape";
-  pages: number; // target page count — enforced by the reviewer
+  pages: number; // target page count — enforced by the reviewer (ignored when autoPages)
+  autoPages?: boolean; // let the content decide how many pages — reviewer skips the count gate
   widthMm: number | null; // Custom size only
   heightMm: number | null;
   docType?: string; // genre/intent (DOC_TYPES) — shapes layout guidance, NOT size. meta() always fills it.
@@ -52,7 +53,7 @@ export interface ProjectMeta {
   settings: PageSettings;
 }
 
-export const DEFAULT_SETTINGS: PageSettings = { pageSize: "A4", orientation: "portrait", pages: 1, widthMm: null, heightMm: null, docType: "one-pager" };
+export const DEFAULT_SETTINGS: PageSettings = { pageSize: "A4", orientation: "portrait", pages: 1, autoPages: false, widthMm: null, heightMm: null, docType: "one-pager" };
 
 /** Clamp a custom dimension to something a printer/screen could plausibly want. */
 function clampDim(v: unknown): number | null {
@@ -159,6 +160,7 @@ export class Project {
         pageSize: stored.settings?.pageSize?.trim() || DEFAULT_SETTINGS.pageSize,
         orientation: stored.settings?.orientation === "landscape" ? "landscape" : "portrait",
         pages: Math.max(1, Math.min(24, Number(stored.settings?.pages) || DEFAULT_SETTINGS.pages)),
+        autoPages: stored.settings?.autoPages === true,
         widthMm: clampDim(stored.settings?.widthMm),
         heightMm: clampDim(stored.settings?.heightMm),
         docType: (DOC_TYPES as readonly string[]).includes(stored.settings?.docType ?? "")

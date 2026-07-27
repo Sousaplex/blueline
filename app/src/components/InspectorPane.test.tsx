@@ -39,6 +39,8 @@ const common = {
   onDeleteHandled: () => {},
   onDeselect: () => {},
   onAlign: () => {},
+  applyProps: () => {},
+  setPosition: () => {},
 };
 
 describe("InspectorPane", () => {

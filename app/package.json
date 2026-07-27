@@ -1,6 +1,8 @@
 {
   "name": "blueline-app",
-  "version": "0.20.3",
+  "version": "0.27.0",
+  "description": "AI design studio for print marketing collateral",
+  "author": "Blueline",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,13 +12,15 @@
     "electron:compile": "esbuild electron/main.ts electron/preload.ts --bundle --platform=node --external:electron --outdir=dist-electron --format=cjs --out-extension:.js=.cjs",
     "electron:dev": "npm run electron:compile && electron .",
     "electron:app": "npm run build && npm run electron:compile && electron .",
-    "electron:smoke": "npm run build && npm run electron:compile && PRESSCHECK_SMOKE=1 electron .",
+    "electron:smoke": "npm run build && npm run electron:compile && BLUELINE_SMOKE=1 electron .",
     "package": "npm run build && npm run electron:compile && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac",
     "package:signed": "npm run build && npm run electron:compile && electron-builder --mac",
     "release:publish": "npm run build && npm run electron:compile && electron-builder --mac --publish always",
     "test": "vitest run"
   },
-  "dependencies": {
+  "//deps": "All build-time only: renderer deps are Vite-bundled into dist/, electron-updater is esbuild-bundled into main.cjs, shadcn is a codegen CLI, and the bridge child uses toolkit/node_modules — so NOTHING here is needed as app/node_modules at runtime. Keeping them in devDependencies stops electron-builder from shipping ~137MB of them.",
+  "dependencies": {},
+  "devDependencies": {
     "@codemirror/lang-html": "^6.4.11",
     "@codemirror/theme-one-dark": "^6.1.3",
     "@fontsource-variable/geist": "^5.3.0",
@@ -36,9 +40,7 @@
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "^4.3.3",
-    "tw-animate-css": "^1.4.0"
-  },
-  "devDependencies": {
+    "tw-animate-css": "^1.4.0",
     "@electron/notarize": "^3.1.1",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^7.0.0",
@@ -65,13 +67,13 @@
   "build": {
     "appId": "com.blueline.app",
     "productName": "Blueline",
-    "asar": false,
+    "asar": true,
     "directories": {
       "output": "release"
     },
     "files": [
       "dist/**",
-      "dist-electron/**",
+      "dist-electron/*.cjs",
       "package.json"
     ],
     "extraResources": [

@@ -1,11 +1,13 @@
 import { Download, Play, RefreshCw, Square, Timer } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import logo from "./assets/logo.png";
-import { AgentPane, type FeedItem } from "./components/AgentPane";
+import { type FeedItem } from "./components/AgentPane";
+import { ChatFab } from "./components/ChatFab";
 import { DocumentTabs } from "./components/DocumentTabs";
 import { AboutDialog } from "./components/AboutDialog";
 import { HomeScreen } from "./components/HomeScreen";
 import { InspectorPane } from "./components/InspectorPane";
+import { LayersPanel } from "./components/LayersPanel";
 import { LeftPane } from "./components/LeftPane";
 import { LibrarySheet } from "./components/LibrarySheet";
 import { NewProjectDialog } from "./components/NewProjectDialog";
@@ -21,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { currentTheme } from "@/lib/theme";
 import {
   BrowserEngineClient,
+  type ContextUsage,
   type EngineEvent,
   type ProjectListing,
   type ProjectState,
@@ -28,7 +31,7 @@ import {
   type SetupState,
   type SystemEvent,
 } from "./engine-client";
-import type { AlignOp, SelectionInfo } from "./selection";
+import type { AlignOp, LayerItem, SelectionInfo } from "./selection";
 
 /** Fold one wire event into the feed (used for both live events and replay). */
 function applyEvent(feed: FeedItem[], event: EngineEvent): FeedItem[] {
@@ -86,11 +89,16 @@ export function App() {
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [setup, setSetup] = useState<SetupState | null>(null);
   const [systemFeed, setSystemFeed] = useState<SystemEvent[]>([]);
+  const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
   const [selection, setSelection] = useState<SelectionInfo | null>(null);
   const [deleteRequestIds, setDeleteRequestIds] = useState<string[] | null>(null);
   const [variantsOpen, setVariantsOpen] = useState(false);
   const [seriesOpen, setSeriesOpen] = useState(false);
   const alignFn = useRef<((op: AlignOp) => void) | null>(null);
+  const applyPropsFn = useRef<((id: string, props: Record<string, string>) => void) | null>(null);
+  const setPositionFn = useRef<((id: string, x: number, y: number, marginTop: number | null) => void) | null>(null);
+  const selectLayerFn = useRef<((id: string) => void) | null>(null);
+  const [layers, setLayers] = useState<LayerItem[]>([]);
   const clearSelectionFn = useRef<(() => void) | null>(null);
   const refreshTimer = useRef<number | undefined>(undefined);
   const currentSlug = useRef<string | null>(null);
@@ -109,9 +117,14 @@ export function App() {
 
   const loadFeed = useCallback(
     async (slug: string | null) => {
-      if (!slug) return setFeed([]);
+      if (!slug) {
+        setContextUsage(null);
+        return setFeed([]);
+      }
       const events = await client.getFeed(slug);
       setFeed(events.reduce(applyEvent, [] as FeedItem[]));
+      // Seed the context meter from the live session (context_usage events aren't buffered).
+      void client.getSessionStats(slug).then((s) => setContextUsage(s.contextUsage)).catch(() => setContextUsage(null));
     },
     [client],
   );
@@ -130,6 +143,11 @@ export function App() {
           currentSlug.current = event.project;
           setRunStates(event.runStates);
           setFeed(event.replay.reduce(applyEvent, [] as FeedItem[]));
+          if (event.project) {
+            void client.getSessionStats(event.project).then((s) => setContextUsage(s.contextUsage)).catch(() => {});
+          } else {
+            setContextUsage(null);
+          }
           void refresh();
           void client.listProjects().then(setProjects);
           break;
@@ -141,6 +159,11 @@ export function App() {
         case "run_cost":
           if (!event.project || event.project === currentSlug.current) {
             setFeed((f) => applyEvent(f, event));
+          }
+          break;
+        case "context_usage":
+          if (!event.project || event.project === currentSlug.current) {
+            setContextUsage({ tokens: event.tokens, contextWindow: event.contextWindow, percent: event.percent });
           }
           break;
         case "run_state":
@@ -200,6 +223,25 @@ export function App() {
     [client],
   );
 
+  const exportArchive = useCallback(
+    (kind: "file" | "project") => {
+      const slug = currentSlug.current;
+      if (!slug) return;
+      void client
+        .exportArchive(slug, kind)
+        .then(({ path, filename }) => {
+          if (path) {
+            setFeed((f) => [...f, { kind: "export", path, at: Date.now() }]);
+            toast(kind === "project" ? "Project exported" : "Document exported", { description: filename });
+          } else {
+            toast("Downloaded", { description: filename });
+          }
+        })
+        .catch((e) => toast.error("Export failed", { description: String(e) }));
+    },
+    [client],
+  );
+
   const [aboutOpen, setAboutOpen] = useState(false);
   // In the packaged app the OS title bar is hidden (titleBarStyle: hiddenInset), so
   // mark the root frameless — global CSS then makes the top bars draggable and pads
@@ -240,6 +282,11 @@ export function App() {
           action: { label: "Restart now", onClick: () => void bl.installUpdate() },
         });
       }),
+      // Failures used to be silent (console-only) — now the user sees why nothing happened.
+      bl.onUpdateError?.((message) => {
+        toast.dismiss("bl-update-dl");
+        toast.error("Update failed", { description: message, duration: 12000 });
+      }) ?? (() => {}),
     ];
     return () => offs.forEach((off) => off());
   }, []);
@@ -370,6 +417,8 @@ export function App() {
         onNewSeries={() => setSeriesOpen(true)}
         onBranch={() => void client.forkProject(project.slug!).catch((e) => setFeed((f) => [...f, { kind: "error", message: String(e), at: Date.now() }]))}
         onNewProject={() => setNewProjectOpen(true)}
+        onExportFile={() => exportArchive("file")}
+        onExportProject={() => exportArchive("project")}
       />
       <VariantsDialog client={client} slug={project.slug} open={variantsOpen} onOpenChange={setVariantsOpen} />
       <SeriesDialog
@@ -391,7 +440,11 @@ export function App() {
           onViewRound={setViewRound}
           onSelect={setSelection}
           onRequestDelete={setDeleteRequestIds}
+          onLayers={setLayers}
           registerAlign={(fn) => (alignFn.current = fn)}
+          registerApplyProps={(fn) => (applyPropsFn.current = fn)}
+          registerSetPosition={(fn) => (setPositionFn.current = fn)}
+          registerSelectLayer={(fn) => (selectLayerFn.current = fn)}
           registerClearSelection={(fn) => (clearSelectionFn.current = fn)}
         />
         <div className="flex h-full min-h-0 flex-col overflow-hidden border-l">
@@ -408,12 +461,47 @@ export function App() {
               setSelection(null);
             }}
             onAlign={(op) => alignFn.current?.(op)}
+            applyProps={(id, props) => applyPropsFn.current?.(id, props)}
+            setPosition={(id, x, y, mt) => setPositionFn.current?.(id, x, y, mt)}
           />
-          <div className="min-h-0 flex-1">
-            <AgentPane feed={feed} systemFeed={systemFeed} running={running} onChat={(t) => void actions.chat(t)} />
+          <div className="min-h-0 flex-1 border-t">
+            <LayersPanel
+              layers={layers}
+              selectedId={selection && selection.kind !== "multi" ? selection.id : null}
+              client={client}
+              onSelect={(id) => selectLayerFn.current?.(id)}
+              onReordered={() => {
+                // Drop the canvas selection so the frozen iframe reloads with the new order
+                // (and the Layers panel re-emits). The ws files_changed already bumped cacheKey.
+                clearSelectionFn.current?.();
+                setSelection(null);
+              }}
+            />
           </div>
         </div>
       </div>
+      <ChatFab
+        feed={feed}
+        systemFeed={systemFeed}
+        running={running}
+        onChat={(t) => void actions.chat(t)}
+        contextUsage={contextUsage}
+        onExportSession={() => {
+          const slug = project?.slug;
+          if (!slug) return;
+          void client
+            .exportSession(slug, "json")
+            .then(({ path }) => {
+              if (path) {
+                setFeed((f) => [...f, { kind: "export", path, at: Date.now() }]);
+                toast("Conversation exported", { description: path.split("/").pop() });
+              } else {
+                toast("Conversation downloaded", { description: `blueline-session-${slug}.json` });
+              }
+            })
+            .catch((e) => toast.error("Export failed", { description: String(e) }));
+        }}
+      />
     </div>
   );
 }

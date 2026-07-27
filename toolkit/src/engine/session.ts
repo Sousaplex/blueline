@@ -1,9 +1,13 @@
+import { mkdir, readFile, writeFile, access } from "node:fs/promises";
+import { resolve, sep } from "node:path";
 import {
   DefaultResourceLoader,
   ModelRuntime,
   SessionManager,
   SettingsManager,
   createAgentSession,
+  createEditToolDefinition,
+  createWriteToolDefinition,
   getAgentDir,
 } from "@earendil-works/pi-coding-agent";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
@@ -13,9 +17,60 @@ import { buildSystemPrompt } from "./prompt.ts";
 import { PlaywrightBackend, type RenderBackend } from "./render.ts";
 import { buildPresscheckTools } from "./tools.ts";
 
-/** Built-in Pi tools the designer may use. Deliberately no bash. */
+/** Built-in Pi tools the designer may use. Deliberately no bash. write/edit are enabled but
+ *  OVERRIDDEN below with project-confined versions (Pi resolves custom tools over builtins by
+ *  name), so a prompt-injected "write ~/Library/LaunchAgents/x" can't escape the project. */
 const BUILTIN_TOOLS = ["read", "write", "edit", "grep", "find", "ls"];
-const CUSTOM_TOOL_NAMES = ["render", "review", "gen_images", "use_image", "gen_qr", "web_fetch", "web_search", "set_format"];
+
+/**
+ * Reject any path that resolves outside `root`. Lexical (no realpath): the agent has no bash
+ * and can't create symlinks, and lexical matching avoids the macOS /tmp→/private/tmp mismatch
+ * that a realpath'd root would cause against Pi's cwd-relative (non-realpath'd) resolution.
+ */
+export function confineToRoot(root: string, p: string): string {
+  const rootAbs = resolve(root);
+  const abs = resolve(p);
+  if (abs !== rootAbs && !abs.startsWith(rootAbs + sep)) {
+    throw new Error(`Refused: the agent may only write inside its project directory, not ${p}`);
+  }
+  return abs;
+}
+
+/** Project-confined fs operations for Pi's write/edit tools. Returned loosely-typed to unify
+ *  with the custom-tool array (the definition generics differ only in render-arg variance). */
+function confinedWriteEditTools(projectDir: string): any[] {
+  const g = (p: string) => confineToRoot(projectDir, p);
+  const write = createWriteToolDefinition(projectDir, {
+    operations: {
+      writeFile: (p, content) => writeFile(g(p), content),
+      mkdir: async (dir) => {
+        await mkdir(g(dir), { recursive: true });
+      },
+    },
+  });
+  const edit = createEditToolDefinition(projectDir, {
+    operations: {
+      readFile: (p) => readFile(g(p)),
+      writeFile: (p, content) => writeFile(g(p), content),
+      access: (p) => access(g(p)),
+    },
+  });
+  return [write, edit];
+}
+const CUSTOM_TOOL_NAMES = [
+  "render",
+  "review",
+  "gen_images",
+  "use_image",
+  "gen_qr",
+  "web_fetch",
+  "fetch_image",
+  "web_search",
+  "set_format",
+  "write_source",
+  "write_brand",
+  "organize_sources",
+];
 
 export interface BluelineSession {
   session: AgentSession;
@@ -85,7 +140,8 @@ export async function createBluelineSession(opts: CreateSessionOptions): Promise
     modelRuntime,
     thinkingLevel: config.designer.thinkingLevel ?? "medium",
     tools: [...BUILTIN_TOOLS, ...CUSTOM_TOOL_NAMES],
-    customTools: buildPresscheckTools(project, backend, config),
+    // The confined write/edit come LAST so they override Pi's unconfined builtins by name.
+    customTools: [...buildPresscheckTools(project, backend, config), ...confinedWriteEditTools(project.dir)],
     resourceLoader,
     settingsManager,
     sessionManager: SessionManager.create(project.dir),

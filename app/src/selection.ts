@@ -13,6 +13,14 @@ export type SelectionInfo =
       ids: string[]; // every selected data-pc-id, primary first
     };
 
+/** One row in the Layers panel — a manipulable element in the live document. */
+export interface LayerItem {
+  id: string; // data-pc-id or data-image-id
+  kind: "text" | "image" | "box";
+  label: string; // id or a text snippet
+  z: string; // computed z-index ("auto" when unset)
+}
+
 /** Alignment operations the Inspector can run on the selection (Figma-style).
  *  One element aligns to the page; two or more align within the selection box. */
 export type AlignOp = "left" | "centerH" | "right" | "top" | "centerV" | "bottom" | "distH" | "distV";

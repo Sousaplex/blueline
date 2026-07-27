@@ -3,15 +3,26 @@ import { search, searchKeymap } from "@codemirror/search";
 import { keymap } from "@codemirror/view";
 import { oneDark } from "@codemirror/theme-one-dark";
 import CodeMirror from "@uiw/react-codemirror";
-import { ChevronLeft, ChevronRight, Code2, Crop, Grid3x3, Heading, History, Loader2, Maximize, Minus, MousePointerClick, Move, Plus, Redo2, RefreshCw, Save, Sparkles, Square, Type, Undo2, X, ZoomIn, ZoomOut } from "lucide-react";
+import { ChevronLeft, ChevronRight, Code2, Crop, Grid3x3, Heading, History, Loader2, Maximize, Minus, MousePointerClick, Move, Plus, Redo2, RefreshCw, Save, Sparkles, Square, Trash2, Type, Undo2, X, ZoomIn, ZoomOut } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  coverLayer,
+  type FrameCtx,
+  type FrameGeom,
+  type ImgLayerGeom,
+  isCorner,
+  resizeFrame,
+  scaleContent,
+  scaleLayerWithFrame,
+  screenDeltaToMm,
+} from "@/lib/layerGeometry";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { currentTheme } from "@/lib/theme";
 import type { EngineClient, ProjectState } from "../engine-client";
-import type { AlignOp, SelectionInfo } from "../selection";
+import type { AlignOp, LayerItem, SelectionInfo } from "../selection";
 
 type Mode = "proof" | "live" | "code";
 
@@ -68,7 +79,11 @@ export function PreviewPane({
   onViewRound,
   onSelect,
   onRequestDelete,
+  onLayers,
   registerAlign,
+  registerApplyProps,
+  registerSetPosition,
+  registerSelectLayer,
   registerClearSelection,
 }: {
   project: ProjectState;
@@ -80,8 +95,16 @@ export function PreviewPane({
   onViewRound: (round: number | null) => void;
   onSelect: (selection: SelectionInfo | null) => void;
   onRequestDelete: (pcIds: string[]) => void;
+  /** Emits the live document's layer list (for the Layers panel) after each iframe (re)arm. */
+  onLayers?: (layers: LayerItem[]) => void;
   /** Hands the Inspector a way to trigger alignment on the current selection. */
   registerAlign: (fn: ((op: AlignOp) => void) | null) => void;
+  /** Lets the Inspector's property panel apply inline styles to the LIVE element + persist. */
+  registerApplyProps: (fn: ((id: string, props: Record<string, string>) => void) | null) => void;
+  /** Lets the Inspector set a block's exact position (X/Y/top) live + persist. */
+  registerSetPosition?: (fn: ((id: string, x: number, y: number, marginTop: number | null) => void) | null) => void;
+  /** Lets the Layers panel select an element by id (dispatches a click in the iframe). */
+  registerSelectLayer?: (fn: ((id: string) => void) | null) => void;
   /** Lets the app drop the canvas selection (e.g. after a delete) so the frozen iframe reloads. */
   registerClearSelection: (fn: (() => void) | null) => void;
 }) {
@@ -98,10 +121,12 @@ export function PreviewPane({
   const [page, setPage] = useState(0);
   const [dirty, setDirty] = useState(false);
   const [activeImage, setActiveImage] = useState<string | null>(null);
-  // Image editing: drag mode (pan the crop vs move the box) + floating-toolbar anchor.
-  const [imgDragMode, setImgDragMode] = useState<"crop" | "move">("crop");
-  const imgDragModeRef = useRef<"crop" | "move">("crop");
-  imgDragModeRef.current = imgDragMode;
+  // Image editing (docs/layer-model.md §5): one selection, no Move/Crop toggle. Default =
+  // frame ops (body moves, corners scale, edges crop). Double-click enters CONTENT mode
+  // (drag pans the photo, corners zoom it inside the frame); Esc/click-out exits.
+  const [contentMode, setContentMode] = useState(false);
+  const contentModeRef = useRef(false);
+  contentModeRef.current = contentMode;
   // Screen-space rect of the selected image's mask frame (position:fixed coords), used to
   // draw the selection overlay + resize handles and to anchor the floating toolbar.
   const [imgTool, setImgTool] = useState<{ id: string; top: number; left: number; width: number; height: number } | null>(null);
@@ -156,8 +181,31 @@ export function PreviewPane({
 
   const selectedIds = (): string[] => (nudgeRef.current ? [nudgeRef.current.pcId, ...extraIdsRef.current] : []);
 
-  const reportBlock = (n: NudgeState, tag?: string) =>
-    onSelect({ kind: "block", id: n.pcId, tag, nudge: { x: n.x, y: n.y, marginTop: n.marginTop } });
+  /** Computed style subset the contextual property panel edits. Also carries the rendered
+   *  width (mm) and whether width is explicitly set inline (so the panel shows a real value). */
+  const readElStyles = (el: HTMLElement): Record<string, string> => {
+    const win = iframeRef.current?.contentDocument?.defaultView;
+    const cs = win ? win.getComputedStyle(el) : null;
+    const rect = el.getBoundingClientRect();
+    return {
+      fontFamily: cs?.fontFamily ?? "",
+      fontSize: cs?.fontSize ?? "",
+      fontWeight: cs?.fontWeight ?? "",
+      fontStyle: cs?.fontStyle ?? "",
+      color: cs?.color ?? "",
+      textAlign: cs?.textAlign ?? "",
+      backgroundColor: cs?.backgroundColor ?? "",
+      borderRadius: cs?.borderTopLeftRadius ?? "",
+      widthMm: (rect.width / MM_TO_PX).toFixed(1),
+      heightMm: (rect.height / MM_TO_PX).toFixed(1),
+      widthInline: el.style.width || "",
+    };
+  };
+
+  const reportBlock = (n: NudgeState, tag?: string) => {
+    const el = nudgeEl(n.pcId);
+    onSelect({ kind: "block", id: n.pcId, tag, nudge: { x: n.x, y: n.y, marginTop: n.marginTop }, styles: el ? readElStyles(el) : undefined });
+  };
 
   /** Push the current selection (single block or multi set) to the Inspector. */
   const reportSelection = () => {
@@ -180,8 +228,11 @@ export function PreviewPane({
     return bases;
   };
 
-  /** Move every selected element by (dx, dy) mm from its base; persist debounced. */
-  const applyDeltaToSelection = (bases: Map<string, Omit<NudgeState, "pcId">>, dx: number, dy: number) => {
+  /** Move every selected element by (dx, dy) mm from its base; persist debounced.
+   *  `live` (a drag frame) writes ONLY the DOM — no setNudge/onSelect, which would re-render
+   *  App + Inspector on every pointermove (60fps jank). The drag commits React state once on
+   *  release (live=false). Keyboard nudges are always live=false (low frequency). */
+  const applyDeltaToSelection = (bases: Map<string, Omit<NudgeState, "pcId">>, dx: number, dy: number, live = false) => {
     for (const [id, b] of bases) {
       const el = nudgeEl(id);
       if (!el) continue;
@@ -189,21 +240,23 @@ export function PreviewPane({
       const y = b.y + dy;
       el.style.transform = x || y ? `translate(${x.toFixed(1)}mm, ${y.toFixed(1)}mm)` : "";
     }
-    const n = nudgeRef.current;
-    if (n && bases.has(n.pcId)) {
-      const b = bases.get(n.pcId)!;
-      const next = { ...n, x: b.x + dx, y: b.y + dy };
-      nudgeRef.current = next; // sync, so rapid key-repeat bursts accumulate correctly
-      setNudge(next);
+    if (!live) {
+      const n = nudgeRef.current;
+      if (n && bases.has(n.pcId)) {
+        const b = bases.get(n.pcId)!;
+        const next = { ...n, x: b.x + dx, y: b.y + dy };
+        nudgeRef.current = next; // sync, so rapid key-repeat bursts accumulate correctly
+        setNudge(next);
+      }
+      reportSelectionRef.current();
     }
-    reportSelectionRef.current();
     window.clearTimeout(persistTimer.current);
     persistTimer.current = window.setTimeout(() => {
-      void client
-        .setElementStyles(
+      void persist(
+        client.setElementStyles(
           [...bases].map(([id, b]) => ({ pcId: id, translateX: b.x + dx, translateY: b.y + dy, marginTop: b.marginTop })),
-        )
-        .then(() => setDirty(true));
+        ),
+      );
     }, 500);
   };
   const applyDeltaRef = useRef(applyDeltaToSelection);
@@ -214,6 +267,10 @@ export function PreviewPane({
   onRequestDeleteRef.current = onRequestDelete;
 
   const clearSelections = () => {
+    // Cancel any pending debounced move-persist: without this, a drag/nudge followed within
+    // 500ms by deselect/undo/delete re-writes the dragged position AFTER the newer state,
+    // corrupting undo or writing styles for an element that's about to be deleted.
+    window.clearTimeout(persistTimer.current);
     const doc = iframeRef.current?.contentDocument;
     doc?.querySelectorAll(".pc-nudge-active").forEach((el) => el.classList.remove("pc-nudge-active"));
     doc?.querySelectorAll("img.pc-active").forEach((el) => el.classList.remove("pc-active"));
@@ -222,7 +279,7 @@ export function PreviewPane({
     setNudge(null);
     setActiveImage(null);
     setImgTool(null);
-    setImgDragMode("move");
+    setContentMode(false);
     onSelect(null);
     setLiveKey(cacheKeyRef.current); // catch up on any renders frozen during the edit
   };
@@ -327,47 +384,57 @@ export function PreviewPane({
     iframeRef.current?.contentDocument?.querySelector<HTMLImageElement>(`img[data-image-id="${id}"]`) ?? null;
 
 
-  const parseTranslateMm = (frame: HTMLElement): [number, number] => {
-    const m = /translate\(\s*(-?[\d.]+)mm\s*,\s*(-?[\d.]+)mm\s*\)/.exec(frame.style.transform || "");
-    return m ? [Number(m[1]), Number(m[2])] : [0, 0];
+  const numMm = (v: string): number => {
+    const n = Number((/(-?[\d.]+)mm/.exec(v || "") || [])[1] ?? NaN);
+    return Number.isFinite(n) ? n : 0;
   };
-  const numMm = (v: string): number => Number((/(-?[\d.]+)mm/.exec(v || "") || [])[1] ?? NaN);
 
-  /** Convert an image to the decoupled "crop window + free image layer" model (Figma-style),
-   *  if it isn't already: the frame becomes a fixed-size crop window (overflow hidden), and
-   *  the image becomes an absolutely-positioned layer sized to COVER it — so it looks
-   *  identical, but resizing the frame now crops instead of rescaling the photo. Idempotent. */
-  const ensureImgLayered = (id: string, img: HTMLImageElement, frame: HTMLElement) => {
-    if (getComputedStyle(img).position === "absolute" && img.style.width.includes("mm")) return;
-    const fr = frame.getBoundingClientRect(); // iframe-internal px
-    const frameW = fr.width / MM_TO_PX;
-    const frameH = fr.height / MM_TO_PX;
-    const nW = img.naturalWidth || fr.width;
-    const nH = img.naturalHeight || fr.height;
-    const aspect = nW / nH || 1;
-    const imgW = Math.max(frameW, frameH * aspect); // cover
-    const imgH = imgW / aspect;
-    const left = (frameW - imgW) / 2;
-    const top = (frameH - imgH) / 2;
-    const fs = frame.style;
-    if (getComputedStyle(frame).position === "static") fs.position = "relative";
-    fs.overflow = "hidden";
-    fs.width = `${frameW.toFixed(1)}mm`;
-    fs.height = `${frameH.toFixed(1)}mm`;
-    const is = img.style;
-    is.objectFit = "";
-    is.objectPosition = "";
-    is.transform = "";
-    is.position = "absolute";
-    is.maxWidth = "none";
-    is.height = "auto";
-    is.width = `${imgW.toFixed(1)}mm`;
-    is.left = `${left.toFixed(1)}mm`;
-    is.top = `${top.toFixed(1)}mm`;
-    void client
-      .setImageStyle(id, { frameWidthMm: frameW, frameHeightMm: frameH, imgWidthMm: imgW, imgLeftMm: left, imgTopMm: top })
-      .then(() => setDirty(true));
+  // ---- Compiled image geometry (docs/layer-model.md): the crop FRAME + inner photo LAYER. ----
+  const frameEl = (id: string): HTMLElement | null =>
+    iframeRef.current?.contentDocument?.querySelector<HTMLElement>(`[data-img-frame="${id}"]`) ?? null;
+  const readFrameGeom = (f: HTMLElement): FrameGeom => ({
+    leftMm: numMm(f.style.left),
+    topMm: numMm(f.style.top),
+    widthMm: numMm(f.style.width),
+    heightMm: numMm(f.style.height),
+  });
+  const readLayerGeom = (img: HTMLImageElement): ImgLayerGeom => ({
+    widthMm: numMm(img.style.width),
+    leftMm: numMm(img.style.left),
+    topMm: numMm(img.style.top),
+  });
+  const writeFrameGeom = (f: HTMLElement, g: FrameGeom) => {
+    f.style.left = `${g.leftMm.toFixed(1)}mm`;
+    f.style.top = `${g.topMm.toFixed(1)}mm`;
+    f.style.width = `${g.widthMm.toFixed(1)}mm`;
+    f.style.height = `${g.heightMm.toFixed(1)}mm`;
   };
+  const writeLayerGeom = (img: HTMLImageElement, g: ImgLayerGeom) => {
+    img.style.width = `${g.widthMm.toFixed(1)}mm`;
+    img.style.left = `${g.leftMm.toFixed(1)}mm`;
+    img.style.top = `${g.topMm.toFixed(1)}mm`;
+  };
+  const imgAspect = (img: HTMLImageElement): number =>
+    img.naturalWidth && img.naturalHeight ? img.naturalWidth / img.naturalHeight : 1;
+  /** Persist the current on-screen geometry of an image (frame and/or layer), debounced-free. */
+  const persistImageGeom = (id: string, frame: HTMLElement | null, img: HTMLImageElement | null) => {
+    void persist(
+      client.setImageGeometry(id, {
+        frame: frame ? readFrameGeom(frame) : undefined,
+        layer: img ? readLayerGeom(img) : undefined,
+      }),
+    );
+  };
+  // Legacy projects (pre-0.21) have uncompiled images. compileOnArm() below normalizes them
+  // ONCE on entry (while nothing is selected, so the iframe isn't frozen) — so by gesture time
+  // the frame exists. This just reads it; no lazy render (that looped against the freeze).
+  const ensureCompiledOrRender = (id: string): HTMLElement | null => frameEl(id);
+
+  // Bounded so a compile that can't add a frame never loops. Reset per project.
+  const compileTriesRef = useRef(0);
+  useEffect(() => {
+    compileTriesRef.current = 0;
+  }, [project.slug]);
 
   /** Run a drag using POINTER CAPTURE. Capturing the pointer routes every pointermove/up to
    *  the grabbed element even when the cursor is over the live-edit iframe — without it, a
@@ -397,153 +464,111 @@ export function PreviewPane({
     el.addEventListener("pointercancel", end);
   };
 
-  /** Drag a mask-frame resize handle. Screen coords: 1mm = MM_TO_PX×zoom screen px. The edge
-   *  opposite the handle stays anchored; left/top handles also shift the frame's translate. */
+  /** Build the once-per-gesture coordinate context (deltas only need the zoom factor). */
+  const gestureCtx = (): FrameCtx => ({ originX: 0, originY: 0, zoom: zoomValRef.current });
+
+  /**
+   * Drag a resize handle (docs/layer-model.md §5). CONTENT mode: a corner zooms the photo
+   * inside a fixed frame. Default mode: a CORNER scales frame+photo proportionally (⌥/⌘ =
+   * free stretch); an EDGE crops/reveals that one side (photo stays put on the page).
+   */
   const startImgResize = (e: React.PointerEvent, h: ImgHandle) => {
     e.preventDefault();
     e.stopPropagation();
     const id = activeImageRef.current;
     if (!id) return;
     const img = liveImg(id);
-    const frame = img?.parentElement as HTMLElement | null;
-    const iframe = iframeRef.current;
-    if (!img || !frame || !iframe) return;
-    const z = zoomValRef.current;
+    const frame = ensureCompiledOrRender(id);
+    if (!img || !frame) return;
+    const ctx = gestureCtx();
+    const startFrame = readFrameGeom(frame);
+    const startLayer = readLayerGeom(img);
+    const aspect = imgAspect(img);
 
-    ensureImgLayered(id, img, frame);
-
-    // CROP mode: a handle SCALES the image LAYER (its width, aspect kept) around its own
-    // centre, driven by the cursor's distance from the frame centre. The crop window is fixed.
-    if (imgDragModeRef.current === "crop") {
-      const fr0 = frame.getBoundingClientRect();
-      const ir0 = iframe.getBoundingClientRect();
-      const cx = ir0.left + (fr0.left + fr0.width / 2) * z;
-      const cy = ir0.top + (fr0.top + fr0.height / 2) * z;
+    if (contentModeRef.current) {
+      // Zoom the photo within the fixed frame, anchored on the frame centre.
+      const r = frameScreenRect(frame);
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
       const startDist = Math.hypot(e.clientX - cx, e.clientY - cy) || 1;
-      const iw0 = numMm(img.style.width) || fr0.width / MM_TO_PX;
-      const il0 = numMm(img.style.left) || 0;
-      const it0 = numMm(img.style.top) || 0;
-      const ih0 = img.naturalWidth && img.naturalHeight ? iw0 * (img.naturalHeight / img.naturalWidth) : iw0;
-      const icx = il0 + iw0 / 2;
-      const icy = it0 + ih0 / 2;
       dragWithCapture(
         e,
         (ev) => {
-          const factor = Math.max(0.2, Math.min(8, Math.hypot(ev.clientX - cx, ev.clientY - cy) / startDist));
-          const iw = iw0 * factor;
-          const ih = ih0 * factor;
-          img.style.width = `${iw.toFixed(1)}mm`;
-          img.style.left = `${(icx - iw / 2).toFixed(1)}mm`;
-          img.style.top = `${(icy - ih / 2).toFixed(1)}mm`;
+          const factor = Math.max(0.1, Math.min(12, Math.hypot(ev.clientX - cx, ev.clientY - cy) / startDist));
+          writeLayerGeom(img, scaleContent(startLayer, factor, startFrame));
         },
-        () =>
-          void client
-            .setImageStyle(id, { imgWidthMm: numMm(img.style.width), imgLeftMm: numMm(img.style.left), imgTopMm: numMm(img.style.top) })
-            .then(() => setDirty(true)),
+        () => persistImageGeom(id, null, img),
       );
       return;
     }
 
-    // FRAME (Move) mode: a handle resizes the CROP WINDOW. The image layer stays fixed, so
-    // you reveal/hide more of it — a true crop, not a rescale.
-    const perMm = MM_TO_PX * z; // screen px per mm
-    const fr = frame.getBoundingClientRect(); // iframe-internal px
-    const ir = iframe.getBoundingClientRect();
-    const startW = fr.width / MM_TO_PX;
-    const startH = fr.height / MM_TO_PX;
-    const [tx0, ty0] = parseTranslateMm(frame);
-    const boxL = ir.left + fr.left * z;
-    const boxT = ir.top + fr.top * z;
-    const boxR = boxL + fr.width * z;
-    const boxB = boxT + fr.height * z;
-    frame.style.overflow = "hidden";
-    void tx0;
-    void ty0;
     dragWithCapture(
       e,
       (ev) => {
-        // Desired size from the cursor, measured against the FIXED (opposite) edge.
-        let w = startW;
-        let hh = startH;
-        if (h.r) w = Math.max(5, (ev.clientX - boxL) / perMm);
-        else if (h.l) w = Math.max(5, (boxR - ev.clientX) / perMm);
-        if (h.b) hh = Math.max(5, (ev.clientY - boxT) / perMm);
-        else if (h.t) hh = Math.max(5, (boxB - ev.clientY) / perMm);
-        frame.style.width = `${w.toFixed(1)}mm`;
-        frame.style.height = `${hh.toFixed(1)}mm`;
-        // Measure-and-pin: after the size change (which may reflow the frame in flow layouts),
-        // move the frame so its FIXED corner sits exactly where it started. Anchor can't drift.
-        const fixX = h.l ? boxR : boxL;
-        const fixY = h.t ? boxB : boxT;
-        const rect = frameScreenRect(frame);
-        const curFixX = h.l ? rect.left + rect.width : rect.left;
-        const curFixY = h.t ? rect.top + rect.height : rect.top;
-        const [ctx, cty] = parseTranslateMm(frame);
-        const ntx = ctx + (fixX - curFixX) / perMm;
-        const nty = cty + (fixY - curFixY) / perMm;
-        frame.style.transform = ntx || nty ? `translate(${ntx.toFixed(1)}mm, ${nty.toFixed(1)}mm)` : "";
+        const { dxMm, dyMm } = screenDeltaToMm(ev.clientX - e.clientX, ev.clientY - e.clientY, ctx);
+        let frameG: FrameGeom;
+        let layerG: ImgLayerGeom;
+        if (isCorner(h)) {
+          const free = ev.altKey || ev.metaKey;
+          frameG = resizeFrame(startFrame, h, dxMm, dyMm, { aspectLock: !free });
+          // Proportional → frame+photo scale together; free stretch → re-cover the new box.
+          layerG = free ? coverLayer(frameG, aspect) : scaleLayerWithFrame(startLayer, startFrame, frameG, h);
+        } else {
+          // Edge = crop one axis. Keep the photo visually put by shifting it opposite any
+          // frame-origin move (west/north edges move the origin).
+          frameG = resizeFrame(startFrame, h, dxMm, dyMm, {});
+          layerG = {
+            widthMm: startLayer.widthMm,
+            leftMm: startLayer.leftMm - (frameG.leftMm - startFrame.leftMm),
+            topMm: startLayer.topMm - (frameG.topMm - startFrame.topMm),
+          };
+        }
+        writeFrameGeom(frame, frameG);
+        writeLayerGeom(img, layerG);
         positionImgOverlayDirect(frameScreenRect(frame));
       },
       () => {
         anchorImgToolRef.current(img, id);
-        const fr2 = frame.getBoundingClientRect();
-        const [tx, ty] = parseTranslateMm(frame);
-        void client
-          .setImageStyle(id, {
-            frameWidthMm: fr2.width / MM_TO_PX,
-            frameHeightMm: fr2.height / MM_TO_PX,
-            translateXMm: tx,
-            translateYMm: ty,
-          })
-          .then(() => setDirty(true));
+        persistImageGeom(id, frame, img);
       },
     );
   };
 
-  /** Drag the body of the selected image: Move translates the box, Crop pans the photo. */
+  /** Drag the image body: default = move the frame on the page; CONTENT mode = pan the photo. */
   const startImgBodyDrag = (e: React.PointerEvent) => {
     e.preventDefault();
     e.stopPropagation();
     const id = activeImageRef.current;
     if (!id) return;
     const img = liveImg(id);
-    const frame = img?.parentElement as HTMLElement | null;
+    const frame = ensureCompiledOrRender(id);
     if (!img || !frame) return;
-    const z = zoomValRef.current;
-    const sx = e.clientX;
-    const sy = e.clientY;
+    const ctx = gestureCtx();
+    const startFrame = readFrameGeom(frame);
+    const startLayer = readLayerGeom(img);
 
-    if (imgDragModeRef.current === "crop") {
-      ensureImgLayered(id, img, frame);
-      const perMm = MM_TO_PX * z;
-      const il0 = numMm(img.style.left) || 0;
-      const it0 = numMm(img.style.top) || 0;
+    if (contentModeRef.current) {
       dragWithCapture(
         e,
         (ev) => {
-          img.style.left = `${(il0 + (ev.clientX - sx) / perMm).toFixed(1)}mm`;
-          img.style.top = `${(it0 + (ev.clientY - sy) / perMm).toFixed(1)}mm`;
+          const { dxMm, dyMm } = screenDeltaToMm(ev.clientX - e.clientX, ev.clientY - e.clientY, ctx);
+          writeLayerGeom(img, { widthMm: startLayer.widthMm, leftMm: startLayer.leftMm + dxMm, topMm: startLayer.topMm + dyMm });
         },
-        () => void client.setImageStyle(id, { imgLeftMm: numMm(img.style.left), imgTopMm: numMm(img.style.top) }).then(() => setDirty(true)),
+        () => persistImageGeom(id, null, img),
       );
       return;
     }
 
-    // Move mode: translate the box.
-    const perMm = MM_TO_PX * z;
-    const [tx0, ty0] = parseTranslateMm(frame);
     dragWithCapture(
       e,
       (ev) => {
-        const tx = tx0 + (ev.clientX - sx) / perMm;
-        const ty = ty0 + (ev.clientY - sy) / perMm;
-        frame.style.transform = `translate(${tx.toFixed(1)}mm, ${ty.toFixed(1)}mm)`;
+        const { dxMm, dyMm } = screenDeltaToMm(ev.clientX - e.clientX, ev.clientY - e.clientY, ctx);
+        writeFrameGeom(frame, { ...startFrame, leftMm: startFrame.leftMm + dxMm, topMm: startFrame.topMm + dyMm });
         positionImgOverlayDirect(frameScreenRect(frame));
       },
       () => {
         anchorImgToolRef.current(img, id);
-        const [tx, ty] = parseTranslateMm(frame);
-        void client.setImageStyle(id, { translateXMm: tx, translateYMm: ty }).then(() => setDirty(true));
+        persistImageGeom(id, frame, null);
       },
     );
   };
@@ -572,6 +597,26 @@ export function PreviewPane({
       if (mode !== "live") return;
       const t = ev.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      // Escape deselects even when focus is on the app chrome (the iframe handler only fires
+      // when the canvas is focused — a keydown reaches one document, so no double-firing).
+      if (ev.key === "Escape" && (activeImageRef.current || nudgeRef.current)) {
+        ev.preventDefault();
+        if (contentModeRef.current) setContentMode(false);
+        else clearSelectionsRef.current();
+        return;
+      }
+      // ⌘]/⌘[ reorder the selection (bring forward / send backward) — image or block.
+      if ((ev.metaKey || ev.ctrlKey) && (ev.key === "]" || ev.key === "[") && (activeImageRef.current || nudgeRef.current)) {
+        ev.preventDefault();
+        reorderSelectedRef.current(ev.key === "]" ? "down" : "up");
+        return;
+      }
+      // A selected image: Delete/Backspace removes it (blocks handled below via nudge).
+      if ((ev.key === "Delete" || ev.key === "Backspace") && activeImageRef.current) {
+        ev.preventDefault();
+        deleteSelectedImageRef.current();
+        return;
+      }
       const n = nudgeRef.current;
       if (!n) return;
       if (ev.key === "Delete" || ev.key === "Backspace") {
@@ -675,6 +720,100 @@ export function PreviewPane({
     return () => registerAlign(null);
   }, [registerAlign]);
 
+  /** One place all persistence flows through: mark dirty on success, surface failures instead
+   *  of silently dropping the edit (a bridge hiccup used to revert the change on next reload). */
+  const persist = (p: Promise<unknown>): Promise<void> =>
+    p.then(() => setDirty(true)).catch((e) => {
+      toast.error("Couldn't save that change", { description: e instanceof Error ? e.message : String(e) });
+    });
+
+  /** Apply property-panel styles to the LIVE element (so the frozen iframe updates in place)
+   *  AND persist to page.html. Kebab-case props; "" removes a property. */
+  const applyElementProps = (id: string, props: Record<string, string>) => {
+    const el = nudgeEl(id);
+    if (el) {
+      for (const [k, v] of Object.entries(props)) {
+        if (v === "") el.style.removeProperty(k);
+        else el.style.setProperty(k, v);
+      }
+    }
+    void persist(client.setElementProps(id, props));
+    reportSelectionRef.current(); // refresh the panel's shown values from the new computed style
+  };
+  const applyPropsRef = useRef(applyElementProps);
+  applyPropsRef.current = applyElementProps;
+  useEffect(() => {
+    registerApplyProps((id, props) => applyPropsRef.current(id, props));
+    return () => registerApplyProps(null);
+  }, [registerApplyProps]);
+
+  /** Set a block's absolute position (the nudge translate + optional top margin) from the
+   *  Inspector — patches the LIVE element so the frozen iframe reflects it immediately (the
+   *  old path persisted only, so X/Y edits & Reset were invisible until deselect). */
+  const setBlockPosition = (id: string, x: number, y: number, marginTop: number | null) => {
+    const el = nudgeEl(id);
+    if (el) {
+      el.style.transform = x || y ? `translate(${x.toFixed(1)}mm, ${y.toFixed(1)}mm)` : "";
+      if (marginTop === null) el.style.removeProperty("margin-top");
+      else el.style.marginTop = `${marginTop.toFixed(1)}mm`;
+    }
+    const n = nudgeRef.current;
+    if (n && n.pcId === id) {
+      const next = { ...n, x, y, marginTop };
+      nudgeRef.current = next;
+      setNudge(next);
+    }
+    void persist(client.setElementStyle(id, { translateX: x, translateY: y, marginTop }));
+    reportSelectionRef.current();
+  };
+  const setPositionRef = useRef(setBlockPosition);
+  setPositionRef.current = setBlockPosition;
+  useEffect(() => {
+    registerSetPosition?.((id, x, y, mt) => setPositionRef.current(id, x, y, mt));
+    return () => registerSetPosition?.(null);
+  }, [registerSetPosition]);
+
+  /** Select an element from the Layers panel by dispatching a click in the iframe (reuses
+   *  the exact same selection path as a canvas click). */
+  const selectLayerById = (id: string) => {
+    const doc = iframeRef.current?.contentDocument;
+    if (!doc) return;
+    const el =
+      doc.querySelector<HTMLElement>(`[data-pc-id="${id}"]`) ?? doc.querySelector<HTMLElement>(`img[data-image-id="${id}"]`);
+    if (!el) return;
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: doc.defaultView! }));
+  };
+  const selectLayerRef = useRef(selectLayerById);
+  selectLayerRef.current = selectLayerById;
+  useEffect(() => {
+    registerSelectLayer?.((id) => selectLayerRef.current(id));
+    return () => registerSelectLayer?.(null);
+  }, [registerSelectLayer]);
+
+  /** Read the live document's manipulable elements (in paint order) for the Layers panel. */
+  const emitLayers = () => {
+    const doc = iframeRef.current?.contentDocument;
+    const win = doc?.defaultView;
+    if (!doc || !win || !onLayers) return;
+    const seen = new Set<string>();
+    const items: LayerItem[] = [];
+    doc.querySelectorAll<HTMLElement>("[data-pc-id], img[data-image-id]").forEach((el) => {
+      if (el.hasAttribute("data-img-slot")) return; // the crop-slot wrapper isn't its own layer
+      const imgId = el.getAttribute("data-image-id");
+      const id = imgId ?? el.getAttribute("data-pc-id")!;
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      const kind: LayerItem["kind"] = imgId ? "image" : el.querySelector("[data-pc-id], img[data-image-id]") ? "box" : "text";
+      const label = imgId ?? el.textContent?.trim().slice(0, 28) ?? id;
+      const z = win.getComputedStyle(el).zIndex;
+      items.push({ id, kind, label: label || id, z: z && z !== "auto" ? z : "auto" });
+    });
+    onLayers(items);
+  };
+  const emitLayersRef = useRef(emitLayers);
+  emitLayersRef.current = emitLayers;
+
   // After an undo/redo the iframe reloads — then we scroll to and flash what changed.
   const pendingFlashRef = useRef<string[] | null>(null);
   const announceHistory = (label: "Undo" | "Redo", changed: string[]) => {
@@ -686,21 +825,45 @@ export function PreviewPane({
         : "Page state restored",
     });
   };
+  /** ⌘]/⌘[ + Layers panel: reorder the selected element (image or block) in the flow, which
+   *  changes paint/stacking order. Clears the selection so the frozen iframe reloads. */
+  const reorderSelected = (dir: "up" | "down") => {
+    const id = activeImageRef.current ?? nudgeRef.current?.pcId;
+    if (!id) return;
+    clearSelectionsRef.current();
+    void client.moveElement(id, dir).then(() => setDirty(true)).catch(() => {});
+  };
+  const reorderSelectedRef = useRef(reorderSelected);
+  reorderSelectedRef.current = reorderSelected;
+  /** Delete the selected image (whole slot/frame/img). Returns true if it handled a selection. */
+  const deleteSelectedImage = (): boolean => {
+    const id = activeImageRef.current;
+    if (!id) return false;
+    clearSelectionsRef.current();
+    void client.deleteImage(id).then(() => setDirty(true)).catch(() => {});
+    return true;
+  };
+  const deleteSelectedImageRef = useRef(deleteSelectedImage);
+  deleteSelectedImageRef.current = deleteSelectedImage;
+
   const doUndo = () => {
     clearSelectionsRef.current();
-    void client.undoPage().then(({ changed }) => announceHistory("Undo", changed)).catch(() => {});
+    void client.undoPage().then(({ changed }) => announceHistory("Undo", changed)).catch((e) => toast.error(e instanceof Error ? e.message : "Undo failed"));
   };
   const doRedo = () => {
     clearSelectionsRef.current();
-    void client.redoPage().then(({ changed }) => announceHistory("Redo", changed)).catch(() => {});
+    void client.redoPage().then(({ changed }) => announceHistory("Redo", changed)).catch((e) => toast.error(e instanceof Error ? e.message : "Redo failed"));
   };
   // Add a new element the generation didn't create. It lands at the page's top-left as a
   // freely-positioned block; the live reload flashes it and the user drags/edits from there.
   const addElement = (kind: "text" | "heading" | "rect" | "divider") => {
-    void client.insertElement(kind).then(({ id }) => {
-      pendingFlashRef.current = [id];
-      setDirty(true);
-    });
+    void client
+      .insertElement(kind)
+      .then(({ id }) => {
+        pendingFlashRef.current = [id];
+        setDirty(true);
+      })
+      .catch((e) => toast.error("Couldn't add that element", { description: e instanceof Error ? e.message : String(e) }));
   };
   const doUndoRef = useRef(doUndo);
   doUndoRef.current = doUndo;
@@ -752,7 +915,10 @@ export function PreviewPane({
 
   // Leaving live mode drops the selection; entering code mode loads the source.
   useEffect(() => {
-    if (mode !== "live") clearSelectionsRef.current();
+    if (mode !== "live") {
+      clearSelectionsRef.current();
+      onLayers?.([]); // the Layers panel only reflects the live document
+    }
     if (mode === "code") {
       setSource(null);
       void client.getPageSource().then((s) => {
@@ -1021,6 +1187,7 @@ export function PreviewPane({
       bases: Map<string, Omit<NudgeState, "pcId">>;
       reorder: boolean; target: HTMLElement | null; after: boolean;
       baseRect?: DOMRect; alignV?: number[]; alignH?: number[];
+      lastDx?: number; lastDy?: number; // last committed delta (mm), for the on-release sync
     } | null = null;
     doc.addEventListener("mousedown", (ev) => {
       const n = nudgeRef.current;
@@ -1109,7 +1276,9 @@ export function PreviewPane({
           if (Math.abs(g - (gb.y + dymm)) <= GRID_SNAP_MM) dymm = g - gb.y;
         }
       }
-      applyDeltaRef.current(drag.bases, dxmm, dymm);
+      drag.lastDx = dxmm;
+      drag.lastDy = dymm;
+      applyDeltaRef.current(drag.bases, dxmm, dymm, true); // live: DOM only, no per-frame re-render
     });
     doc.addEventListener("mouseup", () => {
       if (!drag) return;
@@ -1122,7 +1291,10 @@ export function PreviewPane({
         const id = d.el.getAttribute("data-pc-id")!;
         const beforeId = d.target.getAttribute("data-pc-id")!;
         clearSelectionsRef.current();
-        void client.moveElementBefore(id, beforeId, d.after).then(() => setDirty(true));
+        void persist(client.moveElementBefore(id, beforeId, d.after));
+      } else if (d.lastDx !== undefined) {
+        // Commit the final position to React state + Inspector once (drag frames skipped it).
+        applyDeltaRef.current(d.bases, d.lastDx, d.lastDy ?? 0, false);
       }
     });
 
@@ -1140,7 +1312,19 @@ export function PreviewPane({
       if (ev.key === "Escape") {
         const editing = doc.querySelector<HTMLElement>("[contenteditable]");
         if (editing) return editing.blur(); // commit-on-blur ends the text edit
+        if (contentModeRef.current) return setContentMode(false); // exit photo-adjust first
         clearSelectionsRef.current();
+        return;
+      }
+      // ⌘]/⌘[ reorder the selection; a selected image deletes on Delete/Backspace.
+      if ((ev.metaKey || ev.ctrlKey) && (ev.key === "]" || ev.key === "[") && (activeImageRef.current || nudgeRef.current)) {
+        ev.preventDefault();
+        reorderSelectedRef.current(ev.key === "]" ? "down" : "up");
+        return;
+      }
+      if ((ev.key === "Delete" || ev.key === "Backspace") && activeImageRef.current) {
+        ev.preventDefault();
+        deleteSelectedImageRef.current();
         return;
       }
       const n = nudgeRef.current;
@@ -1179,16 +1363,40 @@ export function PreviewPane({
         if (activeImageRef.current === id) {
           setActiveImage(null);
           setImgTool(null);
+          setContentMode(false);
           onSelect(null);
         } else {
           img.classList.add("pc-active");
           setActiveImage(id);
-          setImgDragMode("move");
+          setContentMode(false);
           anchorImgToolRef.current(img, id);
           onSelect({ kind: "image", id, tag: "IMG" });
         }
       });
+      // Double-click enters CONTENT mode — adjust the photo inside the frame (pan + zoom).
+      img.addEventListener("dblclick", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (activeImageRef.current !== id) {
+          img.classList.add("pc-active");
+          setActiveImage(id);
+          anchorImgToolRef.current(img, id);
+          onSelect({ kind: "image", id, tag: "IMG" });
+        }
+        setContentMode(true);
+      });
     });
+
+    emitLayersRef.current(); // refresh the Layers panel for this (re)armed document
+
+    // Legacy pages: normalize images to the layer form NOW (nothing is selected on a fresh
+    // arm, so the iframe reloads freely). Bounded to avoid a loop if compile can't add a frame.
+    const hasUncompiledImg = doc.querySelector("img[data-image-id]") && !doc.querySelector("[data-img-frame]");
+    const busySelecting = Boolean(nudgeRef.current || activeImageRef.current);
+    if (hasUncompiledImg && !busySelecting && compileTriesRef.current < 2) {
+      compileTriesRef.current += 1;
+      void actions.render().then(() => setDirty(false));
+    }
   };
 
   const saveSource = () => {
@@ -1370,6 +1578,11 @@ export function PreviewPane({
               <iframe
                 ref={iframeRef}
                 title="live preview"
+                // allow-same-origin WITHOUT allow-scripts: the editor (parent) keeps full
+                // contentDocument access, but the agent-authored page's own <script>/inline
+                // handlers can never run — it may contain content copied from fetched sites.
+                // Belt to the bridge's CSP braces (script-src 'none' on /files/*).
+                sandbox="allow-same-origin"
                 className="shrink-0 rounded-sm border-0 bg-white shadow-lg ring-1 ring-black/10"
                 style={{ width: `${art.w}mm`, minHeight: `${art.h}mm`, zoom: zoomVal }}
                 src={client.fileUrl("page.html", liveKey)}
@@ -1420,10 +1633,10 @@ export function PreviewPane({
         </div>
       )}
 
-      {/* Selection overlay for the active image. The BODY captures move (Move mode) / pan
-          (Crop mode); the 8 HANDLES capture resize (Move) / scale (Crop). Everything drags in
-          the parent window with direct-DOM updates — smooth, and it doesn't break when the
-          cursor leaves the image. */}
+      {/* Selection overlay for the active image (docs/layer-model.md §5). Default mode: body
+          moves the frame, corners scale proportionally, edges crop one side. CONTENT mode
+          (double-click): body pans the photo, corners zoom it. All drags run in the parent
+          window with direct-DOM updates — smooth, and unbroken when the cursor leaves the img. */}
       {mode === "live" && imgTool && activeImage === imgTool.id && runState === "idle" && (
         <div
           ref={imgOverlayRef}
@@ -1431,8 +1644,11 @@ export function PreviewPane({
           style={{ top: imgTool.top, left: imgTool.left, width: imgTool.width, height: imgTool.height }}
         >
           <div
-            className="pointer-events-auto absolute inset-0 border-2 border-emerald-500/90"
-            style={{ cursor: imgDragMode === "crop" ? "grab" : "move" }}
+            className={cn(
+              "pointer-events-auto absolute inset-0 border-2",
+              contentMode ? "border-dashed border-sky-500/90" : "border-emerald-500/90",
+            )}
+            style={{ cursor: contentMode ? "grab" : "move" }}
             onPointerDown={startImgBodyDrag}
           />
           {IMG_HANDLES.map((h) => {
@@ -1444,36 +1660,26 @@ export function PreviewPane({
                 className="pointer-events-auto absolute flex size-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center"
                 style={{ left: p.left, top: p.top, cursor: h.cur }}
               >
-                <div className="size-2.5 rounded-[2px] border border-emerald-600 bg-white shadow-sm dark:bg-neutral-900" />
+                <div
+                  className={cn(
+                    "size-2.5 border bg-white shadow-sm dark:bg-neutral-900",
+                    contentMode ? "rounded-full border-sky-600" : "rounded-[2px] border-emerald-600",
+                  )}
+                />
               </div>
             );
           })}
+          {/* Content-mode hint: a tiny badge telling the user corners now zoom the photo. */}
+          {contentMode && (
+            <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full bg-sky-600/90 px-2 py-0.5 text-[10px] font-medium text-white shadow">
+              <ZoomIn className="mr-0.5 inline size-3 align-[-2px]" /> drag to pan · corners zoom
+            </div>
+          )}
         </div>
       )}
 
-      {/* Variant shuttling lives on the selected image's toolbar + the Inspector — no
-          persistent bottom strip (that was clutter). */}
-
       {mode === "live" && imgTool && activeImage === imgTool.id && runState === "idle" && (() => {
         const slot = project.images.find((s) => s.id === imgTool.id);
-        // Segmented Move/Crop toggle. The gestures are the same in both modes — drag the
-        // body, drag a handle — but the MODE decides what they do, so nothing competes:
-        //   Move: body drags the box · handles resize the mask
-        //   Crop: body pans the photo · handles zoom the photo inside the mask
-        const modeBtn = (m: "move" | "crop", Icon: typeof Move, label: string, title: string) => (
-          <button
-            title={title}
-            onClick={() => setImgDragMode(m)}
-            className={cn(
-              "flex items-center gap-1 rounded px-2 py-1 text-[11px] transition-colors",
-              imgDragMode === m
-                ? "bg-background font-medium text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <Icon className="size-3.5" /> {label}
-          </button>
-        );
         const iconBtn = (Icon: typeof Plus, title: string, onClick: () => void, disabled = false) => (
           <button
             title={title}
@@ -1492,10 +1698,18 @@ export function PreviewPane({
             onMouseDown={(e) => e.stopPropagation()}
           >
             <div className="flex items-center gap-1 rounded-lg border bg-background/95 p-1 shadow-xl backdrop-blur">
-              <div className="flex items-center rounded-md bg-muted/50 p-0.5">
-                {modeBtn("move", Move, "Move", "Move: drag to move the box · corners resize it")}
-                {modeBtn("crop", Crop, "Crop", "Crop: drag to pan the photo · corners zoom it")}
-              </div>
+              {/* One selection, no Move/Crop toggle. This button just enters/leaves the
+                  photo-adjust (content) mode that double-click also toggles. */}
+              <button
+                title={contentMode ? "Done adjusting the photo (Esc)" : "Adjust the photo inside the frame (or double-click it)"}
+                onClick={() => setContentMode((v) => !v)}
+                className={cn(
+                  "flex items-center gap-1 rounded px-2 py-1 text-[11px] transition-colors",
+                  contentMode ? "bg-sky-600 font-medium text-white" : "text-muted-foreground hover:text-foreground hover:bg-accent",
+                )}
+              >
+                <Crop className="size-3.5" /> {contentMode ? "Done" : "Adjust photo"}
+              </button>
               {slot && slot.variants.length > 1 && (
                 <>
                   <div className="mx-0.5 h-4 w-px bg-border" />
@@ -1504,6 +1718,14 @@ export function PreviewPane({
                   {iconBtn(ChevronRight, "Next variant", () => void actions.selectVariant(slot.id, slot.current! + 1), !slot.current || slot.current >= Math.max(...slot.variants))}
                 </>
               )}
+              <div className="mx-0.5 h-4 w-px bg-border" />
+              <button
+                title="Delete image (⌫)"
+                onClick={() => deleteSelectedImageRef.current()}
+                className="rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+              >
+                <Trash2 className="size-3.5" />
+              </button>
             </div>
           </div>
         );

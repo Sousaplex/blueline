@@ -129,6 +129,16 @@ server.tool(
 );
 
 server.tool(
+  "organize_sources",
+  "Rename/move workspace source files within or between context/ and brand/. Paths are area-prefixed, e.g. {from: 'context/notes.md', to: 'context/acme/product-notes.md'}. Never overwrites; all moves are validated before any file is touched.",
+  { moves: z.array(z.object({ from: z.string(), to: z.string() })).min(1) },
+  async ({ moves }) => {
+    const { moved } = await api("/api/sources/move", { moves });
+    return text(`Moved:\n${moved.join("\n")}`);
+  },
+);
+
+server.tool(
   "run_project",
   "Start (or queue) the autonomous design loop for a project: draft HTML -> generate images -> render PDF -> vision review -> fix, until the reviewer passes it or the round limit hits. Up to 2 projects run in parallel; extras queue. Returns immediately — poll run_status.",
   { slug: z.string().describe("project slug from workspace_status") },

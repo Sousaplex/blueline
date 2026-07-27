@@ -5,11 +5,12 @@
 // Usage: npm run serve -- [projects/<slug>] [--port 7717]
 import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, extname, join, normalize, resolve } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { WebSocketServer, type WebSocket } from "ws";
 import { DATA_ROOT, REPO_ROOT, applyApiKeys, clampConcurrency, loadConfig, saveApiKeys, type BluelineConfig } from "./config.ts";
+import { compilePage } from "./compile.ts";
 import { resetLedger, takeLedger } from "./cost-ledger.ts";
 import { textCost } from "./pricing.ts";
 import { draftBrief } from "./brief-draft.ts";
@@ -17,6 +18,7 @@ import { gitClone, gitConnect, gitDisconnect, gitStatus, gitSync } from "./git-s
 import { generateImages } from "./images.ts";
 import {
   deleteElement,
+  deleteImage,
   insertElement,
   type InsertKind,
   tagElement,
@@ -27,8 +29,9 @@ import {
   moveElementBefore,
   pageSource,
   selectVariant,
+  setElementProps,
   setElementStyle,
-  setImageStyle,
+  setImageGeometry,
   updateCopy,
   writePageSource,
 } from "./page-edit.ts";
@@ -37,8 +40,11 @@ import { clearHistory, historyDepth, redoPage, snapshotPage, undoPage } from "./
 import { PlaywrightBackend } from "./render.ts";
 import { markRunStart } from "./review.ts";
 import { resetSearchBudget } from "./search.ts";
+import { moveWorkspaceFiles } from "./sources.ts";
 import { extractStyleSpec, saveStyleSpec } from "./style-spec.ts";
 import { createBluelineSession, type BluelineSession } from "./session.ts";
+import { buildRawJsonl, buildSessionBundle } from "./session-export.ts";
+import { exportBundle, exportDocument, importArchive } from "./project-archive.ts";
 import { deleteTemplate, instantiateTemplate, listTemplates, saveTemplate, templateBrief } from "./templates.ts";
 import { suggestDirections, variantBrief, type Direction } from "./variants.ts";
 import { resetFetchBudget } from "./web-fetch.ts";
@@ -70,7 +76,7 @@ interface WireEvent {
 export type RunState = "idle" | "queued" | "running";
 
 class Bridge {
-  private sessions = new Map<string, BluelineSession>(); // slug -> session
+  private sessions = new Map<string, Promise<BluelineSession>>(); // slug -> session (in-flight promise)
   private runStates = new Map<string, RunState>(); // slug -> queued|running
   private costBase = new Map<string, { input: number; output: number }>(); // designer tokens at run start
   // Chat requests in flight: when the agent finishes one and page.html changed,
@@ -130,15 +136,20 @@ class Bridge {
     return [...this.runStates.values()].filter((s) => s === "running").length;
   }
 
-  broadcast(event: WireEvent): void {
-    if (event.project) {
-      const buffer = this.buffers.get(event.project) ?? [];
-      buffer.push(event);
-      if (buffer.length > 500) buffer.splice(0, buffer.length - 500);
-      this.buffers.set(event.project, buffer);
+  broadcast(event: WireEvent, buffer = true): void {
+    if (buffer && event.project) {
+      const buf = this.buffers.get(event.project) ?? [];
+      buf.push(event);
+      if (buf.length > 500) buf.splice(0, buf.length - 500);
+      this.buffers.set(event.project, buf);
     }
     const msg = JSON.stringify(event);
     for (const ws of this.sockets) if (ws.readyState === ws.OPEN) ws.send(msg);
+  }
+
+  /** The in-memory session for a slug, if one is currently loaded (for live stats). */
+  liveSession(slug: string): Promise<BluelineSession> | undefined {
+    return this.sessions.get(slug);
   }
 
   attach(ws: WebSocket): void {
@@ -170,13 +181,41 @@ class Bridge {
     return this.systemFeed.slice(-200);
   }
 
-  /** One Pi session per project, created on demand, events tagged with the slug. */
-  private async ensureSession(slug: string): Promise<BluelineSession> {
+  /** One Pi session per project, created on demand, events tagged with the slug. The map
+   *  holds the in-flight PROMISE (not the resolved session): two near-simultaneous callers
+   *  (chat + run) would otherwise both pass the "existing" check and each build a session,
+   *  leaking one that stays subscribed and double-fires the feed. */
+  private ensureSession(slug: string): Promise<BluelineSession> {
     const existing = this.sessions.get(slug);
     if (existing) return existing;
+    const promise = this.createSession(slug);
+    this.sessions.set(slug, promise);
+    // Don't cache a failed init — let the next caller retry.
+    promise.catch(() => {
+      if (this.sessions.get(slug) === promise) this.sessions.delete(slug);
+    });
+    return promise;
+  }
+
+  /** Read the live context-window usage and push it to the UI (ephemeral — not buffered,
+   *  since only the latest value matters and it would otherwise flood the replay buffer). */
+  private emitContextUsage(slug: string, pc: BluelineSession): void {
+    try {
+      const u = pc.session.getContextUsage();
+      if (u) {
+        this.broadcast(
+          { type: "context_usage", project: slug, tokens: u.tokens, contextWindow: u.contextWindow, percent: u.percent },
+          false,
+        );
+      }
+    } catch {
+      /* usage unavailable (e.g. right after compaction) — ignore */
+    }
+  }
+
+  private async createSession(slug: string): Promise<BluelineSession> {
     const project = this.project?.slug === slug ? this.project : new Project(slug, this.workspace);
     const pc = await createBluelineSession({ project, backend: this.backend });
-    this.sessions.set(slug, pc);
     pc.session.subscribe((event: any) => {
       switch (event.type) {
         case "message_update": {
@@ -191,6 +230,7 @@ class Bridge {
           const summary = event.result?.content?.find((c: any) => c.type === "text")?.text ?? "";
           this.broadcast({ type: "tool_end", project: slug, tool: event.toolName ?? event.name, summary: summary.slice(0, 4000) });
           this.broadcast({ type: "files_changed", project: slug });
+          this.emitContextUsage(slug, pc);
           break;
         }
         case "agent_start": {
@@ -210,6 +250,7 @@ class Bridge {
           this.runStates.delete(slug);
           this.broadcast({ type: "run_state", project: slug, state: "idle" });
           this.emitRunCost(slug, pc);
+          this.emitContextUsage(slug, pc);
           this.captureEditRound(slug);
           this.pumpQueue();
           break;
@@ -307,6 +348,11 @@ class Bridge {
       this.broadcast({ type: "run_state", project: target, state: "queued" });
       return "queued";
     }
+    // Claim "running" SYNCHRONOUSLY (before startRun's first await) so a double-click can't
+    // slip a second run past the idle guard while the session is being created. startRun
+    // resets the state on any failure.
+    this.runStates.set(target, "running");
+    this.broadcast({ type: "run_state", project: target, state: "running" });
     await this.startRun(target, kickoff);
     return "running";
   }
@@ -326,7 +372,7 @@ class Bridge {
     // running: abort the Pi session (waits for it to become idle → fires agent_end,
     // whose handler clears run state and pumps the queue).
     this.logSystem("api", "run_cancel", target);
-    const pc = this.sessions.get(target);
+    const pc = await this.sessions.get(target);
     if (pc) await pc.session.abort();
     // Safety net if abort didn't emit agent_end for any reason.
     if (this.runStates.get(target) !== "idle" && this.runStates.get(target) !== undefined) {
@@ -379,6 +425,12 @@ class Bridge {
   async render(): Promise<void> {
     const project = this.requireProject();
     await this.backend.renderPdf(project.pageHtml, project.proofPdf, this.config.render);
+    // Compile images into directly-editable layer form before the human edits (idempotent).
+    // Non-fatal, but don't swallow silently: a failed compile leaves images uncompiled, so
+    // direct manipulation degrades to the legacy path — surface it in the System tab.
+    await compilePage(project, this.backend).catch((err) => {
+      this.logSystem("engine", "compile_failed", err instanceof Error ? err.message : String(err));
+    });
     this.broadcast({ type: "files_changed", project: project.slug });
   }
 
@@ -443,9 +495,9 @@ class Bridge {
     writeFileSync(configPath, JSON.stringify(current, null, 2) + "\n");
     this.config = loadConfig();
     // Idle sessions pick up the new models on recreation; running ones finish on the old config.
-    for (const [slug, pc] of this.sessions) {
+    for (const [slug, pcPromise] of this.sessions) {
       if (this.runState(slug) === "idle") {
-        await pc.dispose();
+        await (await pcPromise).dispose();
         this.sessions.delete(slug);
       }
     }
@@ -626,7 +678,7 @@ imagery to this subject.
     if (this.runState(slug) !== "idle") throw new Error(`"${slug}" is ${this.runState(slug)} — stop it before deleting`);
     const dir = join(this.workspace.projectsDir, slug);
     if (!existsSync(dir)) throw new Error(`No such project: ${slug}`);
-    const session = this.sessions.get(slug);
+    const session = await this.sessions.get(slug);
     if (session) {
       await session.dispose();
       this.sessions.delete(slug);
@@ -674,7 +726,7 @@ imagery to this subject.
       throw new Error("Runs are active — wait for them to finish before switching workspaces");
     }
     const next = new Workspace(root).ensure();
-    for (const pc of this.sessions.values()) await pc.dispose();
+    for (const pcPromise of this.sessions.values()) await (await pcPromise).dispose();
     this.sessions.clear();
     this.buffers.clear();
     this.runStates.clear();
@@ -743,19 +795,42 @@ imagery to this subject.
   }
 
   async dispose() {
-    for (const pc of this.sessions.values()) await pc.dispose();
+    for (const pcPromise of this.sessions.values()) await (await pcPromise).dispose();
     await this.backend.close();
   }
 }
 
 function json(res: ServerResponse, status: number, body: unknown): void {
-  res.writeHead(status, { "content-type": "application/json", "access-control-allow-origin": "*" });
+  // Deliberately NO access-control-allow-origin: the bridge is same-origin-only (the
+  // packaged app is served BY the bridge; dev goes through the Vite proxy). A CORS header
+  // here would let any website the user visits read workspace data cross-origin.
+  res.writeHead(status, { "content-type": "application/json" });
   res.end(JSON.stringify(body));
 }
 
+/** Same-machine, same-app requests only. Browsers attach an Origin header on cross-origin
+ *  requests — reject any that isn't a local origin (blocks drive-by websites scripting the
+ *  bridge). A non-local Host header means DNS rebinding — reject. Local non-browser clients
+ *  (MCP, curl) send no Origin and a localhost Host, so they pass. */
+const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
+const LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
+function isLocalRequest(req: IncomingMessage): boolean {
+  const origin = req.headers.origin;
+  const host = req.headers.host ?? "";
+  if (!LOCAL_HOST.test(host)) return false;
+  if (origin && !LOCAL_ORIGIN.test(origin)) return false;
+  return true;
+}
+
+const MAX_BODY_BYTES = 64 * 1024 * 1024; // 64MB — generous for base64 image uploads, bounded
 async function readBody(req: IncomingMessage): Promise<any> {
   const chunks: Buffer[] = [];
-  for await (const c of req) chunks.push(c as Buffer);
+  let size = 0;
+  for await (const c of req) {
+    size += (c as Buffer).length;
+    if (size > MAX_BODY_BYTES) throw new Error("Request body too large");
+    chunks.push(c as Buffer);
+  }
   const raw = Buffer.concat(chunks).toString("utf8");
   return raw ? JSON.parse(raw) : {};
 }
@@ -779,12 +854,15 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
     const source = String(req.headers["x-blueline-client"] ?? "app");
     const sys = (action: string, detail: string) => bridge.logSystem(source, action, detail);
     try {
+      // Same-origin gate first: foreign-origin browser requests (drive-by pages) and
+      // DNS-rebound hosts get a flat 403 before any route logic runs. No CORS preflight
+      // approval either — cross-origin JSON POSTs die at the preflight.
+      if (!isLocalRequest(req)) {
+        res.writeHead(403, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ error: "forbidden" }));
+      }
       if (req.method === "OPTIONS") {
-        res.writeHead(204, {
-          "access-control-allow-origin": "*",
-          "access-control-allow-methods": "GET,POST,OPTIONS",
-          "access-control-allow-headers": "content-type",
-        });
+        res.writeHead(204);
         return res.end();
       }
 
@@ -811,8 +889,13 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
         if (!existsSync(file) || !statSync(file).isFile()) return json(res, 404, { error: "not found" });
         res.writeHead(200, {
           "content-type": MIME[extname(file)] ?? "application/octet-stream",
-          "access-control-allow-origin": "*",
           "cache-control": "no-store",
+          // Generated/served project content must never run script: page.html is authored
+          // by the agent (possibly from fetched web content) and renders same-origin in the
+          // live-edit iframe and the print window. Styles/fonts/images stay unrestricted —
+          // print documents need them; scripts have no business in one.
+          "content-security-policy": "script-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'",
+          "x-content-type-options": "nosniff",
         });
         return res.end(readFileSync(file));
       }
@@ -830,10 +913,91 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
         return json(res, 200, { reviews: bridge.reviewsFor(slug) });
       }
 
+      // Live session stats + context-window usage for the meter (in-memory session only).
+      if (url.pathname === "/api/session/stats") {
+        const slug = url.searchParams.get("slug") ?? bridge.project?.slug;
+        if (!slug) return json(res, 400, { error: "slug required" });
+        const pc = await bridge.liveSession(slug);
+        if (!pc) return json(res, 200, { stats: null, contextUsage: null });
+        try {
+          return json(res, 200, { stats: pc.session.getSessionStats(), contextUsage: pc.session.getContextUsage() ?? null });
+        } catch {
+          return json(res, 200, { stats: null, contextUsage: null });
+        }
+      }
+
+      // Export a project as a portable archive: kind=file (.blueline, one document) or
+      // kind=project (.blueproject, the whole family + brand + referenced sources).
+      if (url.pathname === "/api/project/export") {
+        const slug = url.searchParams.get("slug") ?? bridge.project?.slug;
+        if (!slug) return json(res, 400, { error: "slug required" });
+        const kind = url.searchParams.get("kind") === "project" ? "project" : "file";
+        try {
+          const out =
+            kind === "project"
+              ? exportBundle(bridge.workspace, slug)
+              : exportDocument(slug === bridge.project?.slug ? bridge.project : new Project(slug, bridge.workspace));
+          bridge.logSystem("api", "project_export", `${slug} (${kind})`);
+          res.writeHead(200, {
+            "content-type": "application/zip",
+            "content-disposition": `attachment; filename="${out.filename}"`,
+            "cache-control": "no-store",
+          });
+          return res.end(Buffer.from(out.data));
+        } catch (err) {
+          return json(res, 400, { error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+
+      // Full conversation export across ALL threads for a project. format=json → analyzable
+      // bundle (prompts + tool calls w/ args + results + system prompt); format=jsonl → raw.
+      if (url.pathname === "/api/session/export") {
+        const slug = url.searchParams.get("slug") ?? bridge.project?.slug;
+        if (!slug) return json(res, 400, { error: "slug required" });
+        let project: Project;
+        try {
+          project = slug === bridge.project?.slug ? bridge.project : new Project(slug, bridge.workspace);
+        } catch (err) {
+          return json(res, 404, { error: err instanceof Error ? err.message : String(err) });
+        }
+        const format = url.searchParams.get("format") === "jsonl" ? "jsonl" : "json";
+        bridge.logSystem("api", "session_export", `${slug} (${format})`);
+        if (format === "jsonl") {
+          const raw = await buildRawJsonl(project);
+          res.writeHead(200, {
+            "content-type": "application/x-ndjson; charset=utf-8",
+            "content-disposition": `attachment; filename="blueline-session-${slug}.jsonl"`,
+            "cache-control": "no-store",
+          });
+          return res.end(raw);
+        }
+        const bundle = await buildSessionBundle(project, bridge.config);
+        res.writeHead(200, {
+          "content-type": "application/json; charset=utf-8",
+          "content-disposition": `attachment; filename="blueline-session-${slug}.json"`,
+          "cache-control": "no-store",
+        });
+        return res.end(JSON.stringify(bundle, null, 2));
+      }
+
       if (req.method === "POST" && url.pathname === "/api/open") {
         const body = await readBody(req);
         if (!body.projectDir) return json(res, 400, { error: "projectDir required" });
-        await bridge.openProject(body.projectDir);
+        // Containment: over HTTP a project may only be opened from inside the current
+        // workspace's projects dir. Without this, an arbitrary absolute path here turns
+        // /files/* into an arbitrary-file read (e.g. ~/.ssh). The CLI arg keeps its
+        // flexibility — this guard is for the network surface only. Checked BEFORE the
+        // Project constructor runs, because the constructor mkdirs into its target.
+        const raw = String(body.projectDir);
+        const requested = resolve(
+          raw.includes("/") || raw.includes("\\") ? raw : join(bridge.workspace.projectsDir, raw),
+        );
+        const rootReal = realpathSync(bridge.workspace.projectsDir);
+        const requestedReal = existsSync(requested) ? realpathSync(requested) : requested;
+        if (requestedReal !== rootReal && !requestedReal.startsWith(rootReal + "/")) {
+          return json(res, 403, { error: "project must live inside the workspace projects folder" });
+        }
+        await bridge.openProject(requestedReal);
         sys("open_project", String(body.projectDir));
         return json(res, 200, { ok: true });
       }
@@ -843,6 +1007,21 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
         await bridge.createProject(body.name, body.brief, body.meta, body.template ? String(body.template) : undefined);
         sys("create_project", `${body.name}${body.template ? ` (template: ${body.template})` : ""}`);
         return json(res, 200, { ok: true });
+      }
+      // Import a .blueline / .blueproject archive (base64) into the workspace, then open it.
+      if (req.method === "POST" && url.pathname === "/api/project/import") {
+        const body = await readBody(req);
+        if (!body.dataBase64) return json(res, 400, { error: "dataBase64 required" });
+        let result;
+        try {
+          result = importArchive(bridge.workspace, new Uint8Array(Buffer.from(String(body.dataBase64), "base64")));
+        } catch (err) {
+          return json(res, 400, { error: err instanceof Error ? err.message : String(err) });
+        }
+        sys("import_project", `${result.kind}: ${result.imported.map((d) => d.slug).join(", ")}`);
+        if (body.open !== false) await bridge.openProject(join(bridge.workspace.projectsDir, result.open));
+        bridge.broadcast({ type: "projects_changed" });
+        return json(res, 200, result);
       }
       if (url.pathname === "/api/templates") {
         if (req.method === "POST") {
@@ -923,10 +1102,16 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
         const rel = safeRelPath(url.searchParams.get("path") ?? "");
         const file = join(kind === "brand" ? bridge.workspace.brandDir : bridge.workspace.contextDir, rel);
         if (!existsSync(file) || !statSync(file).isFile()) return json(res, 404, { error: "not found" });
+        // A user could upload an .html/.svg source; serving it as its own type on the bridge
+        // origin would be stored XSS. Serve known-safe types inline; force everything else to
+        // download, and never let the browser sniff.
+        const ext = extname(file).toLowerCase();
+        const inlineOk = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".pdf", ".txt", ".md"]);
         res.writeHead(200, {
-          "content-type": MIME[extname(file).toLowerCase()] ?? "application/octet-stream",
-          "access-control-allow-origin": "*",
+          "content-type": inlineOk.has(ext) ? (MIME[ext] ?? "application/octet-stream") : "application/octet-stream",
+          "x-content-type-options": "nosniff",
           "cache-control": "no-store",
+          ...(inlineOk.has(ext) ? {} : { "content-disposition": "attachment" }),
         });
         return res.end(readFileSync(file));
       }
@@ -939,6 +1124,15 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
         rmSync(file);
         bridge.broadcast({ type: "files_changed", project: bridge.project?.slug });
         return json(res, 200, { ok: true });
+      }
+      // Rename/move workspace source files (area-prefixed paths, no overwrites).
+      if (req.method === "POST" && url.pathname === "/api/sources/move") {
+        const body = await readBody(req);
+        if (!Array.isArray(body.moves) || !body.moves.length) return json(res, 400, { error: "moves[] required" });
+        const moved = moveWorkspaceFiles(bridge.workspace, body.moves);
+        sys("move_sources", moved.join(", ").slice(0, 200));
+        bridge.broadcast({ type: "files_changed", project: bridge.project?.slug });
+        return json(res, 200, { ok: true, moved });
       }
 
       if (req.method === "POST" && url.pathname === "/api/meta") {
@@ -1032,32 +1226,47 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
       if (req.method === "POST" && url.pathname === "/api/images/upload") {
         const body = await readBody(req);
         if (!body.imageId || !body.dataBase64) return json(res, 400, { error: "imageId and dataBase64 required" });
+        // Strict id: prevents `..` escaping the images dir (replace(/[/\\]/) alone let ".." through).
+        const imageId = String(body.imageId);
+        if (!/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(imageId)) return json(res, 400, { error: "invalid imageId" });
         const project = bridge.requireProject();
-        const dir = join(project.imagesDir, String(body.imageId).replace(/[/\\]/g, ""));
-        if (!existsSync(dir)) return json(res, 404, { error: `no such image slot: ${body.imageId}` });
+        const dir = join(project.imagesDir, imageId);
+        if (!existsSync(dir)) return json(res, 404, { error: `no such image slot: ${imageId}` });
         const nums = readdirSync(dir)
           .map((f) => /^v(\d+)\.png$/.exec(f)?.[1])
           .filter(Boolean)
           .map(Number);
         const next = nums.length ? Math.max(...nums) + 1 : 1;
         writeFileSync(join(dir, `v${next}.png`), Buffer.from(String(body.dataBase64), "base64"));
-        selectVariant(project, body.imageId, next);
+        snapshotPage(project); // selectVariant rewrites page.html — must be undoable like siblings
+        selectVariant(project, imageId, next);
         bridge.broadcast({ type: "files_changed", project: project.slug });
         return json(res, 200, { ok: true, variant: next });
       }
-      if (req.method === "POST" && url.pathname === "/api/images/style") {
+      if (req.method === "POST" && url.pathname === "/api/images/delete") {
         const body = await readBody(req);
         if (!body.imageId) return json(res, 400, { error: "imageId required" });
         const project = bridge.requireProject();
         snapshotPage(project);
-        setImageStyle(project, body.imageId, {
-          objectPosition: body.objectPosition,
-          zoom: body.zoom,
-          frameWidthMm: body.frameWidthMm,
-          frameHeightMm: body.frameHeightMm,
-          translateXMm: body.translateXMm,
-          translateYMm: body.translateYMm,
-        });
+        deleteImage(project, body.imageId);
+        bridge.broadcast({ type: "files_changed", project: project.slug });
+        return json(res, 200, { ok: true });
+      }
+      if (req.method === "POST" && url.pathname === "/api/element/props") {
+        const body = await readBody(req);
+        if (!body.pcId || typeof body.props !== "object") return json(res, 400, { error: "pcId and props required" });
+        const project = bridge.requireProject();
+        snapshotPage(project);
+        setElementProps(project, body.pcId, body.props);
+        bridge.broadcast({ type: "files_changed", project: project.slug });
+        return json(res, 200, { ok: true });
+      }
+      if (req.method === "POST" && url.pathname === "/api/images/geometry") {
+        const body = await readBody(req);
+        if (!body.imageId) return json(res, 400, { error: "imageId required" });
+        const project = bridge.requireProject();
+        snapshotPage(project);
+        setImageGeometry(project, body.imageId, { frame: body.frame, layer: body.layer });
         bridge.broadcast({ type: "files_changed", project: project.slug });
         return json(res, 200, { ok: true });
       }
@@ -1224,6 +1433,9 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
       }
       if (req.method === "POST" && url.pathname === "/api/page/undo") {
         const project = bridge.requireProject();
+        // Undo while the agent is writing page.html would restore a stale snapshot over the
+        // in-progress page and the agent's next write clobbers the undo — refuse until idle.
+        if (bridge.runState(project.slug) !== "idle") return json(res, 409, { error: "Can't undo while the agent is running" });
         const depth = undoPage(project);
         sys("undo", `${project.slug} (${depth.undo} left)`);
         bridge.broadcast({ type: "files_changed", project: project.slug });
@@ -1231,6 +1443,7 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
       }
       if (req.method === "POST" && url.pathname === "/api/page/redo") {
         const project = bridge.requireProject();
+        if (bridge.runState(project.slug) !== "idle") return json(res, 409, { error: "Can't redo while the agent is running" });
         const depth = redoPage(project);
         sys("redo", `${project.slug} (${depth.redo} left)`);
         bridge.broadcast({ type: "files_changed", project: project.slug });
@@ -1291,10 +1504,17 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
     }
   });
 
-  const wss = new WebSocketServer({ server, path: "/ws" });
+  const wss = new WebSocketServer({
+    server,
+    path: "/ws",
+    // Same gate as HTTP: browsers send Origin on WS upgrades — reject foreign pages.
+    verifyClient: (info: { origin?: string; req: IncomingMessage }) =>
+      isLocalRequest(info.req) && (!info.origin || LOCAL_ORIGIN.test(info.origin)),
+  });
   wss.on("connection", (ws) => bridge.attach(ws));
 
-  await new Promise<void>((resolve) => server.listen(port, resolve));
+  // Loopback only — the bridge serves one desktop app, never the LAN.
+  await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", resolve));
   console.log(
     `Blueline bridge — workspace=${bridge.workspace.root} project=${bridge.project?.slug ?? "(none)"} http://localhost:${port}`,
   );

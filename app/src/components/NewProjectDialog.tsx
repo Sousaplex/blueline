@@ -36,6 +36,7 @@ export function NewProjectDialog({
   const [orientation, setOrientation] = useState<"portrait" | "landscape">("portrait");
   const [docType, setDocType] = useState("one-pager");
   const [pages, setPages] = useState(1);
+  const [autoPages, setAutoPages] = useState(false);
   const [widthMm, setWidthMm] = useState(210);
   const [heightMm, setHeightMm] = useState(297);
   const [creating, setCreating] = useState(false);
@@ -61,9 +62,10 @@ export function NewProjectDialog({
     setError(null);
     try {
       // A template dictates the format; blank projects take the picker's settings.
+      const autoOn = autoPages && !pageSize.startsWith("Slide");
       const settings = selected
         ? undefined
-        : { pageSize, orientation, docType, pages, ...(pageSize === "Custom" ? { widthMm, heightMm } : {}) };
+        : { pageSize, orientation, docType, pages, autoPages: autoOn, ...(pageSize === "Custom" ? { widthMm, heightMm } : {}) };
       await client.createProject(name, brief || undefined, selected?.slug, settings);
       setName("");
       setBrief("");
@@ -167,16 +169,36 @@ export function NewProjectDialog({
                       <SelectItem value="landscape">landscape</SelectItem>
                     </SelectContent>
                   </Select>
-                  <Input
-                    type="number"
-                    min={1}
-                    max={24}
-                    value={pages}
-                    className="h-8 w-16 text-xs"
-                    title={pageSize.startsWith("Slide") ? "Number of slides" : "Target page count — enforced by the reviewer"}
-                    onChange={(e) => setPages(Math.max(1, Math.min(24, Number(e.target.value) || 1)))}
-                  />
-                  <span className="text-xs text-muted-foreground">{pageSize.startsWith("Slide") ? "slides" : "pg"}</span>
+                  {autoPages && !pageSize.startsWith("Slide") ? (
+                    <div className="flex h-8 w-16 items-center justify-center rounded-md border text-xs text-muted-foreground" title="The agent uses as many pages as the content needs">
+                      Auto
+                    </div>
+                  ) : (
+                    <Input
+                      type="number"
+                      min={1}
+                      max={24}
+                      value={pages}
+                      className="h-8 w-16 text-xs"
+                      title={pageSize.startsWith("Slide") ? "Number of slides" : "Target page count — enforced by the reviewer"}
+                      onChange={(e) => setPages(Math.max(1, Math.min(24, Number(e.target.value) || 1)))}
+                    />
+                  )}
+                  {!(autoPages && !pageSize.startsWith("Slide")) && (
+                    <span className="text-xs text-muted-foreground">{pageSize.startsWith("Slide") ? "slides" : "pg"}</span>
+                  )}
+                  {!pageSize.startsWith("Slide") && (
+                    <button
+                      type="button"
+                      onClick={() => setAutoPages((v) => !v)}
+                      className={`h-8 rounded-md border px-2 text-xs transition-colors ${
+                        autoPages ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:text-foreground"
+                      }`}
+                      title="Auto: let the content decide how many pages — good for formatting a document, letter, or report"
+                    >
+                      Auto
+                    </button>
+                  )}
                 </div>
                 {pageSize === "Custom" && (
                   <div className="flex items-center gap-1.5">
@@ -205,7 +227,7 @@ export function NewProjectDialog({
                     idea,
                     selected
                       ? `${selected.settings.pageSize} ${selected.settings.orientation}, ${selected.settings.pages} page(s) (template: ${selected.name})`
-                      : `${pageSize} ${orientation}, ${pages} page(s)`,
+                      : `${pageSize} ${orientation}, ${autoPages && !pageSize.startsWith("Slide") ? "auto page count" : `${pages} page(s)`}`,
                   )
                 }
               />

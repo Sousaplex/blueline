@@ -22,7 +22,36 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import type { SystemEvent } from "../engine-client";
+import type { ContextUsage, SystemEvent } from "../engine-client";
+
+/** "68.4k" / "1.2M" style compact token count. */
+function compact(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 100_000 ? 0 : 1)}k`;
+  return String(n);
+}
+
+/** Slim context-window meter: a bar + "34% · 68k/200k". Hidden until a run reports usage. */
+function ContextMeter({ usage }: { usage: ContextUsage }) {
+  const pct = usage.percent ?? (usage.tokens != null && usage.contextWindow ? (usage.tokens / usage.contextWindow) * 100 : null);
+  if (pct == null) return null;
+  const clamped = Math.max(0, Math.min(100, pct));
+  const tone = clamped >= 90 ? "bg-destructive" : clamped >= 75 ? "bg-amber-500" : "bg-primary/70";
+  return (
+    <div
+      className="flex items-center gap-1.5 text-[11px] text-muted-foreground"
+      title={`Context window: ${usage.tokens ?? "?"} / ${usage.contextWindow} tokens (${clamped.toFixed(0)}%)`}
+    >
+      <div className="h-1.5 w-14 overflow-hidden rounded-full bg-muted">
+        <div className={cn("h-full rounded-full transition-all", tone)} style={{ width: `${clamped}%` }} />
+      </div>
+      <span className="tabular-nums">
+        {clamped.toFixed(0)}%
+        {usage.tokens != null && <span className="ml-1 hidden sm:inline opacity-70">{compact(usage.tokens)}/{compact(usage.contextWindow)}</span>}
+      </span>
+    </div>
+  );
+}
 
 /** Compact markdown for agent messages — chat-sized type, no giant headings. */
 function Md({ text }: { text: string }) {
@@ -204,11 +233,15 @@ export function AgentPane({
   systemFeed,
   running,
   onChat,
+  contextUsage,
+  onExportSession,
 }: {
   feed: FeedItem[];
   systemFeed: SystemEvent[];
   running: boolean;
   onChat: (text: string) => void;
+  contextUsage?: ContextUsage | null;
+  onExportSession?: () => void;
 }) {
   const [draft, setDraft] = useState("");
   const [tab, setTab] = useState<"agent" | "system">("agent");
@@ -257,6 +290,18 @@ export function AgentPane({
           )}
         </button>
         <div className="flex-1" />
+        {tab === "agent" && contextUsage && <ContextMeter usage={contextUsage} />}
+        {tab === "agent" && onExportSession && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-7 text-muted-foreground hover:text-foreground"
+            title="Export this project's full conversation (prompts, tool calls, results) for analysis"
+            onClick={onExportSession}
+          >
+            <Download className="size-3.5" />
+          </Button>
+        )}
         {running ? (
           <span className="flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
             <Loader2 className="size-3 animate-spin" />

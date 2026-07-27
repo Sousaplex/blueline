@@ -22,6 +22,7 @@ export interface PageSettings {
   pageSize: string;
   orientation: "portrait" | "landscape";
   pages: number;
+  autoPages?: boolean; // let content decide the page count — reviewer skips the count gate
   widthMm: number | null;
   heightMm: number | null;
   docType?: string;
@@ -117,17 +118,10 @@ export type RunState = "idle" | "queued" | "running";
 
 /** Image geometry edits. img-level: objectPosition (pan) + zoom (scale within crop).
  *  frame-level: width/height (resize the box) + translate (move it on the page). */
-export interface ImageStyle {
-  objectPosition?: string;
-  zoom?: number;
-  frameWidthMm?: number;
-  frameHeightMm?: number;
-  translateXMm?: number;
-  translateYMm?: number;
-  // Decoupled crop-window + image-layer model (Figma-style).
-  imgWidthMm?: number;
-  imgLeftMm?: number;
-  imgTopMm?: number;
+/** Compiled image geometry (see docs/layer-model.md): the crop FRAME + the inner photo LAYER. */
+export interface ImageGeometry {
+  frame?: { leftMm: number; topMm: number; widthMm: number; heightMm: number };
+  layer?: { widthMm: number; leftMm: number; topMm: number };
 }
 
 export interface SystemEvent {
@@ -155,9 +149,36 @@ export interface SetupState {
   designer: string;
 }
 
+/** Live context-window usage of a project's Pi session. tokens/percent are null right after
+ *  a compaction (before the next model response re-establishes the count). */
+export interface ContextUsage {
+  tokens: number | null;
+  contextWindow: number;
+  percent: number | null;
+}
+
+export interface SessionStats {
+  totalMessages: number;
+  userMessages: number;
+  assistantMessages: number;
+  toolCalls: number;
+  toolResults: number;
+  tokens: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number };
+  cost: number;
+  contextUsage?: ContextUsage;
+}
+
+export interface ArchiveImportResult {
+  kind: "document" | "project";
+  imported: { slug: string; displayName: string }[];
+  open: string;
+  notes: string[];
+}
+
 export type EngineEvent =
   | { type: "hello"; project: string | null; runStates: Record<string, RunState>; replay: EngineEvent[] }
   | { type: "text_delta"; project?: string; delta: string }
+  | { type: "context_usage"; project?: string; tokens: number | null; contextWindow: number; percent: number | null }
   | { type: "chat"; project?: string; text: string }
   | { type: "tool_start"; project?: string; tool: string; args: Record<string, unknown> }
   | { type: "tool_end"; project?: string; tool: string; summary: string }
@@ -189,6 +210,9 @@ declare global {
   interface Window {
     blueline?: {
       exportPdf(): Promise<string | null>;
+      saveTextFile(defaultName: string, content: string): Promise<string | null>;
+      saveBinaryFile(defaultName: string, base64: string): Promise<string | null>;
+      openArchiveFile(): Promise<{ name: string; base64: string } | null>;
       chooseDirectory(): Promise<string | null>;
       revealInFinder(path: string): Promise<void>;
       openPath(path: string): Promise<void>;
@@ -199,6 +223,7 @@ declare global {
       onUpdateAvailable(cb: (version: string) => void): () => void;
       onUpdateProgress(cb: (percent: number) => void): () => void;
       onUpdateDownloaded(cb: (version: string) => void): () => void;
+      onUpdateError(cb: (message: string) => void): () => void;
       isElectron: true;
     };
   }
@@ -245,6 +270,16 @@ export interface EngineClient {
   redoPage(): Promise<{ changed: string[] }>;
   /** System-tab replay: recent API/MCP-triggered actions. */
   getSystemEvents(): Promise<SystemEvent[]>;
+  /** Live token/context-window stats for a project's session (null if not currently loaded). */
+  getSessionStats(slug: string): Promise<{ stats: SessionStats | null; contextUsage: ContextUsage | null }>;
+  /** Export the project's full Pi conversation (all threads). Saves to disk in Electron
+   *  (returns the path), or triggers a browser download (returns null path). */
+  exportSession(slug: string, format: "json" | "jsonl"): Promise<{ path: string | null }>;
+  /** Export a portable archive: kind=file (.blueline, one document) or kind=project
+   *  (.blueproject, the whole family + shared assets). Electron saves + returns the path. */
+  exportArchive(slug: string, kind: "file" | "project"): Promise<{ path: string | null; filename: string }>;
+  /** Import a .blueline/.blueproject archive (base64). Returns what was imported + which to open. */
+  importArchive(base64: string): Promise<ArchiveImportResult>;
   gitStatus(): Promise<GitStatus>;
   gitConnect(url: string): Promise<GitStatus>;
   gitDisconnect(wipeHistory?: boolean): Promise<GitStatus>;
@@ -273,11 +308,25 @@ export interface EngineClient {
   selectVariant(imageId: string, variant: number): Promise<void>;
   generateMoreImages(imageId: string): Promise<void>;
   uploadImageVariant(imageId: string, dataBase64: string): Promise<void>;
-  setImageStyle(imageId: string, style: ImageStyle): Promise<void>;
+  setImageGeometry(imageId: string, geom: ImageGeometry): Promise<void>;
+  /** Delete an image (its whole slot/frame/img block). */
+  deleteImage(imageId: string): Promise<void>;
+  /** Set whitelisted inline style props (font/color/weight/align/background/border/width…). */
+  setElementProps(pcId: string, props: Record<string, string>): Promise<void>;
   proofMeta(round?: number): Promise<{ pages: number }>;
   proofPageUrl(index: number, cacheKey: number, round?: number): string;
   fileUrl(rel: string, cacheKey: number): string;
   subscribe(listener: (event: EngineEvent) => void): () => void;
+}
+
+/** Base64-encode bytes in chunks (String.fromCharCode(...bigArray) overflows the stack). */
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
 }
 
 async function post(path: string, body?: unknown): Promise<void> {
@@ -470,8 +519,14 @@ export class BrowserEngineClient implements EngineClient {
   selectVariant(imageId: string, variant: number) { return post("/api/variant", { imageId, variant }); }
   generateMoreImages(imageId: string) { return post("/api/images/generate", { imageId }); }
   uploadImageVariant(imageId: string, dataBase64: string) { return post("/api/images/upload", { imageId, dataBase64 }); }
-  setImageStyle(imageId: string, style: ImageStyle) {
-    return post("/api/images/style", { imageId, ...style });
+  setImageGeometry(imageId: string, geom: ImageGeometry) {
+    return post("/api/images/geometry", { imageId, ...geom });
+  }
+  deleteImage(imageId: string) {
+    return post("/api/images/delete", { imageId });
+  }
+  setElementProps(pcId: string, props: Record<string, string>) {
+    return post("/api/element/props", { pcId, props });
   }
 
   tagElement(path: string, pcId: string) { return post("/api/element/tag", { path, pcId }); }
@@ -508,6 +563,67 @@ export class BrowserEngineClient implements EngineClient {
   async getSystemEvents(): Promise<SystemEvent[]> {
     const res = await fetch("/api/system");
     return (await res.json()).events ?? [];
+  }
+
+  async getSessionStats(slug: string): Promise<{ stats: SessionStats | null; contextUsage: ContextUsage | null }> {
+    const res = await fetch(`/api/session/stats?slug=${encodeURIComponent(slug)}`);
+    if (!res.ok) return { stats: null, contextUsage: null };
+    return res.json();
+  }
+
+  async exportSession(slug: string, format: "json" | "jsonl"): Promise<{ path: string | null }> {
+    const res = await fetch(`/api/session/export?slug=${encodeURIComponent(slug)}&format=${format}`);
+    if (!res.ok) throw new Error((await res.json().catch(() => ({})) as any).error ?? `export: HTTP ${res.status}`);
+    const content = await res.text();
+    const name = `blueline-session-${slug}.${format}`;
+    // Electron: native Save dialog → real file the user can hand off. Browser: blob download.
+    if (window.blueline?.saveTextFile) {
+      const path = await window.blueline.saveTextFile(name, content);
+      return { path };
+    }
+    const blob = new Blob([content], { type: format === "json" ? "application/json" : "application/x-ndjson" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    return { path: null };
+  }
+
+  async exportArchive(slug: string, kind: "file" | "project"): Promise<{ path: string | null; filename: string }> {
+    const res = await fetch(`/api/project/export?slug=${encodeURIComponent(slug)}&kind=${kind}`);
+    if (!res.ok) throw new Error((await res.json().catch(() => ({})) as any).error ?? `export: HTTP ${res.status}`);
+    const disposition = res.headers.get("content-disposition") ?? "";
+    const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? `export.${kind === "project" ? "blueproject" : "blueline"}`;
+    const buf = new Uint8Array(await res.arrayBuffer());
+    if (window.blueline?.saveBinaryFile) {
+      const path = await window.blueline.saveBinaryFile(filename, bytesToBase64(buf));
+      return { path, filename };
+    }
+    const blob = new Blob([buf], { type: "application/zip" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    return { path: null, filename };
+  }
+
+  async importArchive(base64: string): Promise<ArchiveImportResult> {
+    const res = await fetch("/api/project/import", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ dataBase64: base64 }),
+    });
+    const payload = await res.json();
+    if (!res.ok) throw new Error(payload.error ?? `import: HTTP ${res.status}`);
+    return payload;
   }
 
   async gitStatus(): Promise<GitStatus> {

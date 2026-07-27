@@ -256,20 +256,39 @@ export function LeftPane({
                     <SelectItem value="landscape">landscape</SelectItem>
                   </SelectContent>
                 </Select>
-                <Input
-                  key={`pages-${project.slug}-${meta.settings.pages}`}
-                  type="number"
-                  min={1}
-                  max={24}
-                  defaultValue={meta.settings.pages}
-                  className="h-7 w-16 text-xs"
-                  title="Target page count — enforced by the reviewer"
-                  onBlur={(e) => {
-                    const v = Number(e.target.value);
-                    if (v >= 1 && v !== meta.settings.pages) act(() => client.updateMeta({ settings: { pages: v } }));
-                  }}
-                />
-                <span className="text-xs text-muted-foreground">pg</span>
+                {meta.settings.autoPages ? (
+                  <div
+                    className="flex h-7 w-16 items-center justify-center rounded-md border text-xs text-muted-foreground"
+                    title="The agent uses as many pages as the content needs"
+                  >
+                    Auto
+                  </div>
+                ) : (
+                  <Input
+                    key={`pages-${project.slug}-${meta.settings.pages}`}
+                    type="number"
+                    min={1}
+                    max={24}
+                    defaultValue={meta.settings.pages}
+                    className="h-7 w-16 text-xs"
+                    title="Target page count — enforced by the reviewer"
+                    onBlur={(e) => {
+                      const v = Number(e.target.value);
+                      if (v >= 1 && v !== meta.settings.pages) act(() => client.updateMeta({ settings: { pages: v } }));
+                    }}
+                  />
+                )}
+                {!meta.settings.autoPages && <span className="text-xs text-muted-foreground">pg</span>}
+                <button
+                  type="button"
+                  onClick={() => act(() => client.updateMeta({ settings: { autoPages: !meta.settings.autoPages } }))}
+                  className={`h-7 rounded-md border px-2 text-xs transition-colors ${
+                    meta.settings.autoPages ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                  title="Auto: let the content decide how many pages — good for formatting a document, letter, or report"
+                >
+                  Auto
+                </button>
               </div>
               {meta.settings.pageSize === "Custom" && (
                 <div className="flex items-center gap-1.5">
