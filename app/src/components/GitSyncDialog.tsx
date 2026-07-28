@@ -30,6 +30,7 @@ export function GitSyncDialog({ client }: { client: EngineClient }) {
   const [wipeHistory, setWipeHistory] = useState(false);
   const [conflicts, setConflicts] = useState<DocConflict[] | null>(null);
   const [choices, setChoices] = useState<Record<string, Choice>>({});
+  const [overwriting, setOverwriting] = useState(false);
 
   const refresh = () => client.gitStatus().then(setStatus).catch(() => setStatus(null));
 
@@ -49,6 +50,22 @@ export function GitSyncDialog({ client }: { client: EngineClient }) {
           setConflicts(null);
           setNote(r.summary || "Synced.");
         }
+        return refresh();
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(null));
+  };
+
+  const doOverwrite = (direction: "push" | "pull") => {
+    setBusy("overwrite");
+    setError(null);
+    setNote(null);
+    void client
+      .forceOverwrite(direction)
+      .then((r) => {
+        setOverwriting(false);
+        setConflicts(null);
+        setNote(r.summary);
         return refresh();
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
@@ -232,6 +249,40 @@ export function GitSyncDialog({ client }: { client: EngineClient }) {
                     <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => setConfirmDisconnect(false)}>Cancel</Button>
                   </div>
                 </div>
+              )}
+
+              {!changing && !confirmDisconnect && (
+                overwriting ? (
+                  <div className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-2.5">
+                    <p className="text-xs font-medium text-destructive">
+                      Force overwrite — discards work. Use only when a sync is too tangled to merge normally.
+                    </p>
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="destructive" className="flex-1" disabled={busy !== null} onClick={() => doOverwrite("push")}>
+                        {busy === "overwrite" ? <Loader2 className="animate-spin" data-slot="icon" /> : null} Push mine over remote
+                      </Button>
+                      <Button size="sm" variant="outline" className="flex-1" disabled={busy !== null} onClick={() => doOverwrite("pull")}>
+                        Reset mine to remote
+                      </Button>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      <strong>Push mine over remote</strong>: the repo becomes exactly your workspace — teammates' un-synced remote
+                      changes are lost.
+                      <br />
+                      <strong>Reset mine to remote</strong>: your workspace becomes exactly the repo — your uncommitted local changes are
+                      lost (brand-new files you never synced are kept).
+                    </p>
+                    <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => setOverwriting(false)}>Cancel</Button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+                    onClick={() => { setOverwriting(true); setError(null); setNote(null); }}
+                  >
+                    Force overwrite…
+                  </button>
+                )
               )}
             </div>
           ) : (

@@ -261,34 +261,55 @@ export async function gitSync(root: string, message?: string): Promise<SyncResul
   if (hasUpstream) {
     await git(root, "fetch", "--quiet", "origin").catch(() => {});
     const before = await git(root, "rev-parse", "HEAD").catch(() => "");
-    try {
-      await git(root, "merge", "--no-edit", `origin/${branch}`);
-    } catch {
-      const conflicts = await collectConflicts(root);
-      if (conflicts.length) {
-        return { pulled: false, committed, pushed: false, conflicts, summary: "paused on a merge conflict — needs resolution" };
-      }
-      await git(root, "merge", "--abort").catch(() => {});
-      throw new Error("Merge failed. Try syncing again, or resolve the workspace in a terminal.");
+    if ((await mergeRemote(root, branch)) === "conflict") {
+      return { pulled: false, committed, pushed: false, conflicts: await collectConflicts(root), summary: "paused on a merge conflict — needs resolution" };
     }
     pulled = before !== (await git(root, "rev-parse", "HEAD").catch(() => before));
     if (pulled) parts.push("pulled remote changes");
   }
 
-  const pushed = await pushWithRetry(root, branch, parts);
-  return { pulled, committed, pushed, summary: parts.length ? parts.join(", ") : "already up to date" };
+  const push = await pushWithRetry(root, branch, parts);
+  if (push.conflicts) {
+    return { pulled, committed, pushed: false, conflicts: push.conflicts, summary: "paused on a merge conflict — needs resolution" };
+  }
+  return { pulled, committed, pushed: push.pushed, summary: parts.length ? parts.join(", ") : "already up to date" };
 }
 
-/** Push; on a race (teammate pushed in between) merge their changes and retry once. */
-async function pushWithRetry(root: string, branch: string, parts: string[]): Promise<boolean> {
+/**
+ * Merge origin/<branch> into the current branch. Heals a history unrelated to the remote's — the
+ * mark of a workspace connected before adopt-on-connect — once with --allow-unrelated-histories.
+ * Returns "ok" or "conflict" (leaving the merge in progress for the resolver); throws otherwise.
+ */
+async function mergeRemote(root: string, branch: string): Promise<"ok" | "conflict"> {
+  try {
+    await git(root, "merge", "--no-edit", `origin/${branch}`);
+    return "ok";
+  } catch (err: any) {
+    if (/unrelated histories/i.test(String(err.message))) {
+      try {
+        await git(root, "merge", "--no-edit", "--allow-unrelated-histories", `origin/${branch}`);
+        return "ok";
+      } catch {
+        /* fall through to conflict/abort handling below */
+      }
+    }
+    if ((await collectConflicts(root)).length) return "conflict";
+    await git(root, "merge", "--abort").catch(() => {});
+    throw new Error("Merge failed. Try syncing again, or resolve the workspace in a terminal.");
+  }
+}
+
+/** Push; on a race (teammate pushed in between) merge their changes and retry once. Returns a
+ *  conflict list instead of throwing when that concurrent merge itself conflicts. */
+async function pushWithRetry(root: string, branch: string, parts: string[]): Promise<{ pushed: boolean; conflicts?: DocConflict[] }> {
   const status = await gitStatus(root);
-  if (status.ahead <= 0 && (await git(root, "rev-parse", "--abbrev-ref", "@{upstream}").catch(() => null))) return false;
+  if (status.ahead <= 0 && (await git(root, "rev-parse", "--abbrev-ref", "@{upstream}").catch(() => null))) return { pushed: false };
   try {
     await git(root, "push", "-u", "origin", branch);
   } catch (err: any) {
     if (/non-fast-forward|rejected|fetch first|behind|stale info/i.test(String(err.message))) {
       await git(root, "fetch", "--quiet", "origin");
-      await git(root, "merge", "--no-edit", `origin/${branch}`); // disjoint edits auto-merge
+      if ((await mergeRemote(root, branch)) === "conflict") return { pushed: false, conflicts: await collectConflicts(root) };
       await git(root, "push", "origin", branch);
       parts.push("merged a teammate's concurrent changes");
     } else {
@@ -296,7 +317,38 @@ async function pushWithRetry(root: string, branch: string, parts: string[]): Pro
     }
   }
   parts.push("pushed");
-  return true;
+  return { pushed: true };
+}
+
+/**
+ * The gated "just make one side win" escape hatch for when a merge is too tangled to resolve
+ * document-by-document (e.g. wildly unrelated histories). DESTRUCTIVE — the UI must warn first.
+ *   "push" = the remote is overwritten with your local workspace (teammates' remote-only work lost).
+ *   "pull" = your local workspace is reset to exactly the remote (your uncommitted local work lost;
+ *            brand-new files you never committed are left in place).
+ */
+export async function gitForceOverwrite(root: string, direction: "push" | "pull"): Promise<{ summary: string }> {
+  const status = await gitStatus(root);
+  if (!status.isRepo || !status.remote) throw new Error("Workspace is not connected to a remote — connect a repo first");
+  const branch = status.branch ?? "main";
+  await git(root, "merge", "--abort").catch(() => {}); // clear any half-finished merge/rebase
+  await git(root, "rebase", "--abort").catch(() => {});
+  ensureGitignore(root);
+  await untrackSecrets(root);
+  await git(root, "fetch", "--quiet", "origin").catch(() => {});
+
+  if (direction === "pull") {
+    await git(root, "reset", "--hard", `origin/${branch}`);
+    return { summary: "Local workspace reset to match the remote. (Uncommitted local changes were discarded; brand-new files you never synced were kept.)" };
+  }
+  // push: force the remote to match local.
+  await git(root, "add", "-A");
+  if (await git(root, "status", "--porcelain")) {
+    await git(root, "commit", "-m", "blueline workspace overwrite");
+  }
+  await git(root, "branch", "--set-upstream-to", `origin/${branch}`).catch(() => {});
+  await git(root, "push", "--force", "origin", branch);
+  return { summary: "Remote overwritten with your local workspace. (Any remote-only changes were discarded.)" };
 }
 
 export type ConflictChoice = "mine" | "theirs" | "fork";
@@ -375,9 +427,9 @@ export async function gitResolveConflicts(root: string, resolutions: ConflictRes
   await git(root, "commit", "--no-edit");
   const branch = (await gitStatus(root)).branch ?? "main";
   const parts: string[] = [];
-  const pushed = await pushWithRetry(root, branch, parts);
+  const push = await pushWithRetry(root, branch, parts);
   return {
-    pushed,
+    pushed: push.pushed,
     forked,
     summary: [forked.length ? `forked ${forked.length} document(s)` : "", ...parts].filter(Boolean).join(", ") || "resolved",
   };

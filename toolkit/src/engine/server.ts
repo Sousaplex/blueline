@@ -14,7 +14,7 @@ import { compilePage } from "./compile.ts";
 import { resetLedger, takeLedger } from "./cost-ledger.ts";
 import { textCost } from "./pricing.ts";
 import { draftBrief } from "./brief-draft.ts";
-import { gitClone, gitConnect, gitDisconnect, gitResolveConflicts, gitStatus, gitSync } from "./git-sync.ts";
+import { gitClone, gitConnect, gitDisconnect, gitForceOverwrite, gitResolveConflicts, gitStatus, gitSync } from "./git-sync.ts";
 import { generateImages } from "./images.ts";
 import {
   deleteElement,
@@ -1486,6 +1486,16 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
         const body = await readBody(req);
         const result = await gitSync(bridge.workspace.root, body.message ? String(body.message) : undefined);
         sys("git_sync", result.summary);
+        bridge.broadcast({ type: "files_changed", project: bridge.project?.slug });
+        return json(res, 200, { ok: true, ...result });
+      }
+      // Gated force-overwrite: make one side win. direction=push (remote←local) | pull (local←remote).
+      if (req.method === "POST" && url.pathname === "/api/git/overwrite") {
+        const body = await readBody(req);
+        const direction = body.direction === "pull" ? "pull" : "push";
+        const result = await gitForceOverwrite(bridge.workspace.root, direction);
+        sys("git_overwrite", `${direction}: ${result.summary}`);
+        bridge.broadcast({ type: "projects_changed" });
         bridge.broadcast({ type: "files_changed", project: bridge.project?.slug });
         return json(res, 200, { ok: true, ...result });
       }

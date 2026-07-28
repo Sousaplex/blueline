@@ -305,6 +305,8 @@ export interface EngineClient {
   gitSync(message?: string): Promise<SyncResult>;
   /** Resolve an in-progress merge conflict, per document: keep mine / keep theirs / fork (keep both). */
   resolveConflicts(resolutions: { docId: string; choice: "mine" | "theirs" | "fork" }[]): Promise<ResolveResult>;
+  /** DESTRUCTIVE escape hatch: force one side to win. push = remote←local, pull = local←remote. */
+  forceOverwrite(direction: "push" | "pull"): Promise<{ summary: string }>;
   gitClone(url: string, dest: string): Promise<void>;
   /** Pick a workspace dir (native dialog in Electron, path prompt in browser) and switch to it. */
   chooseWorkspace(): Promise<boolean>;
@@ -693,6 +695,17 @@ export class BrowserEngineClient implements EngineClient {
     });
     const payload = await res.json();
     if (!res.ok) throw new Error(payload.error ?? `resolve: HTTP ${res.status}`);
+    return payload;
+  }
+
+  async forceOverwrite(direction: "push" | "pull"): Promise<{ summary: string }> {
+    const res = await fetch("/api/git/overwrite", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ direction }),
+    });
+    const payload = await res.json();
+    if (!res.ok) throw new Error(payload.error ?? `overwrite: HTTP ${res.status}`);
     return payload;
   }
 

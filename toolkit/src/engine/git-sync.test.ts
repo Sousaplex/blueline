@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { gitConnect, gitResolveConflicts, gitStatus, gitSync } from "./git-sync.ts";
+import { gitConnect, gitForceOverwrite, gitResolveConflicts, gitStatus, gitSync } from "./git-sync.ts";
 
 // Hermetic git: identity + a writable global config (so we can map a github-looking URL to a
 // local bare repo via insteadOf — gitConnect only accepts https/git@ URLs, by design).
@@ -69,6 +69,42 @@ test("gitSync detects a same-document conflict; fork keeps BOTH versions", async
   assert.equal(remoteShow(remote, "projects/doc/page.html").trim(), "A version", "shared doc keeps the remote's version");
   assert.equal(remoteShow(remote, `projects/${newId}/page.html`).trim(), "B version", "my version survives as a new document");
   assert.match(remoteShow(remote, `projects/${newId}/project.json`), /'s version\)/, "fork is credited to the user");
+});
+
+/** A workspace mimicking the OLD gitConnect: fresh init, remote added + fetched, but never
+ *  adopted — so its history is unrelated to the remote's. */
+function legacyUnrelatedWs(url: string): string {
+  const ws = mkdtempSync(join(tmpdir(), "gsync-legacy-"));
+  mkdirSync(join(ws, "projects"), { recursive: true });
+  writeFileSync(join(ws, "projects", "mine.txt"), "local work\n");
+  sh(ws, "init", "-b", "main");
+  sh(ws, "remote", "add", "origin", url);
+  sh(ws, "fetch", "origin");
+  return ws;
+}
+
+test("gitSync heals a legacy workspace whose history is unrelated to the remote", async () => {
+  const { url, path } = seededRemote();
+  const ws = legacyUnrelatedWs(url);
+  const res = await gitSync(ws, "first sync");
+  assert.ok(res.pushed, "healed the unrelated history and pushed (no 'refusing to merge unrelated histories')");
+  const files = remoteFiles(path);
+  assert.ok(files.includes("projects/mine.txt"), "my work reached the remote");
+  assert.ok(files.includes("README.md"), "the remote's content is merged in, not lost");
+});
+
+test("gitForceOverwrite push replaces the remote with local; pull resets local to the remote", async () => {
+  const push = seededRemote();
+  const wsPush = legacyUnrelatedWs(push.url);
+  await gitForceOverwrite(wsPush, "push");
+  const pushed = remoteFiles(push.path);
+  assert.ok(pushed.includes("projects/mine.txt"), "local made it to the remote");
+  assert.ok(!pushed.includes("README.md"), "remote overwritten — its old content is gone");
+
+  const pull = seededRemote();
+  const wsPull = legacyUnrelatedWs(pull.url);
+  await gitForceOverwrite(wsPull, "pull");
+  assert.ok(existsSync(join(wsPull, "README.md")), "local now matches the remote (README pulled in)");
 });
 
 test("gitResolveConflicts 'mine' keeps my version on the shared document", async () => {

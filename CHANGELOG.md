@@ -5,6 +5,21 @@ All notable user-facing changes to Blueline. Kept from v0.17.0 onward
 [Keep a Changelog](https://keepachangelog.com/); versions match `app/package.json`
 and the GitHub release tags.
 
+## [0.30.0]
+
+Sync heals older workspaces, and adds a gated force-overwrite escape hatch.
+
+### Fixed
+- **"refusing to merge unrelated histories" on sync.** A workspace connected before adopt-on-connect
+  (0.28) had a git history unrelated to the remote's, so the new merge-based sync refused it. Sync now
+  heals that automatically the first time — it reconciles the two histories instead of erroring.
+
+### Added
+- **Force overwrite (with a warning).** For a sync too tangled to merge document-by-document, the Git
+  panel now has a gated **Force overwrite…** with two clearly-warned choices: *Push mine over remote*
+  (the repo becomes exactly your workspace) or *Reset mine to remote* (your workspace becomes exactly
+  the repo). Both are destructive by design and spell out what's lost before you commit to it.
+
 ## [0.29.0]
 
 Real multi-person collaboration: unique document ids + a merge-conflict resolver with fork.
