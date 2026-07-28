@@ -4,9 +4,21 @@
 //   <root>/brand/             — brand guidelines + assets (agent read-only)
 // The Blueline repo itself is the default workspace (backwards compatible
 // with the demo). The last-used workspace persists in config/workspace.json.
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { DATA_ROOT } from "./config.ts";
+
+/** A short filesystem-safe random id (base36, ~41 bits) appended to document folder names so
+ *  two people who independently create documents with the SAME name never collide in git —
+ *  no central coordination needed. Lowercase avoids case-insensitive-filesystem clashes. */
+export function shortId(len = 8): string {
+  const alphabet = "0123456789abcdefghijklmnopqrstuvwxyz";
+  const bytes = randomBytes(len);
+  let out = "";
+  for (let i = 0; i < len; i++) out += alphabet[bytes[i]! % alphabet.length];
+  return out;
+}
 
 const STATE_PATH = join(DATA_ROOT, "config", "workspace.json");
 
@@ -54,15 +66,18 @@ export class Workspace {
   }
 
   createProject(name: string, brief: string): { dir: string; slug: string } {
-    const slug = name
+    const base = name
       .toLowerCase()
       .trim()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "")
-      .slice(0, 60);
-    if (!slug) throw new Error("Project name produces an empty slug");
+      .slice(0, 48);
+    if (!base) throw new Error("Project name produces an empty slug");
+    // Folder id = readable slug + a random suffix, so the SAME name from two people never
+    // collides in a shared git repo. The display name (which may repeat) lives in project.json.
+    const slug = `${base}-${shortId()}`;
     const dir = join(this.projectsDir, slug);
-    if (existsSync(dir)) throw new Error(`Project "${slug}" already exists`);
+    if (existsSync(dir)) throw new Error(`Project "${slug}" already exists`); // astronomically unlikely
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "brief.md"), brief.trim() + "\n");
     return { dir, slug };

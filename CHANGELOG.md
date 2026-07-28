@@ -5,6 +5,16 @@ All notable user-facing changes to Blueline. Kept from v0.17.0 onward
 [Keep a Changelog](https://keepachangelog.com/); versions match `app/package.json`
 and the GitHub release tags.
 
+## [0.29.0]
+
+Documents get unique ids so two people never collide on the same name.
+
+### Changed
+- **Every new document gets a unique folder id** (a readable slug plus a short random suffix,
+  e.g. `acme-flyer-x7k2p9qm`). Two people who independently create documents with the *same
+  name* in a shared repo no longer clobber each other — both coexist. The display name is free to
+  repeat. Existing documents keep their current folders unchanged.
+
 ## [0.28.0]
 
 Workspace git sync now works with team repos that already have content.

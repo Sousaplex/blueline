@@ -29,6 +29,7 @@ export interface PageSettings {
 }
 
 export interface ProjectMeta {
+  id: string; // stable unique document id (folder name: readable slug + random suffix)
   displayName: string;
   series: string | null;
   kind: "document" | "variant";

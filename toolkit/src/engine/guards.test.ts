@@ -346,6 +346,22 @@ const { Workspace } = await import("./workspace.ts");
 const { saveTemplate, listTemplates, instantiateTemplate, templateBrief, deleteTemplate } = await import("./templates.ts");
 const { buildSystemPrompt } = await import("./prompt.ts");
 
+test("same name twice yields distinct unique folder ids (no cross-user collision)", () => {
+  const ws = new Workspace(mkdtempSync(join(tmpdir(), "pc-ws-"))).ensure();
+  const a = ws.createProject("Acme Flyer", "# a");
+  const b = ws.createProject("Acme Flyer", "# b");
+  assert.notEqual(a.slug, b.slug, "two 'Acme Flyer's get different folder ids");
+  assert.match(a.slug, /^acme-flyer-[0-9a-z]{8}$/, "readable slug + random suffix");
+  // meta.id defaults to the folder id; displayName (set by the create flow) can duplicate freely.
+  const pa = new Project(a.dir, ws);
+  assert.equal(pa.meta().id, a.slug, "meta.id is the folder id");
+  pa.updateMeta({ displayName: "Acme Flyer" });
+  const pb = new Project(b.dir, ws);
+  pb.updateMeta({ displayName: "Acme Flyer" });
+  assert.equal(pa.meta().displayName, pb.meta().displayName, "duplicate display names are allowed");
+  assert.equal(pa.meta().id !== pb.meta().id, true, "but ids stay distinct");
+});
+
 test("templates: save from project, list, instantiate into a new project", () => {
   const ws = new Workspace(mkdtempSync(join(tmpdir(), "pc-ws-"))).ensure();
   const { dir } = ws.createProject("invoice-master", "# Brief: monthly invoice");

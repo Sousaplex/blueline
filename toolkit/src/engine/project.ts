@@ -44,6 +44,7 @@ export function pageDims(settings: PageSettings): { w: number; h: number } {
 }
 
 export interface ProjectMeta {
+  id: string; // stable unique document id (= folder name: readable slug + random suffix)
   displayName: string;
   series: string | null; // document-family name; drives grouping + export filenames
   kind: "document" | "variant";
@@ -150,6 +151,7 @@ export class Project {
       }
     }
     return {
+      id: stored.id ?? this.slug, // existing docs: the folder name IS their stable id
       displayName: stored.displayName?.trim() || this.slug,
       series: stored.series ?? null,
       kind: stored.kind === "variant" ? "variant" : "document",
