@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { gitConnect, gitStatus, gitSync } from "./git-sync.ts";
+import { gitConnect, gitResolveConflicts, gitStatus, gitSync } from "./git-sync.ts";
 
 // Hermetic git: identity + a writable global config (so we can map a github-looking URL to a
 // local bare repo via insteadOf — gitConnect only accepts https/git@ URLs, by design).
@@ -21,6 +21,63 @@ Object.assign(process.env, {
 const sh = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, stdio: "pipe" });
 const remoteFiles = (remote: string) =>
   execFileSync("git", ["--git-dir", remote, "ls-tree", "-r", "--name-only", "main"]).toString();
+const remoteShow = (remote: string, path: string) =>
+  execFileSync("git", ["--git-dir", remote, "show", `main:${path}`]).toString();
+
+/** Seed a remote that already contains one document, and return two connected workspaces plus a
+ *  same-file conflict staged in B (B edited projects/doc/page.html differently from A, who pushed). */
+async function conflictSetup() {
+  const base = mkdtempSync(join(tmpdir(), "gsync-"));
+  const remote = join(base, "remote.git");
+  execFileSync("git", ["init", "-q", "--bare", remote]);
+  const url = `https://blueline.test/repo-${remoteSeq++}.git`;
+  execFileSync("git", ["config", "--global", `url.${remote}.insteadOf`, url]);
+  const seed = join(base, "seed");
+  mkdirSync(join(seed, "projects", "doc"), { recursive: true });
+  writeFileSync(join(seed, "projects", "doc", "page.html"), "base\n");
+  writeFileSync(join(seed, "projects", "doc", "project.json"), JSON.stringify({ id: "doc", displayName: "Poster" }));
+  execFileSync("git", ["init", "-q", "-b", "main", seed]);
+  sh(seed, "add", "-A");
+  sh(seed, "commit", "-qm", "seed doc");
+  sh(seed, "remote", "add", "origin", remote);
+  sh(seed, "push", "-q", "-u", "origin", "main");
+
+  const wsA = mkdtempSync(join(tmpdir(), "gsync-a-"));
+  const wsB = mkdtempSync(join(tmpdir(), "gsync-b-"));
+  await gitConnect(wsA, url);
+  await gitConnect(wsB, url); // both now hold "base"
+  // A edits the poster and pushes.
+  writeFileSync(join(wsA, "projects", "doc", "page.html"), "A version\n");
+  await gitSync(wsA, "A edit");
+  // B edits the SAME file from base; sync must detect the conflict (not push).
+  writeFileSync(join(wsB, "projects", "doc", "page.html"), "B version\n");
+  const res = await gitSync(wsB, "B edit");
+  return { remote, wsB, res };
+}
+
+test("gitSync detects a same-document conflict; fork keeps BOTH versions", async () => {
+  const { remote, wsB, res } = await conflictSetup();
+  assert.ok(res.conflicts && res.conflicts.length === 1, "sync paused on a conflict instead of pushing");
+  assert.equal(res.conflicts![0]!.docId, "doc");
+  assert.ok(!res.pushed, "nothing pushed while unresolved");
+
+  const resolved = await gitResolveConflicts(wsB, [{ docId: "doc", choice: "fork" }]);
+  assert.ok(resolved.pushed, "resolution pushed");
+  assert.equal(resolved.forked.length, 1, "one document was forked");
+  const newId = resolved.forked[0]!.newDocId;
+
+  assert.equal(remoteShow(remote, "projects/doc/page.html").trim(), "A version", "shared doc keeps the remote's version");
+  assert.equal(remoteShow(remote, `projects/${newId}/page.html`).trim(), "B version", "my version survives as a new document");
+  assert.match(remoteShow(remote, `projects/${newId}/project.json`), /'s version\)/, "fork is credited to the user");
+});
+
+test("gitResolveConflicts 'mine' keeps my version on the shared document", async () => {
+  const { remote, wsB } = await conflictSetup();
+  const resolved = await gitResolveConflicts(wsB, [{ docId: "doc", choice: "mine" }]);
+  assert.ok(resolved.pushed);
+  assert.equal(resolved.forked.length, 0, "no fork when keeping mine");
+  assert.equal(remoteShow(remote, "projects/doc/page.html").trim(), "B version", "my version won");
+});
 
 let remoteSeq = 0;
 /** A seeded non-empty bare remote, returned as a github-looking URL that git rewrites to the

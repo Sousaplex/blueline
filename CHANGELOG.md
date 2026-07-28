@@ -7,13 +7,22 @@ and the GitHub release tags.
 
 ## [0.29.0]
 
-Documents get unique ids so two people never collide on the same name.
+Real multi-person collaboration: unique document ids + a merge-conflict resolver with fork.
+
+### Added
+- **Merge-conflict resolution with "Keep both".** If a teammate edited the *same* document while
+  you did, Sync no longer fails silently — it pauses and shows each conflicted document with three
+  choices: **Keep both** (default), **Keep mine**, or **Keep theirs**. *Keep both* saves your
+  version as a brand-new document credited to you (from your git name), and keeps theirs — so no
+  one's work is ever lost. Resolve and it pushes.
 
 ### Changed
 - **Every new document gets a unique folder id** (a readable slug plus a short random suffix,
   e.g. `acme-flyer-x7k2p9qm`). Two people who independently create documents with the *same
   name* in a shared repo no longer clobber each other — both coexist. The display name is free to
   repeat. Existing documents keep their current folders unchanged.
+- Workspace sync now integrates remote changes with a merge (was rebase), which makes the
+  keep-mine / keep-theirs choices unambiguous during a conflict.
 
 ## [0.28.0]
 

@@ -2,9 +2,11 @@
 // team, or just back the work up. Uses the system git binary and whatever
 // credentials the user's environment already has (ssh agent, credential helper).
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { userInfo } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { shortId } from "./workspace.ts";
 
 const run = promisify(execFile);
 
@@ -179,32 +181,71 @@ export async function gitClone(url: string, dest: string): Promise<void> {
   );
 }
 
+/** One document (or the shared-files group) with unresolved conflicts, for the resolution UI. */
+export interface DocConflict {
+  /** Document folder id under projects/, or "__shared__" for brand/context/root-level files. */
+  docId: string;
+  displayName: string;
+  files: string[]; // repo-relative paths still in conflict
+}
+
 export interface SyncResult {
   pulled: boolean;
   committed: boolean;
   pushed: boolean;
   summary: string;
+  /** Present (and non-empty) when the sync paused on a merge conflict awaiting resolution. */
+  conflicts?: DocConflict[];
 }
 
-/** Pull (rebase, autostash) → commit local changes → push. */
+/** The name to credit a fork to: the git identity they commit as, then the OS user. */
+async function currentUserName(root: string): Promise<string> {
+  const gitName = (await git(root, "config", "user.name").catch(() => "")).trim();
+  if (gitName) return gitName;
+  try {
+    return userInfo().username || "me";
+  } catch {
+    return "me";
+  }
+}
+
+/** Read a document's display name from its project.json (falls back to the folder id). */
+function docDisplayName(root: string, docId: string): string {
+  try {
+    const meta = JSON.parse(readFileSync(join(root, "projects", docId, "project.json"), "utf8"));
+    return (meta.displayName as string) || docId;
+  } catch {
+    return docId;
+  }
+}
+
+/** Group the currently-unmerged files into per-document conflicts. */
+async function collectConflicts(root: string): Promise<DocConflict[]> {
+  const out = (await git(root, "diff", "--name-only", "--diff-filter=U").catch(() => "")).split("\n").filter(Boolean);
+  const byDoc = new Map<string, string[]>();
+  for (const f of out) {
+    const m = f.match(/^projects\/([^/]+)\//);
+    const key = m ? m[1]! : "__shared__";
+    (byDoc.get(key) ?? byDoc.set(key, []).get(key)!).push(f);
+  }
+  return [...byDoc.entries()].map(([docId, files]) => ({
+    docId,
+    displayName: docId === "__shared__" ? "Shared brand & sources" : docDisplayName(root, docId),
+    files,
+  }));
+}
+
+/** Commit local changes → integrate the remote (merge) → push. If the merge conflicts, leave the
+ *  merge in progress and return the conflicts for the UI to resolve (see gitResolveConflicts). */
 export async function gitSync(root: string, message?: string): Promise<SyncResult> {
   const status = await gitStatus(root);
   if (!status.isRepo || !status.remote) throw new Error("Workspace is not connected to a remote — connect a repo first");
-  // Defensive: repair the ignore rules and untrack secrets on EVERY sync, so a workspace
-  // connected before this fix stops pushing .env from the next sync onward.
-  ensureGitignore(root);
+  ensureGitignore(root); // repair ignores + untrack secrets on EVERY sync (heals pre-fix workspaces)
   await untrackSecrets(root);
+  const branch = status.branch ?? "main";
   const parts: string[] = [];
 
-  const hasUpstream = await git(root, "rev-parse", "--abbrev-ref", "@{upstream}").catch(() => null);
-  let pulled = false;
-  if (hasUpstream) {
-    const before = await git(root, "rev-parse", "HEAD").catch(() => "");
-    await git(root, "pull", "--rebase", "--autostash", "origin", status.branch ?? "main");
-    pulled = before !== (await git(root, "rev-parse", "HEAD").catch(() => before));
-    if (pulled) parts.push("pulled remote changes");
-  }
-
+  // 1) Commit local work first, so the merge reconciles whole commits (clean ours/theirs).
   await git(root, "add", "-A");
   const staged = await git(root, "status", "--porcelain");
   let committed = false;
@@ -214,26 +255,130 @@ export async function gitSync(root: string, message?: string): Promise<SyncResul
     parts.push(`committed ${staged.split("\n").filter(Boolean).length} change(s)`);
   }
 
-  let pushed = false;
-  const after = await gitStatus(root);
-  if (after.ahead > 0 || !hasUpstream) {
-    const branch = after.branch ?? "main";
+  // 2) Integrate the remote via merge (ours = mine, theirs = remote — intuitive for resolution).
+  let pulled = false;
+  const hasUpstream = await git(root, "rev-parse", "--abbrev-ref", "@{upstream}").catch(() => null);
+  if (hasUpstream) {
+    await git(root, "fetch", "--quiet", "origin").catch(() => {});
+    const before = await git(root, "rev-parse", "HEAD").catch(() => "");
     try {
-      await git(root, "push", "-u", "origin", branch);
-    } catch (err: any) {
-      // A teammate pushed between our pull and our push (concurrent edit). Rebase onto their
-      // changes and retry once — disjoint edits (different documents) merge automatically; a
-      // genuine same-file conflict surfaces here for the user to resolve.
-      if (/non-fast-forward|rejected|fetch first|behind|stale info/i.test(String(err.message))) {
-        await git(root, "pull", "--rebase", "--autostash", "origin", branch);
-        await git(root, "push", "origin", branch);
-        parts.push("merged a teammate's concurrent changes");
-      } else {
-        throw err;
+      await git(root, "merge", "--no-edit", `origin/${branch}`);
+    } catch {
+      const conflicts = await collectConflicts(root);
+      if (conflicts.length) {
+        return { pulled: false, committed, pushed: false, conflicts, summary: "paused on a merge conflict — needs resolution" };
       }
+      await git(root, "merge", "--abort").catch(() => {});
+      throw new Error("Merge failed. Try syncing again, or resolve the workspace in a terminal.");
     }
-    pushed = true;
-    parts.push("pushed");
+    pulled = before !== (await git(root, "rev-parse", "HEAD").catch(() => before));
+    if (pulled) parts.push("pulled remote changes");
   }
+
+  const pushed = await pushWithRetry(root, branch, parts);
   return { pulled, committed, pushed, summary: parts.length ? parts.join(", ") : "already up to date" };
+}
+
+/** Push; on a race (teammate pushed in between) merge their changes and retry once. */
+async function pushWithRetry(root: string, branch: string, parts: string[]): Promise<boolean> {
+  const status = await gitStatus(root);
+  if (status.ahead <= 0 && (await git(root, "rev-parse", "--abbrev-ref", "@{upstream}").catch(() => null))) return false;
+  try {
+    await git(root, "push", "-u", "origin", branch);
+  } catch (err: any) {
+    if (/non-fast-forward|rejected|fetch first|behind|stale info/i.test(String(err.message))) {
+      await git(root, "fetch", "--quiet", "origin");
+      await git(root, "merge", "--no-edit", `origin/${branch}`); // disjoint edits auto-merge
+      await git(root, "push", "origin", branch);
+      parts.push("merged a teammate's concurrent changes");
+    } else {
+      throw err;
+    }
+  }
+  parts.push("pushed");
+  return true;
+}
+
+export type ConflictChoice = "mine" | "theirs" | "fork";
+export interface ConflictResolution {
+  docId: string;
+  choice: ConflictChoice;
+}
+export interface ResolveResult {
+  pushed: boolean;
+  forked: { fromDocId: string; newDocId: string; displayName: string }[];
+  summary: string;
+}
+
+/**
+ * Resolve an in-progress merge conflict per document. "mine"/"theirs" keep one side; "fork" keeps
+ * BOTH — your version is copied into a brand-new document (new id, credited to you) and the shared
+ * document takes the remote's version, so nobody loses work. Then the merge is committed and pushed.
+ */
+export async function gitResolveConflicts(root: string, resolutions: ConflictResolution[]): Promise<ResolveResult> {
+  const pending = await collectConflicts(root);
+  if (!pending.length) throw new Error("No conflict to resolve.");
+  const choiceFor = new Map(resolutions.map((r) => [r.docId, r.choice]));
+  const forked: ResolveResult["forked"] = [];
+  const userName = await currentUserName(root);
+
+  for (const conflict of pending) {
+    const choice = choiceFor.get(conflict.docId) ?? "theirs";
+    // Check out one side into the working tree. Does NOT `git add` — adding collapses the merge
+    // stages, so a subsequent checkout of the other side would silently no-op (fork needs both).
+    const checkoutSide = async (side: "--ours" | "--theirs") => {
+      for (const f of conflict.files) await git(root, "checkout", side, "--", f).catch(() => {});
+    };
+    const take = async (side: "--ours" | "--theirs") => {
+      await checkoutSide(side);
+      await git(root, "add", "--", ...conflict.files);
+    };
+
+    if (choice === "fork" && conflict.docId !== "__shared__") {
+      // 1) Materialize MY version of the whole document, 2) copy it to a new id, 3) reset the
+      //    shared document to THEIRS. Both survive. Check out both sides BEFORE adding.
+      await checkoutSide("--ours");
+      const srcDir = join(root, "projects", conflict.docId);
+      const base = (docDisplayName(root, conflict.docId) || conflict.docId)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 40) || "document";
+      const newDocId = `${base}-${shortId()}`;
+      const destDir = join(root, "projects", newDocId);
+      cpSync(srcDir, destDir, { recursive: true });
+      // Patch the fork's identity + name so it's a distinct, clearly-credited document.
+      try {
+        const metaPath = join(destDir, "project.json");
+        const meta = existsSync(metaPath) ? JSON.parse(readFileSync(metaPath, "utf8")) : {};
+        meta.id = newDocId;
+        meta.displayName = `${docDisplayName(root, conflict.docId)} (${userName}'s version)`;
+        writeFileSync(metaPath, JSON.stringify(meta, null, 2) + "\n");
+      } catch {
+        /* a doc without project.json still forks — just without the renamed metadata */
+      }
+      await take("--theirs"); // the shared document keeps the remote's version
+      await git(root, "add", "--", `projects/${conflict.docId}`, `projects/${newDocId}`);
+      forked.push({ fromDocId: conflict.docId, newDocId, displayName: `${docDisplayName(root, conflict.docId)} (${userName}'s version)` });
+    } else {
+      await take(choice === "mine" ? "--ours" : "--theirs");
+    }
+  }
+
+  // Any straggler unmerged files (defensive) block the commit — take theirs.
+  const still = (await git(root, "diff", "--name-only", "--diff-filter=U").catch(() => "")).split("\n").filter(Boolean);
+  for (const f of still) {
+    await git(root, "checkout", "--theirs", "--", f).catch(() => {});
+    await git(root, "add", "--", f);
+  }
+
+  await git(root, "commit", "--no-edit");
+  const branch = (await gitStatus(root)).branch ?? "main";
+  const parts: string[] = [];
+  const pushed = await pushWithRetry(root, branch, parts);
+  return {
+    pushed,
+    forked,
+    summary: [forked.length ? `forked ${forked.length} document(s)` : "", ...parts].filter(Boolean).join(", ") || "resolved",
+  };
 }

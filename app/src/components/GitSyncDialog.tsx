@@ -14,7 +14,9 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { EngineClient, GitStatus } from "../engine-client";
+import type { DocConflict, EngineClient, GitStatus } from "../engine-client";
+
+type Choice = "mine" | "theirs" | "fork";
 
 export function GitSyncDialog({ client }: { client: EngineClient }) {
   const [open, setOpen] = useState(false);
@@ -26,8 +28,49 @@ export function GitSyncDialog({ client }: { client: EngineClient }) {
   const [changing, setChanging] = useState(false); // revealing the "change repo" input
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const [wipeHistory, setWipeHistory] = useState(false);
+  const [conflicts, setConflicts] = useState<DocConflict[] | null>(null);
+  const [choices, setChoices] = useState<Record<string, Choice>>({});
 
   const refresh = () => client.gitStatus().then(setStatus).catch(() => setStatus(null));
+
+  // Sync, but branch into conflict-resolution when the merge pauses.
+  const doSync = () => {
+    setBusy("sync");
+    setError(null);
+    setNote(null);
+    void client
+      .gitSync()
+      .then((r) => {
+        if (r.conflicts && r.conflicts.length) {
+          setConflicts(r.conflicts);
+          // Default every conflict to "fork" — the no-data-loss choice (keeps both versions).
+          setChoices(Object.fromEntries(r.conflicts.map((c) => [c.docId, c.docId === "__shared__" ? "theirs" : "fork"])));
+        } else {
+          setConflicts(null);
+          setNote(r.summary || "Synced.");
+        }
+        return refresh();
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(null));
+  };
+
+  const doResolve = () => {
+    if (!conflicts) return;
+    setBusy("resolve");
+    setError(null);
+    setNote(null);
+    void client
+      .resolveConflicts(conflicts.map((c) => ({ docId: c.docId, choice: choices[c.docId] ?? "theirs" })))
+      .then((r) => {
+        setConflicts(null);
+        const forkNote = r.forked.length ? ` Kept your version as: ${r.forked.map((f) => f.displayName).join(", ")}.` : "";
+        setNote(`Resolved and pushed.${forkNote}`);
+        return refresh();
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(null));
+  };
   useEffect(() => {
     if (open) void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -77,16 +120,62 @@ export function GitSyncDialog({ client }: { client: EngineClient }) {
                   {status.ahead > 0 && ` · ${status.ahead} ahead`}
                 </p>
               </div>
-              <Button
-                className="w-full"
-                disabled={busy !== null}
-                onClick={() => act("sync", async () => (await client.gitSync()).summary)}
-              >
+              <Button className="w-full" disabled={busy !== null || !!conflicts} onClick={doSync}>
                 {busy === "sync" ? <Loader2 className="animate-spin" data-slot="icon" /> : <RefreshCw data-slot="icon" />}
                 Sync now
               </Button>
 
-              {!changing && !confirmDisconnect && (
+              {conflicts && (
+                <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3">
+                  <p className="text-sm font-medium">
+                    A teammate edited the same {conflicts.length === 1 ? "document" : "documents"} — choose what to keep:
+                  </p>
+                  {conflicts.map((c) => (
+                    <div key={c.docId} className="space-y-1">
+                      <p className="truncate text-sm font-medium" title={c.files.join(", ")}>
+                        {c.displayName}
+                        <span className="ml-1 text-[10px] text-muted-foreground">
+                          {c.files.length} file{c.files.length === 1 ? "" : "s"}
+                        </span>
+                      </p>
+                      <div className="flex gap-1">
+                        {(
+                          [
+                            ["fork", "Keep both"],
+                            ["mine", "Keep mine"],
+                            ["theirs", "Keep theirs"],
+                          ] as [Choice, string][]
+                        )
+                          .filter(([v]) => !(v === "fork" && c.docId === "__shared__"))
+                          .map(([value, label]) => (
+                            <button
+                              key={value}
+                              type="button"
+                              onClick={() => setChoices((ch) => ({ ...ch, [c.docId]: value }))}
+                              className={`flex-1 rounded border px-2 py-1 text-xs transition-colors ${
+                                (choices[c.docId] ?? "theirs") === value
+                                  ? "border-primary bg-primary/10 font-medium"
+                                  : "text-muted-foreground hover:text-foreground"
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                      </div>
+                    </div>
+                  ))}
+                  <p className="text-[11px] text-muted-foreground">
+                    <strong>Keep both</strong> saves your version as a new document (credited to you) and keeps theirs — no work lost.
+                  </p>
+                  <div className="flex gap-2">
+                    <Button size="sm" className="flex-1" disabled={busy !== null} onClick={doResolve}>
+                      {busy === "resolve" ? <Loader2 className="animate-spin" data-slot="icon" /> : null} Resolve &amp; push
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {!changing && !confirmDisconnect && !conflicts && (
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" className="flex-1" disabled={busy !== null}
                     onClick={() => { setChanging(true); setUrl(""); setError(null); setNote(null); }}>

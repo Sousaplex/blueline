@@ -142,6 +142,24 @@ export interface GitStatus {
   behind: number;
 }
 
+export interface DocConflict {
+  docId: string;
+  displayName: string;
+  files: string[];
+}
+export interface SyncResult {
+  pulled: boolean;
+  committed: boolean;
+  pushed: boolean;
+  summary: string;
+  conflicts?: DocConflict[];
+}
+export interface ResolveResult {
+  pushed: boolean;
+  forked: { fromDocId: string; newDocId: string; displayName: string }[];
+  summary: string;
+}
+
 export interface SetupState {
   fresh: boolean;
   workspaceRoot: string;
@@ -284,7 +302,9 @@ export interface EngineClient {
   gitStatus(): Promise<GitStatus>;
   gitConnect(url: string): Promise<GitStatus>;
   gitDisconnect(wipeHistory?: boolean): Promise<GitStatus>;
-  gitSync(message?: string): Promise<{ pulled: boolean; committed: boolean; pushed: boolean; summary: string }>;
+  gitSync(message?: string): Promise<SyncResult>;
+  /** Resolve an in-progress merge conflict, per document: keep mine / keep theirs / fork (keep both). */
+  resolveConflicts(resolutions: { docId: string; choice: "mine" | "theirs" | "fork" }[]): Promise<ResolveResult>;
   gitClone(url: string, dest: string): Promise<void>;
   /** Pick a workspace dir (native dialog in Electron, path prompt in browser) and switch to it. */
   chooseWorkspace(): Promise<boolean>;
@@ -654,7 +674,7 @@ export class BrowserEngineClient implements EngineClient {
     return payload.status;
   }
 
-  async gitSync(message?: string) {
+  async gitSync(message?: string): Promise<SyncResult> {
     const res = await fetch("/api/git/sync", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -662,6 +682,17 @@ export class BrowserEngineClient implements EngineClient {
     });
     const payload = await res.json();
     if (!res.ok) throw new Error(payload.error ?? `git sync: HTTP ${res.status}`);
+    return payload;
+  }
+
+  async resolveConflicts(resolutions: { docId: string; choice: "mine" | "theirs" | "fork" }[]): Promise<ResolveResult> {
+    const res = await fetch("/api/git/resolve", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ resolutions }),
+    });
+    const payload = await res.json();
+    if (!res.ok) throw new Error(payload.error ?? `resolve: HTTP ${res.status}`);
     return payload;
   }
 
