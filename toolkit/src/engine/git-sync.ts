@@ -86,7 +86,24 @@ async function untrackSecrets(root: string): Promise<void> {
   await git(root, "rm", "-r", "--cached", "--ignore-unmatch", "--", ...SECRET_PATHS).catch(() => {});
 }
 
-/** Turn the current workspace into a repo connected to `url` (idempotent). */
+/** The remote's default branch name, or null if the remote is empty. Robust across GitHub
+ *  (symbolic-ref) and quirky local remotes (existence fallback). Assumes origin fetched. */
+async function remoteDefaultBranch(root: string): Promise<string | null> {
+  await git(root, "remote", "set-head", "origin", "--auto").catch(() => {});
+  const sym = await git(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").catch(() => null);
+  if (sym) return sym.replace(/^origin\//, "");
+  for (const b of ["main", "master"]) {
+    if (await git(root, "rev-parse", "--verify", "--quiet", `origin/${b}`).catch(() => null)) return b;
+  }
+  return null;
+}
+
+/**
+ * Turn the current workspace into a repo connected to `url` (idempotent). If the remote already
+ * has commits (a shared team repo), ADOPT it: bring its files and history into the workspace so
+ * the first sync fast-forwards instead of being rejected non-fast-forward. Local files are kept
+ * (remote-only files are pulled in; colliding local files are preserved and become changes).
+ */
 export async function gitConnect(root: string, url: string): Promise<GitStatus> {
   if (!/^(https:\/\/|git@)[\w.@:/~-]+$/.test(url.trim())) throw new Error("That does not look like a git remote URL");
   const status = await gitStatus(root);
@@ -99,6 +116,35 @@ export async function gitConnect(root: string, url: string): Promise<GitStatus> 
   if (hasOrigin) await git(root, "remote", "set-url", "origin", url.trim());
   else await git(root, "remote", "add", "origin", url.trim());
   await git(root, "fetch", "--quiet", "origin").catch(() => {}); // may be an empty repo — fine
+
+  const branch = await remoteDefaultBranch(root);
+  if (branch) {
+    // Non-empty remote → adopt its history so the workspace is "the repo, plus my local files".
+    const localHasCommit = await git(root, "rev-parse", "--verify", "--quiet", "HEAD").catch(() => null);
+    if (!localHasCommit) {
+      // Fresh workspace: base the branch on the remote and pull its files onto disk without
+      // clobbering any local files (restore only the paths missing from the working tree).
+      await git(root, "reset", "--mixed", `origin/${branch}`);
+      const deleted = await git(root, "ls-files", "--deleted", "-z").catch(() => "");
+      const files = deleted.split("\0").filter(Boolean);
+      if (files.length) await git(root, "checkout", "--", ...files);
+    } else {
+      // Reconnecting with local commits: replay them on top of the remote (no clobber). A true
+      // conflict is surfaced rather than left half-done.
+      try {
+        await git(root, "rebase", `origin/${branch}`);
+      } catch (err: any) {
+        await git(root, "rebase", "--abort").catch(() => {});
+        throw new Error(
+          `This workspace has local commits that conflict with the remote. Resolve them in a terminal ` +
+            `(git pull --rebase), or disconnect and clone the repo into a fresh workspace. (${err.message})`,
+        );
+      }
+    }
+    await git(root, "branch", "--set-upstream-to", `origin/${branch}`).catch(() => {});
+    ensureGitignore(root); // re-assert blueline's ignores on top of whatever .gitignore the repo shipped
+    await untrackSecrets(root);
+  }
   return gitStatus(root);
 }
 
@@ -171,7 +217,21 @@ export async function gitSync(root: string, message?: string): Promise<SyncResul
   let pushed = false;
   const after = await gitStatus(root);
   if (after.ahead > 0 || !hasUpstream) {
-    await git(root, "push", "-u", "origin", after.branch ?? "main");
+    const branch = after.branch ?? "main";
+    try {
+      await git(root, "push", "-u", "origin", branch);
+    } catch (err: any) {
+      // A teammate pushed between our pull and our push (concurrent edit). Rebase onto their
+      // changes and retry once — disjoint edits (different documents) merge automatically; a
+      // genuine same-file conflict surfaces here for the user to resolve.
+      if (/non-fast-forward|rejected|fetch first|behind|stale info/i.test(String(err.message))) {
+        await git(root, "pull", "--rebase", "--autostash", "origin", branch);
+        await git(root, "push", "origin", branch);
+        parts.push("merged a teammate's concurrent changes");
+      } else {
+        throw err;
+      }
+    }
     pushed = true;
     parts.push("pushed");
   }

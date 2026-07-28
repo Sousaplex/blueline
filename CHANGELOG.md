@@ -5,6 +5,19 @@ All notable user-facing changes to Blueline. Kept from v0.17.0 onward
 [Keep a Changelog](https://keepachangelog.com/); versions match `app/package.json`
 and the GitHub release tags.
 
+## [0.28.0]
+
+Workspace git sync now works with team repos that already have content.
+
+### Fixed
+- **Connecting to a non-empty repo pulls it in.** Previously, connecting a workspace to a repo
+  that already had commits started a fresh, unrelated history — so the first sync was rejected
+  with a confusing `non-fast-forward` error. Now connecting **adopts** the repo: its files and
+  history come into your workspace (your local files are kept), so sync just works.
+- **Concurrent edits merge automatically.** When a teammate pushes while you're syncing, Blueline
+  now integrates their changes and retries the push. Edits to *different* documents merge with no
+  intervention; only a true same-file overlap needs manual resolution.
+
 ## [0.27.0]
 
 Shareable project files, and a fix for silent update failures.
