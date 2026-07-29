@@ -5,6 +5,18 @@ All notable user-facing changes to Blueline. Kept from v0.17.0 onward
 [Keep a Changelog](https://keepachangelog.com/); versions match `app/package.json`
 and the GitHub release tags.
 
+## [0.31.0]
+
+Roomier brief, and a resizable left panel.
+
+### Added
+- **Free-form "Notes" in the brief.** Alongside the structured fields (headline, audience, goal…),
+  the brief now has a big **Notes** area to just *write* — paste the actual copy, background,
+  constraints, references, anything the fields don't capture. It's saved with the brief and the
+  agent reads it.
+- **Resizable left panel.** Drag the edge of the left column to widen it (double-click to reset) —
+  handy when Sources/Brand file names are longer than the default width. The width is remembered.
+
 ## [0.30.0]
 
 Sync heals older workspaces, and adds a gated force-overwrite escape hatch.

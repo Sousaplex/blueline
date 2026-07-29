@@ -9,6 +9,7 @@ export interface BriefFields {
   messages: string[];
   mustInclude: string;
   tone: string;
+  notes: string; // free-form "anything else" — full prose the structured fields don't capture
   extra: string; // unrecognized sections, kept verbatim
 }
 
@@ -19,10 +20,13 @@ export const EMPTY_BRIEF: BriefFields = {
   messages: [],
   mustInclude: "",
   tone: "",
+  notes: "",
   extra: "",
 };
 
-const KNOWN_SECTIONS = new Set(["key messages", "must include", "tone"]);
+// "notes"/"details"/"background"/"context"/"content"/"copy" all fold into the free-form notes field.
+const NOTES_SECTIONS = new Set(["notes", "details", "background", "context", "content", "copy", "body"]);
+const KNOWN_SECTIONS = new Set(["key messages", "must include", "tone", ...NOTES_SECTIONS]);
 
 export function parseBrief(md: string): BriefFields {
   const fields: BriefFields = { ...EMPTY_BRIEF, messages: [] };
@@ -58,6 +62,8 @@ export function parseBrief(md: string): BriefFields {
       }
     } else if (section === "tone") {
       if (line.trim() && !/^<.*>$/.test(line.trim())) fields.tone += (fields.tone ? " " : "") + line.trim();
+    } else if (NOTES_SECTIONS.has(section)) {
+      if (!/^<.*>$/.test(line.trim())) fields.notes += (fields.notes ? "\n" : "") + line;
     } else if (!KNOWN_SECTIONS.has(section) && section) {
       extras.push(line);
     }
@@ -84,6 +90,7 @@ export function composeBrief(f: BriefFields): string {
     f.mustInclude.split("\n").map((l) => l.trim()).filter(Boolean).forEach((l) => parts.push(`- ${l}`));
   }
   if (f.tone.trim()) parts.push("", "## Tone", f.tone.trim());
+  if (f.notes.trim()) parts.push("", "## Notes", f.notes.trim());
   if (f.extra.trim()) parts.push("", f.extra.trim());
   return parts.join("\n") + "\n";
 }

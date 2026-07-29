@@ -243,6 +243,29 @@ export function App() {
   );
 
   const [aboutOpen, setAboutOpen] = useState(false);
+
+  // Resizable left column — file names in Sources/Brand can be longer than the default width.
+  const gridRef = useRef<HTMLDivElement>(null);
+  const [leftWidth, setLeftWidth] = useState(() => {
+    const s = Number(localStorage.getItem("bl-left-width"));
+    return s >= 240 && s <= 640 ? s : 300;
+  });
+  useEffect(() => {
+    localStorage.setItem("bl-left-width", String(leftWidth));
+  }, [leftWidth]);
+  const startLeftResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const left = gridRef.current?.getBoundingClientRect().left ?? 0;
+    const onMove = (ev: MouseEvent) => setLeftWidth(Math.max(240, Math.min(640, ev.clientX - left)));
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.style.userSelect = "";
+    };
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
   // In the packaged app the OS title bar is hidden (titleBarStyle: hiddenInset), so
   // mark the root frameless — global CSS then makes the top bars draggable and pads
   // them to clear the traffic lights. No-op in the browser dev server.
@@ -428,8 +451,19 @@ export function App() {
         open={seriesOpen}
         onOpenChange={setSeriesOpen}
       />
-      <div className="grid min-h-0 flex-1 grid-cols-[300px_minmax(0,1fr)_340px] grid-rows-1 overflow-hidden">
+      <div
+        ref={gridRef}
+        className="relative grid min-h-0 flex-1 grid-rows-1 overflow-hidden"
+        style={{ gridTemplateColumns: `${leftWidth}px minmax(0,1fr) 340px` }}
+      >
         <LeftPane project={project} client={client} cacheKey={cacheKey} viewRound={viewRound} onViewRound={setViewRound} />
+        <div
+          onMouseDown={startLeftResize}
+          onDoubleClick={() => setLeftWidth(300)}
+          className="absolute top-0 z-20 h-full w-1.5 -translate-x-1/2 cursor-col-resize transition-colors hover:bg-primary/40"
+          style={{ left: leftWidth }}
+          title="Drag to resize · double-click to reset"
+        />
         <PreviewPane
           project={project}
           client={client}

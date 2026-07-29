@@ -16,8 +16,8 @@ export function BriefForm({
 }: {
   initial: string;
   onChange: (md: string) => void;
-  /** When provided, shows the "describe it -> AI drafts the brief" box. */
-  draft?: (idea: string) => Promise<Omit<BriefFields, "extra">>;
+  /** When provided, shows the "describe it -> AI drafts the brief" box. (Notes stay user-authored.) */
+  draft?: (idea: string) => Promise<Omit<BriefFields, "extra" | "notes">>;
 }) {
   const [tab, setTab] = useState<"form" | "markdown">("form");
   const [fields, setFields] = useState<BriefFields>(() => parseBrief(initial));
@@ -155,6 +155,15 @@ export function BriefForm({
             <Label className="text-[11px]">Tone</Label>
             <Input className="h-8 px-2.5 text-xs" value={fields.tone} placeholder="confident / playful / clinical / warm"
               onChange={(e) => update({ tone: e.target.value })} />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-[11px]">Notes — anything else (free-form: full copy, background, constraints…)</Label>
+            <textarea
+              className="min-h-40 w-full rounded-md border bg-transparent px-2.5 py-2 text-xs leading-relaxed outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              value={fields.notes}
+              placeholder={"Write freely here — paste the actual copy, context, references, do's & don'ts, anything the structured fields above don't capture."}
+              onChange={(e) => update({ notes: e.target.value })}
+            />
           </div>
           {fields.extra && (
             <p className="rounded-md border bg-muted/30 p-2 text-[10.5px] leading-relaxed text-muted-foreground">
