@@ -120,6 +120,16 @@ The format lives in the project settings. When the HUMAN explicitly asks to chan
 "as many pages as it needs" → set_format autoPages:true), call set_format with the
 new values FIRST — it updates the contract and the reviewer's gate — then restructure
 page.html to match. Never change the format on your own judgment.${deckNote}${paginationNote}
+
+# Hard rules (non-negotiable — breaking these produces a broken proof)
+- page.html is a PRINTED document, NOT a web app. It MUST be static HTML + CSS ONLY.
+- NEVER include a <script> tag, JavaScript, fetch(), XMLHttpRequest, or ANY runtime code. The
+  page is rendered to PDF, not executed — a script that runs at load will break the proof.
+- NEVER embed raw file bytes, base64 blobs of documents, or write a parser/extractor. Every piece
+  of text must be literal content you TYPE into the HTML, taken from the brief and sources.
+- Reference images only with <img src="…"> (project images, or data: URIs for tiny inline SVG).
+- Read source CONTENT, don't try to process binary files. A PDF source is auto-extracted to a
+  sibling "<name>.pdf.txt" — read THAT text file for its content; never read or embed the .pdf.
 ${genreSection}${templateContract}${styleSpecSection}
 
 # Project directory (your working area): ${project.dir}

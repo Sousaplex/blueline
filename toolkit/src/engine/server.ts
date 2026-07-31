@@ -46,6 +46,7 @@ import { createBluelineSession, type BluelineSession } from "./session.ts";
 import { buildRawJsonl, buildSessionBundle } from "./session-export.ts";
 import { exportBundle, exportDocument, importArchive } from "./project-archive.ts";
 import { listGoogleModels } from "./models.ts";
+import { ensurePdfSidecars } from "./pdf-text.ts";
 import { deleteTemplate, instantiateTemplate, listTemplates, saveTemplate, templateBrief } from "./templates.ts";
 import { suggestDirections, variantBrief, type Direction } from "./variants.ts";
 import { resetFetchBudget } from "./web-fetch.ts";
@@ -281,6 +282,14 @@ class Bridge {
       resetFetchBudget(project);
       resetSearchBudget(project);
       markRunStart(project); // review round cap is per run
+      // Extract any PDF sources to readable .txt sidecars so the agent designs from the real text
+      // instead of trying (and failing) to parse the binary in the page. Best-effort.
+      try {
+        await ensurePdfSidecars(this.workspace.contextDir);
+        await ensurePdfSidecars(this.workspace.brandDir);
+      } catch {
+        /* extraction is best-effort — never block a run on it */
+      }
       this.runStates.set(slug, "running");
       this.broadcast({ type: "run_state", project: slug, state: "running" });
       const prompt =

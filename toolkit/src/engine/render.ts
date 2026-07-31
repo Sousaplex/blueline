@@ -1,4 +1,10 @@
+import { readFileSync, writeFileSync } from "node:fs";
 import type { Browser } from "playwright";
+
+/** Strip <script> blocks — print pages are static; a runtime script (fetch/parser) breaks the proof. */
+function stripScripts(html: string): string {
+  return html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "").replace(/<script\b[^>]*\/>/gi, "");
+}
 
 export interface RenderOptions {
   printBackground?: boolean;
@@ -36,6 +42,16 @@ export class PlaywrightBackend implements RenderBackend {
   }
 
   async renderPdf(htmlPath: string, outPath: string, opts: RenderOptions = {}): Promise<void> {
+    // Defensive: print pages are static. Permanently strip any <script> the agent added (a runtime
+    // fetch/parser breaks the proof AND the export). The live-edit iframe already blocks scripts via
+    // CSP; this gives the print path the same guarantee and cleanly ends the "broken proof" loop.
+    try {
+      const raw = readFileSync(htmlPath, "utf8");
+      const clean = stripScripts(raw);
+      if (clean !== raw) writeFileSync(htmlPath, clean);
+    } catch {
+      /* best-effort — render the file as-is if we can't read/rewrite it */
+    }
     await this.withPage(async (page) => {
       await page.goto(`file://${htmlPath}`, { waitUntil: "networkidle" });
       // `networkidle` fires ~500ms after load but does NOT wait for image *decoding*.

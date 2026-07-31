@@ -5,6 +5,20 @@ All notable user-facing changes to Blueline. Kept from v0.17.0 onward
 [Keep a Changelog](https://keepachangelog.com/); versions match `app/package.json`
 and the GitHub release tags.
 
+## [0.35.0]
+
+The big one: the agent now reads PDF sources, and can't produce a broken proof.
+
+### Fixed
+- **PDF sources are actually read now.** A PDF was never text-extracted, so the agent got binary
+  garbage and (in the worst case) embedded the raw bytes and wrote a runtime JavaScript parser into
+  the page — which failed to render ("Failed to fetch") and sent it looping forever. PDFs are now
+  extracted to a readable `<name>.pdf.txt` at run start, and the agent designs from the real text.
+- **A stray script can never break a proof again.** The print renderer strips `<script>` before
+  rendering (the live-edit iframe already did via CSP), so runtime code can't ruin the PDF or export.
+- **Hard prompt rules:** page.html must be static HTML+CSS — no `<script>`, `fetch`, or embedded
+  file bytes; read a PDF's `.txt` sidecar, never the binary.
+
 ## [0.34.0]
 
 Fixes Settings hanging on "loading…", plus polish.
