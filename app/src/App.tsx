@@ -248,7 +248,8 @@ export function App() {
   const gridRef = useRef<HTMLDivElement>(null);
   const [leftWidth, setLeftWidth] = useState(() => {
     const s = Number(localStorage.getItem("bl-left-width"));
-    return s >= 240 && s <= 640 ? s : 300;
+    if (s === 300) return 330; // migrate the old default up — the scrollbar was cramping content
+    return s >= 240 && s <= 640 ? s : 330;
   });
   useEffect(() => {
     localStorage.setItem("bl-left-width", String(leftWidth));

@@ -5,14 +5,20 @@ All notable user-facing changes to Blueline. Kept from v0.17.0 onward
 [Keep a Changelog](https://keepachangelog.com/); versions match `app/package.json`
 and the GitHub release tags.
 
-## [0.33.0]
+## [0.34.0]
 
-No more uninvited QR codes.
+Fixes Settings hanging on "loading…", plus polish.
 
 ### Fixed
-- **The agent stops adding speculative QR codes.** It was reaching for a "scan to…" QR on pieces
-  that never asked for one (resumes, reports). Now it only generates a QR when the brief explicitly
-  calls for a scannable link/CTA — hardened at both the tool and the system-prompt level.
+- **Settings opens instantly again.** 0.32's live model list was fetched *while* loading Settings,
+  so a slow/unreachable Google API froze the whole dialog on "loading…". The model list is now
+  fetched separately (and time-limited), so Settings always opens; the models fill in a moment later.
+
+### Changed / Added
+- **The agent stops adding speculative QR codes** — only when the brief explicitly asks for a
+  scannable link/CTA (hardened at the tool and system-prompt level). No more uninvited QR on resumes.
+- **Wider default left panel** so the ever-present scrollbar doesn't crowd Sources/Brand names.
+- **Darker canvas** around the artboard, for better contrast with the page.
 
 ## [0.32.0]
 

@@ -15,9 +15,17 @@ export interface AvailableModels {
 
 const stripPrefix = (name: string) => name.replace(/^models\//, "");
 
-/** Ask Google which models this API key can actually use. Never throws — errors come back in `error`. */
-export async function listGoogleModels(apiKey: string | undefined): Promise<AvailableModels> {
+/** Ask Google which models this API key can actually use. Never throws (errors come back in
+ *  `error`) and never hangs (hard timeout) — so it can't block whatever awaits it. */
+export async function listGoogleModels(apiKey: string | undefined, timeoutMs = 8000): Promise<AvailableModels> {
   if (!apiKey) return { generate: [], image: [], error: "No GEMINI_API_KEY set." };
+  const timeout = new Promise<AvailableModels>((resolve) =>
+    setTimeout(() => resolve({ generate: [], image: [], error: `Model list timed out after ${timeoutMs}ms.` }), timeoutMs),
+  );
+  return Promise.race([fetchModels(apiKey), timeout]);
+}
+
+async function fetchModels(apiKey: string): Promise<AvailableModels> {
   try {
     const ai = new GoogleGenAI({ apiKey });
     const pager = await ai.models.list();

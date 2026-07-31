@@ -323,6 +323,8 @@ export interface EngineClient {
   /** Returns the saved path (Electron printToPDF) or null (browser fallback opened the proof). */
   exportPdf(): Promise<string | null>;
   getSettings(): Promise<EngineSettings>;
+  /** Live model list from Google (fetched separately so Settings opens instantly). */
+  listModels(): Promise<{ generate: string[]; image: string[]; error?: string }>;
   /** Support dump: version, configured models, key presence, live model list (or its error), recent events. */
   diagnostics(): Promise<Record<string, unknown>>;
   updateSettings(patch: SettingsPatch): Promise<void>;
@@ -403,6 +405,12 @@ export class BrowserEngineClient implements EngineClient {
   async getSettings(): Promise<EngineSettings> {
     const res = await fetch("/api/settings");
     if (!res.ok) throw new Error(`settings: HTTP ${res.status}`);
+    return res.json();
+  }
+
+  async listModels(): Promise<{ generate: string[]; image: string[]; error?: string }> {
+    const res = await fetch("/api/models");
+    if (!res.ok) throw new Error(`models: HTTP ${res.status}`);
     return res.json();
   }
 

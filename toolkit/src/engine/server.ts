@@ -1347,18 +1347,21 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
           await bridge.updateSettings(await readBody(req));
           return json(res, 200, { ok: true });
         }
-        const geminiKey = process.env[bridge.config.reviewer.apiKeyEnv ?? "GEMINI_API_KEY"];
-        const available = await listGoogleModels(geminiKey);
+        // Return FAST — never block on the live Google model list (that call can be slow and used
+        // to freeze the whole Settings dialog on "loading…"). The UI fetches /api/models separately.
         return json(res, 200, {
           config: bridge.config,
           registry: await bridge.modelRegistry(),
-          // Live from the Google API (falls back to a static hint if listing fails, e.g. no key yet).
-          available,
           suggestions: {
-            reviewer: available.generate.length ? available.generate : ["gemini-3.5-flash", "gemini-2.5-flash"],
-            images: available.image.length ? available.image : ["gemini-3.1-flash-image", "gemini-2.5-flash-image"],
+            reviewer: ["gemini-3.5-flash", "gemini-2.5-flash"],
+            images: ["gemini-3.1-flash-image", "gemini-2.5-flash-image"],
           },
         });
+      }
+      // Live model list, fetched separately so it never blocks the Settings dialog opening.
+      if (url.pathname === "/api/models") {
+        const geminiKey = process.env[bridge.config.reviewer.apiKeyEnv ?? "GEMINI_API_KEY"];
+        return json(res, 200, await listGoogleModels(geminiKey));
       }
       // Diagnostics dump for support — version, configured models, key presence, the LIVE model
       // list (or the error that explains why generation fails), and recent system events.

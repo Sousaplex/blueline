@@ -60,11 +60,15 @@ export function SettingsDialog({ client }: { client: EngineClient }) {
       .catch((e) => setError(String(e)));
     setGeminiKey("");
     setMoonshotKey("");
+    setAvail(null);
     void client.getSetup().then(setSetup).catch(() => setSetup(null));
+    // Fetch the live model list in the background — the dialog is usable before this resolves.
+    void client.listModels().then(setAvail).catch(() => setAvail({ generate: [], image: [], error: "Couldn't reach the model list." }));
   }, [open, client]);
 
   const [copied, setCopied] = useState(false);
-  const avail = settings?.available; // live Google model list (or its error)
+  // Live Google model list — fetched SEPARATELY so it never blocks the dialog opening.
+  const [avail, setAvail] = useState<{ generate: string[]; image: string[]; error?: string } | null>(null);
   const providerModels = settings?.registry.find((p) => p.id === provider)?.models ?? [];
   const uniq = (xs: (string | undefined)[]) => [...new Set(xs.filter(Boolean) as string[])];
   // Prefer the LIVE list of models the key can actually use; fall back to registry/suggestions.

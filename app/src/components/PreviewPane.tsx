@@ -1412,7 +1412,7 @@ export function PreviewPane({
 
   if (!project.hasPage) {
     return (
-      <main className="flex items-center justify-center bg-muted/30">
+      <main className="flex items-center justify-center bg-zinc-300 dark:bg-zinc-800">
         <p className="text-sm text-muted-foreground">
           No page yet — hit <strong>Run</strong> to let the agent draft the piece.
         </p>
@@ -1555,7 +1555,7 @@ export function PreviewPane({
         )
       ) : (
         <div className="relative flex min-h-0 flex-1 flex-col">
-        <div ref={canvasRef} className="flex-1 overflow-auto bg-muted/30">
+        <div ref={canvasRef} className="flex-1 overflow-auto bg-zinc-300 dark:bg-zinc-800">
           <div className="mx-auto w-fit p-6">
             {mode === "proof" ? (
               viewRound != null && !roundHasProof ? (
