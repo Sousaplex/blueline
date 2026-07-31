@@ -106,6 +106,8 @@ export interface EngineSettings {
   };
   registry: { id: string; models: string[] }[];
   suggestions: { reviewer: string[]; images: string[] };
+  /** Live from the Google API — the models this key can actually use (or the error explaining why not). */
+  available?: { generate: string[]; image: string[]; error?: string };
 }
 
 export type SettingsPatch = {
@@ -321,6 +323,8 @@ export interface EngineClient {
   /** Returns the saved path (Electron printToPDF) or null (browser fallback opened the proof). */
   exportPdf(): Promise<string | null>;
   getSettings(): Promise<EngineSettings>;
+  /** Support dump: version, configured models, key presence, live model list (or its error), recent events. */
+  diagnostics(): Promise<Record<string, unknown>>;
   updateSettings(patch: SettingsPatch): Promise<void>;
   run(slug?: string, prompt?: string): Promise<void>;
   cancelRun(slug?: string): Promise<void>;
@@ -399,6 +403,12 @@ export class BrowserEngineClient implements EngineClient {
   async getSettings(): Promise<EngineSettings> {
     const res = await fetch("/api/settings");
     if (!res.ok) throw new Error(`settings: HTTP ${res.status}`);
+    return res.json();
+  }
+
+  async diagnostics(): Promise<Record<string, unknown>> {
+    const res = await fetch("/api/diagnostics");
+    if (!res.ok) throw new Error(`diagnostics: HTTP ${res.status}`);
     return res.json();
   }
 

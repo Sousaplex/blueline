@@ -63,8 +63,31 @@ export function SettingsDialog({ client }: { client: EngineClient }) {
     void client.getSetup().then(setSetup).catch(() => setSetup(null));
   }, [open, client]);
 
+  const [copied, setCopied] = useState(false);
+  const avail = settings?.available; // live Google model list (or its error)
   const providerModels = settings?.registry.find((p) => p.id === provider)?.models ?? [];
-  const modelOptions = providerModels.includes(model) || !model ? providerModels : [model, ...providerModels];
+  const uniq = (xs: (string | undefined)[]) => [...new Set(xs.filter(Boolean) as string[])];
+  // Prefer the LIVE list of models the key can actually use; fall back to registry/suggestions.
+  const modelOptions =
+    provider === "google" && avail?.generate.length
+      ? uniq([model, ...avail.generate])
+      : providerModels.includes(model) || !model
+        ? providerModels
+        : [model, ...providerModels];
+  const reviewerOptions = uniq([reviewerModel, ...(avail?.generate.length ? avail.generate : settings?.suggestions.reviewer ?? [])]);
+  const imageOptions = uniq([imagesModel, ...(avail?.image.length ? avail.image : settings?.suggestions.images ?? [])]);
+
+  const copyDiagnostics = async () => {
+    setError(null);
+    try {
+      const d = await client.diagnostics();
+      await navigator.clipboard.writeText("```json\n" + JSON.stringify(d, null, 2) + "\n```");
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   const save = async () => {
     setSaving(true);
@@ -103,6 +126,17 @@ export function SettingsDialog({ client }: { client: EngineClient }) {
 
         {!settings && !error && <p className="text-sm text-muted-foreground">loading…</p>}
         {error && <p className="text-sm text-destructive">{error}</p>}
+
+        {avail?.error && (
+          <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-300">
+            Couldn't reach the Google model list: {avail.error} — usually a missing or invalid API key. Add your key below, then reopen Settings.
+          </p>
+        )}
+        {avail && !avail.error && avail.generate.length > 0 && provider === "google" && model && !avail.generate.includes(model) && (
+          <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-300">
+            Your designer model <span className="font-mono">{model}</span> isn't in the list Google serves for this key — that stalls generation. Pick an available model below.
+          </p>
+        )}
 
         {settings && (
           <div className="space-y-5">
@@ -202,7 +236,7 @@ export function SettingsDialog({ client }: { client: EngineClient }) {
                   <Select value={reviewerModel} onValueChange={setReviewerModel}>
                     <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {[...new Set([reviewerModel, ...settings.suggestions.reviewer])].map((m) => (
+                      {reviewerOptions.map((m) => (
                         <SelectItem key={m} value={m}>{m}</SelectItem>
                       ))}
                     </SelectContent>
@@ -231,7 +265,7 @@ export function SettingsDialog({ client }: { client: EngineClient }) {
                   <Select value={imagesModel} onValueChange={setImagesModel}>
                     <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {[...new Set([imagesModel, ...settings.suggestions.images])].map((m) => (
+                      {imageOptions.map((m) => (
                         <SelectItem key={m} value={m}>{m}</SelectItem>
                       ))}
                     </SelectContent>
@@ -270,6 +304,20 @@ export function SettingsDialog({ client }: { client: EngineClient }) {
                   quota in parallel — 3 is a good default.
                 </p>
               </div>
+            </section>
+
+            <Separator />
+
+            <section className="space-y-2">
+              <h4 className="text-sm font-medium">Debug</h4>
+              <p className="text-xs text-muted-foreground">
+                Something not working? Copy a diagnostics report (app version, configured models, which models your key can
+                actually use, and recent errors — no secrets) and paste it when asking for help.
+              </p>
+              <Button variant="outline" size="sm" onClick={() => void copyDiagnostics()}>
+                {copied ? <Check data-slot="icon" /> : null}
+                {copied ? "Copied to clipboard" : "Copy diagnostics"}
+              </Button>
             </section>
           </div>
         )}

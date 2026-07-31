@@ -45,6 +45,7 @@ import { extractStyleSpec, saveStyleSpec } from "./style-spec.ts";
 import { createBluelineSession, type BluelineSession } from "./session.ts";
 import { buildRawJsonl, buildSessionBundle } from "./session-export.ts";
 import { exportBundle, exportDocument, importArchive } from "./project-archive.ts";
+import { listGoogleModels } from "./models.ts";
 import { deleteTemplate, instantiateTemplate, listTemplates, saveTemplate, templateBrief } from "./templates.ts";
 import { suggestDirections, variantBrief, type Direction } from "./variants.ts";
 import { resetFetchBudget } from "./web-fetch.ts";
@@ -290,12 +291,14 @@ class Bridge {
       void pc.session.prompt(prompt).catch((err) => {
         this.runStates.delete(slug);
         this.broadcast({ type: "error", project: slug, message: err instanceof Error ? err.message : String(err) });
+      this.logSystem("error", "run", err instanceof Error ? err.message : String(err));
         this.broadcast({ type: "run_state", project: slug, state: "idle" });
         this.pumpQueue();
       });
     } catch (err) {
       this.runStates.delete(slug);
       this.broadcast({ type: "error", project: slug, message: err instanceof Error ? err.message : String(err) });
+      this.logSystem("error", "run", err instanceof Error ? err.message : String(err));
       this.broadcast({ type: "run_state", project: slug, state: "idle" });
       this.pumpQueue();
     }
@@ -419,6 +422,7 @@ class Bridge {
     const opts = pc.session.isStreaming ? { streamingBehavior: "steer" as const } : undefined;
     void pc.session.prompt(text, opts).catch((err) => {
       this.broadcast({ type: "error", project: slug, message: err instanceof Error ? err.message : String(err) });
+      this.logSystem("error", "run", err instanceof Error ? err.message : String(err));
     });
   }
 
@@ -1062,9 +1066,15 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
       if (req.method === "POST" && url.pathname === "/api/brief/draft") {
         const body = await readBody(req);
         if (typeof body.idea !== "string" || !body.idea.trim()) return json(res, 400, { error: "idea required" });
-        const fields = await draftBrief(bridge.workspace, bridge.config, String(body.idea), body.format ? String(body.format) : undefined);
-        sys("draft_brief", String(body.idea).slice(0, 80));
-        return json(res, 200, { fields });
+        try {
+          const fields = await draftBrief(bridge.workspace, bridge.config, String(body.idea), body.format ? String(body.format) : undefined);
+          sys("draft_brief", String(body.idea).slice(0, 80));
+          return json(res, 200, { fields });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          bridge.logSystem("error", "draft_brief", message); // captured for the diagnostics dump
+          return json(res, 500, { error: message });
+        }
       }
       if (req.method === "POST" && url.pathname === "/api/brief") {
         const body = await readBody(req);
@@ -1337,13 +1347,38 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
           await bridge.updateSettings(await readBody(req));
           return json(res, 200, { ok: true });
         }
+        const geminiKey = process.env[bridge.config.reviewer.apiKeyEnv ?? "GEMINI_API_KEY"];
+        const available = await listGoogleModels(geminiKey);
         return json(res, 200, {
           config: bridge.config,
           registry: await bridge.modelRegistry(),
+          // Live from the Google API (falls back to a static hint if listing fails, e.g. no key yet).
+          available,
           suggestions: {
-            reviewer: ["gemini-3.5-flash", "gemini-3.1-pro-preview", "gemini-2.5-flash"],
-            images: ["gemini-3.1-flash-image", "gemini-3-pro-image", "gemini-2.5-flash-image"],
+            reviewer: available.generate.length ? available.generate : ["gemini-3.5-flash", "gemini-2.5-flash"],
+            images: available.image.length ? available.image : ["gemini-3.1-flash-image", "gemini-2.5-flash-image"],
           },
+        });
+      }
+      // Diagnostics dump for support — version, configured models, key presence, the LIVE model
+      // list (or the error that explains why generation fails), and recent system events.
+      if (url.pathname === "/api/diagnostics") {
+        const geminiKey = process.env[bridge.config.reviewer.apiKeyEnv ?? "GEMINI_API_KEY"];
+        const available = await listGoogleModels(geminiKey);
+        const c = bridge.config;
+        return json(res, 200, {
+          version: process.env.BLUELINE_VERSION ?? "dev",
+          platform: process.platform,
+          models: {
+            designer: `${c.designer.provider}/${c.designer.model}`,
+            reviewer: c.reviewer.model,
+            images: c.images.model,
+          },
+          keys: { GEMINI_API_KEY: Boolean(process.env.GEMINI_API_KEY), MOONSHOT_API_KEY: Boolean(process.env.MOONSHOT_API_KEY) },
+          available,
+          designerModelAvailable: available.generate.length ? available.generate.includes(c.designer.model) : "unknown",
+          reviewerModelAvailable: available.generate.length ? available.generate.includes(c.reviewer.model) : "unknown",
+          recentEvents: bridge.systemEvents().slice(-40),
         });
       }
 

@@ -5,6 +5,21 @@ All notable user-facing changes to Blueline. Kept from v0.17.0 onward
 [Keep a Changelog](https://keepachangelog.com/); versions match `app/package.json`
 and the GitHub release tags.
 
+## [0.32.0]
+
+Live model list + a diagnostics report — so a bad model or key never fails silently again.
+
+### Fixed / Added
+- **The model picker is now live.** Settings lists the Gemini models your API key can *actually*
+  use, fetched from Google — no more stale hardcoded names. New models show up automatically; a
+  retired one no longer silently breaks generation.
+- **Clear warnings instead of a silent stall.** If your key can't reach Google (missing/invalid),
+  Settings says so with the real error. If your configured model isn't one Google serves for your
+  key, it flags it and points you at a valid one — this was the cause of "the agent just gets stuck."
+- **Copy diagnostics.** Settings → Debug → *Copy diagnostics* puts a shareable report on your
+  clipboard (app version, configured models, which models your key can use, recent errors — no
+  secrets) for troubleshooting. Agent and brief errors are now recorded for it too.
+
 ## [0.31.0]
 
 Roomier brief, and a resizable left panel.
