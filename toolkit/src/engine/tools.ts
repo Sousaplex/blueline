@@ -182,8 +182,8 @@ export function buildPresscheckTools(project: Project, backend: RenderBackend, c
     name: "gen_qr",
     label: "Generate QR code",
     description:
-      "Generate a QR code (URL, plain text, vCard) as a print-ready file placed in an image slot. Default SVG (crisp vector for print). Use when the brief calls for a scannable link/CTA.",
-    promptSnippet: "gen_qr: data + id -> images/<id>/qr.svg (scannable code)",
+      "Generate a QR code (URL, plain text, vCard) as a print-ready file placed in an image slot. Default SVG (crisp vector for print). ONLY use this when the brief or the human EXPLICITLY asks for a scannable code or a real link to scan (e.g. 'add a QR to the signup page'). Do NOT invent a QR code or a scan-to-do-X call-to-action that the brief didn't request — most pieces (resumes, reports, letters) should have NO QR code.",
+    promptSnippet: "gen_qr: data + id -> images/<id>/qr.svg (ONLY when the brief explicitly asks to scan a link)",
     parameters: Type.Object({
       id: Type.String({ description: "image slot id, e.g. 'signup-qr'" }),
       data: Type.String({ description: "the URL or text to encode" }),

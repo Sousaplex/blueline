@@ -144,7 +144,10 @@ Workspace-level (shared across ALL projects — read freely; write ONLY via the 
   If the brand has NO logo file here yet but has one on their website, DOWNLOAD the real file
   with fetch_image({ url, into: "brand" }) (web_fetch mode=brand reports the logo URL), then
   place it with use_image — NEVER gen_images a stand-in logo. Same for real product photos on
-  their site: fetch_image them into context/ and use_image them instead of generating fakes.${reuseImageNote}
+  their site: fetch_image them into context/ and use_image them instead of generating fakes.
+  QR codes: add one ONLY when the brief explicitly asks for a scannable link/CTA. Never invent a
+  QR code or a "scan to …" call-to-action the brief didn't request — resumes, reports and letters
+  should almost never have one.${reuseImageNote}
 
 # Workspace curation (write_source / write_brand / organize_sources)
 The source library and brand home outlive any single project. When the HUMAN asks you to

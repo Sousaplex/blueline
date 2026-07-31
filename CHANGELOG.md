@@ -5,6 +5,15 @@ All notable user-facing changes to Blueline. Kept from v0.17.0 onward
 [Keep a Changelog](https://keepachangelog.com/); versions match `app/package.json`
 and the GitHub release tags.
 
+## [0.33.0]
+
+No more uninvited QR codes.
+
+### Fixed
+- **The agent stops adding speculative QR codes.** It was reaching for a "scan to…" QR on pieces
+  that never asked for one (resumes, reports). Now it only generates a QR when the brief explicitly
+  calls for a scannable link/CTA — hardened at both the tool and the system-prompt level.
+
 ## [0.32.0]
 
 Live model list + a diagnostics report — so a bad model or key never fails silently again.
