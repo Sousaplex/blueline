@@ -247,6 +247,44 @@ async function runSmokeTest(): Promise<void> {
   smokeLog(`[smoke] done window=${join(SMOKE_DIR, "smoke-window.png")} export=${exported}`);
 }
 
+// Double-clicking a .blueline/.blueproject in Finder fires 'open-file' (macOS only,
+// registered by the fileAssociations in package.json). It can arrive BEFORE the app
+// is ready (cold start), so buffer paths until the bridge + window are up, then import
+// each through the same endpoint the in-app Import button uses.
+let filesReady = false;
+const pendingOpenFiles: string[] = [];
+
+async function handleOpenFile(filePath: string): Promise<void> {
+  if (!/\.(blueline|blueproject)$/i.test(filePath)) return;
+  try {
+    const dataBase64 = readFileSync(filePath).toString("base64");
+    const res = await fetch(`${BRIDGE_URL}/api/project/import`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ dataBase64, open: true }),
+    });
+    if (!res.ok) {
+      const err = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(err.error ?? `HTTP ${res.status}`);
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  } catch (err) {
+    dialog.showErrorBox(
+      "Couldn't open file",
+      `${filePath}\n\n${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
+app.on("open-file", (event, filePath) => {
+  event.preventDefault(); // tell macOS we handled it
+  if (filesReady) void handleOpenFile(filePath);
+  else pendingOpenFiles.push(filePath);
+});
+
 app.whenReady().then(async () => {
   try {
     // Window FIRST so the app never has zero windows during setup (see ensureChromium note).
@@ -296,6 +334,12 @@ app.whenReady().then(async () => {
     if (SMOKE) smokeLog("[smoke] loading renderer: " + rendererUrl);
     await mainWindow.loadURL(rendererUrl);
     if (SMOKE) smokeLog("[smoke] renderer loaded");
+
+    // Bridge + renderer are up — drain any files opened via Finder double-click.
+    filesReady = true;
+    if (!SMOKE) {
+      for (const f of pendingOpenFiles.splice(0)) await handleOpenFile(f);
+    }
 
     if (SMOKE) {
       await runSmokeTest();

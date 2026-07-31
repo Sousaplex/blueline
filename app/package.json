@@ -1,6 +1,6 @@
 {
   "name": "blueline-app",
-  "version": "0.39.0",
+  "version": "0.40.0",
   "description": "AI design studio for print marketing collateral",
   "author": "Blueline",
   "private": true,
@@ -71,6 +71,24 @@
     "directories": {
       "output": "release"
     },
+    "fileAssociations": [
+      {
+        "ext": "blueline",
+        "name": "Blueline Document",
+        "description": "Blueline document",
+        "role": "Editor",
+        "rank": "Owner",
+        "icon": "build/icon.icns"
+      },
+      {
+        "ext": "blueproject",
+        "name": "Blueline Project",
+        "description": "Blueline project",
+        "role": "Editor",
+        "rank": "Owner",
+        "icon": "build/icon.icns"
+      }
+    ],
     "files": [
       "dist/**",
       "dist-electron/*.cjs",

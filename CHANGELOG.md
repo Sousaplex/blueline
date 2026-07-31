@@ -5,6 +5,17 @@ All notable user-facing changes to Blueline. Kept from v0.17.0 onward
 [Keep a Changelog](https://keepachangelog.com/); versions match `app/package.json`
 and the GitHub release tags.
 
+## [0.40.0]
+
+Shared Blueline files get an icon and open on double-click.
+
+### Added
+- **`.blueline` / `.blueproject` files now show the Blueline icon in Finder** and open the app when
+  double-clicked — which imports them straight into your workspace. Registered as document types
+  owned by Blueline, so this takes effect on any Mac once Blueline is installed (the README inside a
+  shared archive tells recipients to install it). Files created before this still get the icon once
+  the app has been launched once.
+
 ## [0.39.0]
 
 Four requested settings land: template overrides, per-template instructions, a configurable
