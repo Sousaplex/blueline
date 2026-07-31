@@ -10,10 +10,19 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { readBridgeInfo } from "../engine/discovery.ts";
 
-const BRIDGE = process.env.BLUELINE_BRIDGE_URL ?? "http://localhost:7717";
+// Resolve the bridge URL fresh each call: an explicit env override wins, otherwise
+// read the discovery file the running app wrote (its port may have auto-fallen-back
+// off 7717), falling back to the default port if nothing is recorded yet.
+function bridgeUrl(): string {
+  if (process.env.BLUELINE_BRIDGE_URL) return process.env.BLUELINE_BRIDGE_URL;
+  const info = readBridgeInfo();
+  return `http://localhost:${info?.port ?? 7717}`;
+}
 
 async function api(path: string, body?: unknown): Promise<any> {
+  const BRIDGE = bridgeUrl();
   let res: Response;
   try {
     res = await fetch(`${BRIDGE}${path}`, {
@@ -78,14 +87,15 @@ server.tool(
 
 server.tool(
   "save_template",
-  "Freeze a project's current design as a workspace template. New projects created from it keep the structure exactly; the agent only fills in data.",
+  "Freeze a project's current design as a workspace template. New projects created from it keep the structure exactly; the agent only fills in data. Optional guidance is extra system-prompt instructions injected for every project made from this template (e.g. date format, terms, tone).",
   {
     slug: z.string().describe("project with a finished page.html"),
     name: z.string().describe("template name, e.g. 'Invoice'"),
     description: z.string().optional(),
+    guidance: z.string().optional().describe("extra instructions the agent follows whenever this template is used"),
   },
-  async ({ slug, name, description }) => {
-    const { template } = await api("/api/templates", { slug, name, description });
+  async ({ slug, name, description, guidance }) => {
+    const { template } = await api("/api/templates", { slug, name, description, guidance });
     return text(`Saved template "${template.slug}" (${template.settings.pageSize}, ${template.settings.pages} pg).`);
   },
 );
@@ -233,4 +243,4 @@ server.tool(
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error(`blueline MCP server ready (bridge: ${BRIDGE})`);
+console.error(`blueline MCP server ready (bridge: ${bridgeUrl()})`);

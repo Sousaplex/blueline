@@ -17,6 +17,9 @@ export interface TemplateInfo {
   slug: string;
   name: string;
   description: string;
+  /** Extra system-prompt guidance injected when a project uses this template
+   *  (e.g. "this is a US client invoice — dates MM/DD/YYYY, net-30 terms"). */
+  guidance: string;
   settings: PageSettings;
   sourceProject: string | null;
   createdAt: string;
@@ -43,6 +46,7 @@ function readInfo(dir: string, slug: string): TemplateInfo {
     slug,
     name: stored.name?.trim() || slug,
     description: stored.description ?? "",
+    guidance: typeof stored.guidance === "string" ? stored.guidance : "",
     settings: {
       pageSize: stored.settings?.pageSize?.trim() || DEFAULT_SETTINGS.pageSize,
       orientation: stored.settings?.orientation === "landscape" ? "landscape" : "portrait",
@@ -67,7 +71,7 @@ export function listTemplates(ws: Workspace): TemplateInfo[] {
 }
 
 /** Freeze a project's current design as a workspace template. */
-export function saveTemplate(project: Project, name: string, description = ""): TemplateInfo {
+export function saveTemplate(project: Project, name: string, description = "", guidance = ""): TemplateInfo {
   if (!existsSync(project.pageHtml)) {
     throw new Error(`"${project.slug}" has no page.html yet — a template needs a finished design`);
   }
@@ -83,6 +87,7 @@ export function saveTemplate(project: Project, name: string, description = ""): 
     slug,
     name: name.trim(),
     description: description.trim(),
+    guidance: guidance.trim(),
     settings: project.meta().settings,
     sourceProject: project.slug,
     createdAt: new Date().toISOString(),

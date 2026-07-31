@@ -16,6 +16,14 @@
     "maxRounds": 6,
     "apiKeyEnv": "GEMINI_API_KEY"
   },
+  "brief": {
+    "model": "gemini-3.5-flash",
+    "apiKeyEnv": "GEMINI_API_KEY"
+  },
+  "mcp": {
+    "enabled": true,
+    "port": 7717
+  },
   "render": {
     "format": "A4",
     "printBackground": true,

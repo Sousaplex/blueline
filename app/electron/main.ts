@@ -32,8 +32,37 @@ const REPO_ROOT = resolve(__dirname, "..", "..");
 const PACKAGED = app.isPackaged;
 const TOOLKIT_DIR = PACKAGED ? join(process.resourcesPath, "toolkit") : join(REPO_ROOT, "toolkit");
 const BLUELINE_HOME = process.env.BLUELINE_HOME ?? (PACKAGED ? app.getPath("userData") : undefined);
-const BRIDGE_PORT = Number(process.env.BLUELINE_PORT ?? 7717);
-const BRIDGE_URL = `http://localhost:${BRIDGE_PORT}`;
+
+/** Preferred bridge port: env override → configured mcp.port → default 7717. The
+ *  bridge auto-falls-back to a free port if this one is taken; we discover where
+ *  it actually landed via ~/.blueline/bridge.json. */
+function preferredPort(): number {
+  if (process.env.BLUELINE_PORT) return Number(process.env.BLUELINE_PORT);
+  for (const p of [join(BLUELINE_HOME ?? REPO_ROOT, "config", "providers.json"), join(REPO_ROOT, "config", "providers.example.json")]) {
+    try {
+      const cfg = JSON.parse(readFileSync(p, "utf8"));
+      if (cfg?.mcp?.port) return Number(cfg.mcp.port);
+    } catch {
+      /* file missing or unreadable — try the next candidate */
+    }
+  }
+  return 7717;
+}
+/** The port the running bridge recorded, or null if none is up. */
+function discoveredPort(): number | null {
+  try {
+    const raw = JSON.parse(readFileSync(join(app.getPath("home"), ".blueline", "bridge.json"), "utf8"));
+    return typeof raw.port === "number" && raw.port > 0 ? raw.port : null;
+  } catch {
+    return null;
+  }
+}
+let BRIDGE_PORT = preferredPort();
+let BRIDGE_URL = `http://localhost:${BRIDGE_PORT}`;
+function setBridgePort(port: number): void {
+  BRIDGE_PORT = port;
+  BRIDGE_URL = `http://localhost:${port}`;
+}
 const SMOKE = process.env.BLUELINE_SMOKE === "1";
 const SMOKE_DIR = process.env.BLUELINE_SMOKE_DIR ?? join(app.getPath("temp"), "blueline-smoke");
 
@@ -116,9 +145,9 @@ function smokeLog(msg: string): void {
   }
 }
 
-async function bridgeAlive(): Promise<boolean> {
+async function bridgeAlive(port: number): Promise<boolean> {
   try {
-    const res = await fetch(`${BRIDGE_URL}/api/project`, { signal: AbortSignal.timeout(1500) });
+    const res = await fetch(`http://localhost:${port}/api/project`, { signal: AbortSignal.timeout(1500) });
     return res.ok;
   } catch {
     return false;
@@ -126,11 +155,24 @@ async function bridgeAlive(): Promise<boolean> {
 }
 
 async function ensureBridge(): Promise<void> {
-  if (await bridgeAlive()) return; // reuse a dev bridge if one is already running
+  // Reuse a bridge that's already up: one recorded in discovery, or a dev bridge
+  // on the preferred port. Verify liveness so a stale record can't mislead us.
+  for (const p of [discoveredPort(), BRIDGE_PORT].filter((x): x is number => typeof x === "number")) {
+    if (await bridgeAlive(p)) {
+      setBridgePort(p);
+      return;
+    }
+  }
+  // Spawn on the preferred port; the bridge records where it truly bound (it may
+  // fall back if the port was taken), and we adopt that.
   bridgeChild = spawnNode([TSX_CLI, "src/engine/server.ts", "--port", String(BRIDGE_PORT)]);
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
-    if (await bridgeAlive()) return;
+    const port = discoveredPort();
+    if (port && (await bridgeAlive(port))) {
+      setBridgePort(port);
+      return;
+    }
     await new Promise((r) => setTimeout(r, 400));
   }
   throw new Error("Engine bridge failed to start within 30s");

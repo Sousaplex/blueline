@@ -9,7 +9,8 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync,
 import { dirname, extname, join, normalize, resolve } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { WebSocketServer, type WebSocket } from "ws";
-import { DATA_ROOT, REPO_ROOT, applyApiKeys, clampConcurrency, loadConfig, saveApiKeys, type BluelineConfig } from "./config.ts";
+import { DATA_ROOT, DEFAULT_MCP_PORT, REPO_ROOT, applyApiKeys, clampConcurrency, loadConfig, saveApiKeys, type BluelineConfig } from "./config.ts";
+import { clearBridgeInfo, writeBridgeInfo } from "./discovery.ts";
 import { compilePage } from "./compile.ts";
 import { resetLedger, takeLedger } from "./cost-ledger.ts";
 import { textCost } from "./pricing.ts";
@@ -503,7 +504,7 @@ class Bridge {
     const current: Record<string, unknown> = existsSync(configPath)
       ? JSON.parse(readFileSync(configPath, "utf8"))
       : { ...this.config };
-    for (const key of ["designer", "reviewer", "images", "render", "webFetch", "runs"] as const) {
+    for (const key of ["designer", "reviewer", "images", "brief", "render", "webFetch", "runs", "mcp"] as const) {
       if (patch[key]) current[key] = { ...(current[key] as object | undefined), ...patch[key] };
     }
     writeFileSync(configPath, JSON.stringify(current, null, 2) + "\n");
@@ -564,7 +565,7 @@ class Bridge {
     const project = new Project(dir, this.workspace);
     if (template) {
       const info = instantiateTemplate(this.workspace, template, dir);
-      project.updateMeta({ template: info.slug, settings: info.settings });
+      project.updateMeta({ template: info.slug, templateGuidance: info.guidance || undefined, settings: info.settings });
     }
     project.updateMeta({ displayName: name.trim(), ...meta });
     this.broadcast({ type: "projects_changed" });
@@ -849,6 +850,31 @@ async function readBody(req: IncomingMessage): Promise<any> {
   return raw ? JSON.parse(raw) : {};
 }
 
+/** Bind loopback on the preferred port; on EADDRINUSE fall back to an ephemeral
+ *  one so a port clash never blocks startup. Returns the port actually bound. */
+function listenLoopback(server: import("node:http").Server, preferred: number): Promise<number> {
+  const attempt = (p: number) =>
+    new Promise<number>((resolve, reject) => {
+      const onError = (err: NodeJS.ErrnoException) => {
+        server.removeListener("listening", onListening);
+        reject(err);
+      };
+      const onListening = () => {
+        server.removeListener("error", onError);
+        const addr = server.address();
+        resolve(typeof addr === "object" && addr ? addr.port : p);
+      };
+      server.once("error", onError);
+      server.once("listening", onListening);
+      server.listen(p, "127.0.0.1");
+    });
+  return attempt(preferred).catch((err: NodeJS.ErrnoException) => {
+    if (err.code !== "EADDRINUSE") throw err;
+    console.warn(`Blueline bridge: port ${preferred} is in use — falling back to a free port`);
+    return attempt(0);
+  });
+}
+
 export async function startServer(projectDirArg: string | undefined, port: number): Promise<void> {
   const { workspace, lastProject, fresh } = Workspace.load();
   let project: Project | undefined;
@@ -878,6 +904,12 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
       if (req.method === "OPTIONS") {
         res.writeHead(204);
         return res.end();
+      }
+
+      // External-agent gate: when MCP access is turned off in Settings, reject the
+      // MCP server's tagged requests. The app itself sends no tag, so it's unaffected.
+      if (source === "mcp" && !bridge.config.mcp.enabled) {
+        return json(res, 403, { error: "MCP access is disabled in Blueline Settings (External access → off)." });
       }
 
       // Built viewer (app/dist) as web root.
@@ -1067,7 +1099,12 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
           } catch {
             // no rendered page or browser hiccup — the template still works without a spec
           }
-          const info = saveTemplate(sourceProject, String(body.name), body.description ? String(body.description) : "");
+          const info = saveTemplate(
+            sourceProject,
+            String(body.name),
+            body.description ? String(body.description) : "",
+            body.guidance ? String(body.guidance) : "",
+          );
           sys("save_template", `${body.slug} -> ${info.slug}`);
           return json(res, 200, { ok: true, template: info });
         }
@@ -1591,22 +1628,34 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
     }
   });
 
-  const wss = new WebSocketServer({
-    server,
-    path: "/ws",
-    // Same gate as HTTP: browsers send Origin on WS upgrades — reject foreign pages.
-    verifyClient: (info: { origin?: string; req: IncomingMessage }) =>
-      isLocalRequest(info.req) && (!info.origin || LOCAL_ORIGIN.test(info.origin)),
-  });
+  // noServer + manual upgrade: keeps the WebSocket server OFF the http server's
+  // listen lifecycle, so a port-in-use error surfaces to listenLoopback (which
+  // retries on a free port) instead of crashing via an unhandled ws 'error'.
+  const wss = new WebSocketServer({ noServer: true });
   wss.on("connection", (ws) => bridge.attach(ws));
+  server.on("upgrade", (req, socket, head) => {
+    const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
+    const origin = req.headers.origin;
+    // Same gate as HTTP: reject non-/ws paths and foreign-origin browser upgrades.
+    if (pathname !== "/ws" || !isLocalRequest(req) || (origin && !LOCAL_ORIGIN.test(origin))) {
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
+  });
 
   // Loopback only — the bridge serves one desktop app, never the LAN.
-  await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", resolve));
+  port = await listenLoopback(server, port);
+  // A late server error (e.g. a transient socket fault) must log, never crash the bridge.
+  server.on("error", (err) => console.error("Blueline bridge server error:", err));
+  // Record where we landed so the standalone MCP process (and the app) can find us.
+  writeBridgeInfo(port);
   console.log(
     `Blueline bridge — workspace=${bridge.workspace.root} project=${bridge.project?.slug ?? "(none)"} http://localhost:${port}`,
   );
 
   const shutdown = async () => {
+    clearBridgeInfo();
     await bridge.dispose();
     process.exit(0);
   };
@@ -1619,10 +1668,18 @@ const isMain = process.argv[1]?.endsWith("server.ts");
 if (isMain) {
   const args = process.argv.slice(2);
   let projectDir: string | undefined;
-  let port = 7717;
+  let port: number | undefined;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--port") port = Number(args[++i]);
     else if (!args[i].startsWith("--")) projectDir = args[i];
+  }
+  // No explicit --port: honor the configured preferred port (Settings → External access).
+  if (!port) {
+    try {
+      port = loadConfig().mcp.port;
+    } catch {
+      port = DEFAULT_MCP_PORT;
+    }
   }
   await startServer(projectDir, port);
 }

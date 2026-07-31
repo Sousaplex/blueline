@@ -39,6 +39,7 @@ export function NewProjectDialog({
   const [autoPages, setAutoPages] = useState(false);
   const [widthMm, setWidthMm] = useState(210);
   const [heightMm, setHeightMm] = useState(297);
+  const [overrideSize, setOverrideSize] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,15 +58,31 @@ export function NewProjectDialog({
 
   const selected = template === BLANK ? undefined : templates.find((t) => t.slug === template);
 
+  // Seed the format controls from the chosen template so an override starts from
+  // the template's real size (and resets to locked each time the pick changes).
+  useEffect(() => {
+    if (!selected) return;
+    const s = selected.settings;
+    setPageSize(s.pageSize);
+    setOrientation(s.orientation);
+    setDocType(s.docType ?? "one-pager");
+    setPages(s.pages);
+    setAutoPages(s.autoPages ?? false);
+    if (typeof s.widthMm === "number") setWidthMm(s.widthMm);
+    if (typeof s.heightMm === "number") setHeightMm(s.heightMm);
+    setOverrideSize(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [template]);
+
   const create = async () => {
     setCreating(true);
     setError(null);
     try {
-      // A template dictates the format; blank projects take the picker's settings.
+      // A template dictates the format unless the user overrides its size;
+      // blank projects always take the picker's settings.
       const autoOn = autoPages && !pageSize.startsWith("Slide");
-      const settings = selected
-        ? undefined
-        : { pageSize, orientation, docType, pages, autoPages: autoOn, ...(pageSize === "Custom" ? { widthMm, heightMm } : {}) };
+      const picked = { pageSize, orientation, docType, pages, autoPages: autoOn, ...(pageSize === "Custom" ? { widthMm, heightMm } : {}) };
+      const settings = selected ? (overrideSize ? picked : undefined) : picked;
       await client.createProject(name, brief || undefined, selected?.slug, settings);
       setName("");
       setBrief("");
@@ -73,6 +90,7 @@ export function NewProjectDialog({
       setPageSize("A4");
       setOrientation("portrait");
       setPages(1);
+      setOverrideSize(false);
       onOpenChange(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -127,12 +145,30 @@ export function NewProjectDialog({
                 )}
               </div>
             </div>
-            {selected ? (
-              <p className="rounded-md border bg-muted/30 p-2 text-xs text-muted-foreground">
-                {selected.settings.pageSize} {selected.settings.orientation}, {selected.settings.pages} pg ·
-                structure comes from the template; the agent fills it with this project's data.
-              </p>
-            ) : (
+            {selected && (
+              <div className="space-y-2 rounded-md border bg-muted/30 p-2 text-xs text-muted-foreground">
+                <div className="flex items-center justify-between gap-2">
+                  <span>
+                    {selected.settings.pageSize} {selected.settings.orientation}, {selected.settings.pages} pg ·
+                    structure comes from the template.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setOverrideSize((v) => !v)}
+                    className={`shrink-0 rounded-md border px-2 py-1 transition-colors ${
+                      overrideSize ? "bg-accent font-medium text-foreground" : "hover:text-foreground"
+                    }`}
+                    title="Change the page size/count for this project — the template's layout is still copied in"
+                  >
+                    {overrideSize ? "Custom size on" : "Override size"}
+                  </button>
+                </div>
+                {selected.guidance ? (
+                  <p className="border-t pt-2 text-[11px]">Template instructions: {selected.guidance}</p>
+                ) : null}
+              </div>
+            )}
+            {(!selected || overrideSize) && (
               <div className="space-y-1.5">
                 <Label>Type &amp; format</Label>
                 <Select value={docType} onValueChange={setDocType}>

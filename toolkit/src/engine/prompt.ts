@@ -85,7 +85,7 @@ const ANTI_SLOP = `# Anti-slop — avoid the generic "AI-generated" tells
 /** System prompt for the Blueline designer agent — the engine-authoritative
  *  version of the loop contract that CLAUDE.md described in the sidecar era. */
 export function buildSystemPrompt(project: Project, config: BluelineConfig): string {
-  const { settings, template } = project.meta();
+  const { settings, template, templateGuidance } = project.meta();
   const dims = pageDims(settings);
   // Named print sizes keep the robust `size: A4 portrait` form; slides/custom get exact mm.
   const namedPrintSize = settings.pageSize in PAGE_DIMS && !settings.pageSize.startsWith("Slide") && settings.pageSize !== "Square";
@@ -150,7 +150,7 @@ page.html already contains the approved template structure. Treat it as a CONTRA
   fit the data — clone an existing row's markup verbatim so classes and structure stay identical.
 - Do NOT add new sections, restyle, or restructure. If the brief demands something the template
   cannot express, fill in what fits and flag the rest in your final message.
-`
+${templateGuidance?.trim() ? `\nTemplate-specific instructions (authored with this template — follow them):\n${templateGuidance.trim()}\n` : ""}`
     : "";
   return `You are the layout engine and art director for print/PDF marketing material.
 You work inside one project directory and drive an iterative design loop until the

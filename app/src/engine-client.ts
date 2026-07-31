@@ -43,6 +43,7 @@ export interface TemplateInfo {
   slug: string;
   name: string;
   description: string;
+  guidance: string;
   settings: PageSettings;
   sourceProject: string | null;
   createdAt: string;
@@ -102,7 +103,9 @@ export interface EngineSettings {
     designer: { provider: string; model: string; thinkingLevel?: string; apiKeyEnv?: string };
     reviewer: { provider: string; model: string; maxRounds: number; apiKeyEnv?: string };
     images: { provider: string; model: string; variantsPerPrompt: number; apiKeyEnv?: string };
+    brief?: { model: string; apiKeyEnv?: string };
     runs?: { maxConcurrent: number };
+    mcp?: { enabled: boolean; port: number };
   };
   registry: { id: string; models: string[] }[];
   suggestions: { reviewer: string[]; images: string[] };
@@ -114,7 +117,9 @@ export type SettingsPatch = {
   designer?: Partial<EngineSettings["config"]["designer"]>;
   reviewer?: Partial<EngineSettings["config"]["reviewer"]>;
   images?: Partial<EngineSettings["config"]["images"]>;
+  brief?: { model?: string; apiKeyEnv?: string };
   runs?: { maxConcurrent: number };
+  mcp?: { enabled?: boolean; port?: number };
 };
 
 export type RunState = "idle" | "queued" | "running";
@@ -257,7 +262,7 @@ export interface EngineClient {
   createProject(name: string, brief?: string, template?: string, settings?: Partial<PageSettings>): Promise<void>;
   listTemplates(): Promise<TemplateInfo[]>;
   /** Freeze a project's current design as a workspace template. */
-  saveTemplate(slug: string, name: string, description?: string): Promise<void>;
+  saveTemplate(slug: string, name: string, description?: string, guidance?: string): Promise<void>;
   deleteTemplate(slug: string): Promise<void>;
   closeProject(): Promise<void>;
   deleteProject(slug: string): Promise<void>;
@@ -436,7 +441,7 @@ export class BrowserEngineClient implements EngineClient {
     const res = await fetch("/api/templates");
     return (await res.json()).templates ?? [];
   }
-  saveTemplate(slug: string, name: string, description?: string) { return post("/api/templates", { slug, name, description }); }
+  saveTemplate(slug: string, name: string, description?: string, guidance?: string) { return post("/api/templates", { slug, name, description, guidance }); }
   deleteTemplate(slug: string) { return post("/api/templates/delete", { slug }); }
   closeProject() { return post("/api/project/close"); }
   deleteProject(slug: string) { return post("/api/project/delete", { slug }); }

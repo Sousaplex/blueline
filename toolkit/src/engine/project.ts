@@ -51,6 +51,7 @@ export interface ProjectMeta {
   parent: string | null; // slug this project was created from
   forkedFromRound: number | null; // set when branched from a specific review round
   template: string | null; // workspace template slug — locks the agent into fill-in-the-data mode
+  templateGuidance?: string; // extra system-prompt guidance carried from the template at creation
   settings: PageSettings;
 }
 
@@ -158,6 +159,7 @@ export class Project {
       parent: stored.parent ?? null,
       forkedFromRound: stored.forkedFromRound ?? null,
       template: stored.template ?? null,
+      templateGuidance: typeof stored.templateGuidance === "string" ? stored.templateGuidance : undefined,
       settings: {
         pageSize: stored.settings?.pageSize?.trim() || DEFAULT_SETTINGS.pageSize,
         orientation: stored.settings?.orientation === "landscape" ? "landscape" : "portrait",

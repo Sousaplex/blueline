@@ -27,6 +27,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -86,6 +87,7 @@ export function LeftPane({
   const [templateDialog, setTemplateDialog] = useState(false);
   const [templateName, setTemplateName] = useState("");
   const [templateDesc, setTemplateDesc] = useState("");
+  const [templateGuidance, setTemplateGuidance] = useState("");
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [templateError, setTemplateError] = useState<string | null>(null);
   const contextInput = useRef<HTMLInputElement>(null);
@@ -101,10 +103,11 @@ export function LeftPane({
     setSavingTemplate(true);
     setTemplateError(null);
     try {
-      await client.saveTemplate(project.slug!, templateName, templateDesc || undefined);
+      await client.saveTemplate(project.slug!, templateName, templateDesc || undefined, templateGuidance || undefined);
       setTemplateDialog(false);
       setTemplateName("");
       setTemplateDesc("");
+      setTemplateGuidance("");
     } catch (e) {
       setTemplateError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -603,6 +606,18 @@ export function LeftPane({
                 placeholder="Standard client invoice, Letter portrait"
                 onChange={(e) => setTemplateDesc(e.target.value)}
               />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Agent instructions (optional)</Label>
+              <Textarea
+                value={templateGuidance}
+                rows={3}
+                placeholder="Extra rules the agent follows whenever this template is used — e.g. dates as MM/DD/YYYY, net-30 terms, keep the legal footer verbatim."
+                onChange={(e) => setTemplateGuidance(e.target.value)}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Added to the system prompt for every project started from this template.
+              </p>
             </div>
             {templateError && <p className="text-sm text-destructive">{templateError}</p>}
           </div>

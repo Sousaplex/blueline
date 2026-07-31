@@ -5,6 +5,30 @@ All notable user-facing changes to Blueline. Kept from v0.17.0 onward
 [Keep a Changelog](https://keepachangelog.com/); versions match `app/package.json`
 and the GitHub release tags.
 
+## [0.39.0]
+
+Four requested settings land: template overrides, per-template instructions, a configurable
+external-access port with an on/off switch, and a dedicated brief-drafting model.
+
+### Added
+- **Override a template's size at creation.** Starting a project from a template now shows its
+  page size with an **Override size** toggle — flip it to change the format (including Custom
+  dimensions) for this project while still copying in the template's layout. Left off, the
+  template's size is used as before.
+- **Per-template agent instructions.** *Save as template* has a new **Agent instructions** field:
+  extra system-prompt guidance (date formats, terms, tone…) that every project made from the
+  template follows. Shown when you pick the template, and available via the `save_template` MCP tool.
+- **Separate brief-drafting model.** Settings → **Brief drafting** picks the Gemini model that
+  expands a one-line idea into a structured brief, independent of the reviewer model.
+- **External access (MCP) controls.** Settings → **External access (MCP)** turns agent access
+  on/off (applies immediately — the app itself keeps working either way) and sets a **preferred
+  port**. If that port is busy the bridge now auto-picks a free one instead of failing to start,
+  and records where it landed so the MCP server always finds it.
+
+### Fixed
+- A port conflict on 7717 no longer blocks startup — the engine falls back to a free port and
+  writes a discovery file (`~/.blueline/bridge.json`) the MCP server reads.
+
 ## [0.38.0]
 
 Shared project files now explain themselves.

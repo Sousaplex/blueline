@@ -13,21 +13,28 @@ export interface BluelineConfig {
   designer: DesignerConfig;
   images: { provider: string; model: string; variantsPerPrompt: number; apiKeyEnv?: string };
   reviewer: { provider: string; model: string; maxRounds: number; apiKeyEnv?: string };
+  brief: { model: string; apiKeyEnv?: string }; // Gemini model that drafts briefs from a one-liner
   render: { format: string; printBackground: boolean; preferCSSPageSize: boolean };
   webFetch: { maxFetchesPerRun: number; maxContentChars: number };
   webSearch: { model: string; maxSearchesPerRun: number; apiKeyEnv?: string };
   runs: { maxConcurrent: number }; // how many project generations run at once (clamped 1–10)
+  mcp: { enabled: boolean; port: number }; // external-agent bridge: on/off + preferred port
 }
+
+/** The default bridge/MCP port. Auto-fallback picks another if this one is taken. */
+export const DEFAULT_MCP_PORT = 7717;
 
 /** Concurrency bounds — the setting is clamped to this range everywhere it's read. */
 export const MIN_CONCURRENT_RUNS = 1;
 export const MAX_CONCURRENT_RUNS_CAP = 10;
 export const DEFAULT_CONCURRENT_RUNS = 3;
 
-const DEFAULTS: Pick<BluelineConfig, "webFetch" | "webSearch" | "runs"> = {
+const DEFAULTS: Pick<BluelineConfig, "webFetch" | "webSearch" | "runs" | "brief" | "mcp"> = {
   webFetch: { maxFetchesPerRun: 10, maxContentChars: 20_000 },
   webSearch: { model: "gemini-3.5-flash", maxSearchesPerRun: 5, apiKeyEnv: "GEMINI_API_KEY" },
   runs: { maxConcurrent: DEFAULT_CONCURRENT_RUNS },
+  brief: { model: "gemini-3.5-flash", apiKeyEnv: "GEMINI_API_KEY" },
+  mcp: { enabled: true, port: DEFAULT_MCP_PORT },
 };
 
 /** Clamp any stored/incoming concurrency to the safe range, tolerating junk values. */
@@ -69,7 +76,17 @@ export function loadConfig(): BluelineConfig {
       `Missing "designer" block in ${path}. Add e.g. {"designer": {"provider": "moonshotai", "model": "<id>", "apiKeyEnv": "MOONSHOT_API_KEY"}}`,
     );
   }
-  return { ...DEFAULTS, ...raw };
+  // Deep-merge the optional blocks so a partial override (e.g. mcp:{enabled:false})
+  // doesn't drop the sibling default (the port).
+  return {
+    ...DEFAULTS,
+    ...raw,
+    brief: { ...DEFAULTS.brief, ...raw.brief },
+    mcp: { ...DEFAULTS.mcp, ...raw.mcp },
+    runs: { ...DEFAULTS.runs, ...raw.runs },
+    webFetch: { ...DEFAULTS.webFetch, ...raw.webFetch },
+    webSearch: { ...DEFAULTS.webSearch, ...raw.webSearch },
+  };
 }
 
 /** Persist API keys to DATA_ROOT/.env AND inject into the running process —

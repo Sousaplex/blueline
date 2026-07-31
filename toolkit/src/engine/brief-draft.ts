@@ -36,7 +36,9 @@ export async function draftBrief(
   idea: string,
   format?: string,
 ): Promise<DraftedBrief> {
-  const apiKey = requireApiKey(config.reviewer.apiKeyEnv ?? "GEMINI_API_KEY", "brief drafting");
+  // A dedicated brief model (Settings → Brief drafting), falling back to the reviewer's.
+  const briefCfg = config.brief ?? { model: config.reviewer.model, apiKeyEnv: config.reviewer.apiKeyEnv };
+  const apiKey = requireApiKey(briefCfg.apiKeyEnv ?? "GEMINI_API_KEY", "brief drafting");
   const ai = new GoogleGenAI({ apiKey });
   const brand = listSourceFiles(workspace.brandDir)
     .filter((f) => f.kind === "text")
@@ -44,7 +46,7 @@ export async function draftBrief(
     .join("\n\n")
     .slice(0, 4000);
   const response = await ai.models.generateContent({
-    model: config.reviewer.model,
+    model: briefCfg.model,
     contents: [
       {
         role: "user",

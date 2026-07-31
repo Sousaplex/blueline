@@ -36,7 +36,10 @@ export function SettingsDialog({ client }: { client: EngineClient }) {
   const [maxRounds, setMaxRounds] = useState(6);
   const [imagesModel, setImagesModel] = useState("");
   const [variantsPerPrompt, setVariantsPerPrompt] = useState(2);
+  const [briefModel, setBriefModel] = useState("");
   const [maxConcurrent, setMaxConcurrent] = useState(3);
+  const [mcpEnabled, setMcpEnabled] = useState(true);
+  const [mcpPort, setMcpPort] = useState(7717);
   const [setup, setSetup] = useState<SetupState | null>(null);
   const [geminiKey, setGeminiKey] = useState("");
   const [moonshotKey, setMoonshotKey] = useState("");
@@ -55,7 +58,10 @@ export function SettingsDialog({ client }: { client: EngineClient }) {
         setMaxRounds(s.config.reviewer.maxRounds);
         setImagesModel(s.config.images.model);
         setVariantsPerPrompt(s.config.images.variantsPerPrompt);
+        setBriefModel(s.config.brief?.model ?? s.config.reviewer.model);
         setMaxConcurrent(s.config.runs?.maxConcurrent ?? 3);
+        setMcpEnabled(s.config.mcp?.enabled ?? true);
+        setMcpPort(s.config.mcp?.port ?? 7717);
       })
       .catch((e) => setError(String(e)));
     setGeminiKey("");
@@ -80,6 +86,7 @@ export function SettingsDialog({ client }: { client: EngineClient }) {
         : [model, ...providerModels];
   const reviewerOptions = uniq([reviewerModel, ...(avail?.generate.length ? avail.generate : settings?.suggestions.reviewer ?? [])]);
   const imageOptions = uniq([imagesModel, ...(avail?.image.length ? avail.image : settings?.suggestions.images ?? [])]);
+  const briefOptions = uniq([briefModel, ...(avail?.generate.length ? avail.generate : settings?.suggestions.reviewer ?? [])]);
 
   const copyDiagnostics = async () => {
     setError(null);
@@ -105,7 +112,9 @@ export function SettingsDialog({ client }: { client: EngineClient }) {
         designer: { provider, model, thinkingLevel: thinking }, // apiKeyEnv is derived from the provider engine-side
         reviewer: { model: reviewerModel, maxRounds },
         images: { model: imagesModel, variantsPerPrompt },
+        brief: { model: briefModel },
         runs: { maxConcurrent: Math.max(1, Math.min(10, Math.round(maxConcurrent) || 3)) },
+        mcp: { enabled: mcpEnabled, port: Math.max(1024, Math.min(65535, Math.round(mcpPort) || 7717)) },
       });
       setOpen(false);
     } catch (e) {
@@ -291,6 +300,28 @@ export function SettingsDialog({ client }: { client: EngineClient }) {
             <Separator />
 
             <section className="space-y-3">
+              <h4 className="text-sm font-medium">Brief drafting</h4>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Model</Label>
+                  <Select value={briefModel} onValueChange={setBriefModel}>
+                    <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {briefOptions.map((m) => (
+                        <SelectItem key={m} value={m}>{m}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <p className="self-center text-xs text-muted-foreground">
+                  The Gemini model that expands a one-line idea into a structured brief (New project → Draft).
+                </p>
+              </div>
+            </section>
+
+            <Separator />
+
+            <section className="space-y-3">
               <h4 className="text-sm font-medium">Runs</h4>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
@@ -308,6 +339,46 @@ export function SettingsDialog({ client }: { client: EngineClient }) {
                   quota in parallel — 3 is a good default.
                 </p>
               </div>
+            </section>
+
+            <Separator />
+
+            <section className="space-y-3">
+              <h4 className="text-sm font-medium">External access (MCP)</h4>
+              <p className="text-xs text-muted-foreground">
+                Lets external AI agents (Claude Code, Kimi CLI…) drive Blueline through its MCP server —
+                create projects, run designs, read reviews. The app itself keeps working either way.
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Agent access</Label>
+                  <button
+                    type="button"
+                    onClick={() => setMcpEnabled((v) => !v)}
+                    className={`h-9 w-full rounded-md border px-3 text-sm font-medium transition-colors ${
+                      mcpEnabled
+                        ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {mcpEnabled ? "On — agents allowed" : "Off — agents blocked"}
+                  </button>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Preferred port</Label>
+                  <Input
+                    type="number"
+                    min={1024}
+                    max={65535}
+                    value={mcpPort}
+                    onChange={(e) => setMcpPort(Number(e.target.value))}
+                  />
+                </div>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                If this port is busy Blueline picks a free one automatically. Turning access on/off applies
+                immediately; a port change takes effect next time you launch the app.
+              </p>
             </section>
 
             <Separator />
