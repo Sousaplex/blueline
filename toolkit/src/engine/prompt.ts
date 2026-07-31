@@ -1,6 +1,57 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { BluelineConfig } from "./config.ts";
 import { PAGE_DIMS, listSourceFiles, pageDims, type Project } from "./project.ts";
 import { formatStyleSpec, loadStyleSpec } from "./style-spec.ts";
+
+/**
+ * Inline the ACTUAL text of the project's sources into the system prompt so the model designs from
+ * real content instead of inventing it. Text sources are read directly; PDFs are read from their
+ * extracted `<name>.pdf.txt` sidecar. Honors the project's source selection (null = all context).
+ */
+function buildSourceMaterial(project: Project): string {
+  const selected = project.selectedSources(); // string[] of relative paths, or null = all
+  const contextDir = project.workspace.contextDir;
+  const files = listSourceFiles(contextDir).filter((f) => (selected ? selected.includes(f.path) : true));
+  const read = (p: string) => {
+    try {
+      return readFileSync(p, "utf8");
+    } catch {
+      return "";
+    }
+  };
+  const chunks: string[] = [];
+  let budget = 24_000;
+  for (const f of files) {
+    if (budget <= 0) break;
+    let text = "";
+    let label = f.path;
+    if (f.kind === "text") text = read(join(contextDir, f.path));
+    else if (f.kind === "pdf") {
+      const sidecar = join(contextDir, `${f.path}.txt`);
+      if (existsSync(sidecar)) {
+        text = read(sidecar);
+        label = `${f.path} (extracted text)`;
+      }
+    }
+    text = text.trim();
+    if (!text) continue;
+    const slice = text.slice(0, Math.min(6000, budget));
+    budget -= slice.length;
+    chunks.push(`## ${label}\n${slice}${text.length > slice.length ? "\n…(truncated)" : ""}`);
+  }
+  if (!chunks.length) return "";
+  return `
+
+# Source material — the FACTUAL CONTENT for this piece (use ONLY what is here)
+Every name, company, employer, job title, date, number and claim you place on the page MUST come
+from these sources or brief.md. NEVER invent companies, employers, credentials, or facts, and never
+fill a gap with a plausible-sounding placeholder — if it is not in the sources, leave it out. When
+the source IS the content (e.g. a résumé, a spec, a bio), reproduce its facts faithfully; your job is
+layout and design, not authorship of new claims.
+
+${chunks.join("\n\n")}`;
+}
 
 /** Per-genre composition doctrine. The default craft rules below assume a one-pager;
  *  these override them so an infographic/poster/report doesn't collapse into the same
@@ -77,6 +128,7 @@ These numbers were measured from the template/series master. Sibling documents m
 indistinguishable in type and rhythm; the reviewer flags deviations as defects.
 `
     : "";
+  const sourceMaterial = buildSourceMaterial(project);
   const brandAssets = project.brandAssets();
   const contextImages = listSourceFiles(project.workspace.contextDir).filter((f) => f.kind === "image");
   const reuseImageNote =
@@ -130,7 +182,7 @@ page.html to match. Never change the format on your own judgment.${deckNote}${pa
 - Reference images only with <img src="…"> (project images, or data: URIs for tiny inline SVG).
 - Read source CONTENT, don't try to process binary files. A PDF source is auto-extracted to a
   sibling "<name>.pdf.txt" — read THAT text file for its content; never read or embed the .pdf.
-${genreSection}${templateContract}${styleSpecSection}
+${genreSection}${templateContract}${styleSpecSection}${sourceMaterial}
 
 # Project directory (your working area): ${project.dir}
 - brief.md          — the ask: audience, message, key content. Read first.

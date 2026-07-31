@@ -5,6 +5,18 @@ All notable user-facing changes to Blueline. Kept from v0.17.0 onward
 [Keep a Changelog](https://keepachangelog.com/); versions match `app/package.json`
 and the GitHub release tags.
 
+## [0.36.0]
+
+The agent now designs from your sources — no more invented companies.
+
+### Fixed
+- **Source content is put directly in front of the agent.** The actual text of your sources (and a
+  PDF's extracted text) is now inlined into the agent's instructions, with a hard rule: every name,
+  company, date and number must come from the sources or brief — never invent, never fill a gap with
+  a plausible placeholder. This stops the "where did StackAdapt come from?" hallucinations.
+- **PDF extraction now runs for edits too**, not just full runs — so steering ("use the sources!")
+  works even if you never hit Run after adding the PDF.
+
 ## [0.35.0]
 
 The big one: the agent now reads PDF sources, and can't produce a broken proof.

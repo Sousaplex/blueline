@@ -14,6 +14,7 @@ import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { loadConfig, type BluelineConfig } from "./config.ts";
 import { Project } from "./project.ts";
 import { buildSystemPrompt } from "./prompt.ts";
+import { ensurePdfSidecars } from "./pdf-text.ts";
 import { PlaywrightBackend, type RenderBackend } from "./render.ts";
 import { buildPresscheckTools } from "./tools.ts";
 
@@ -118,6 +119,10 @@ export async function createBluelineSession(opts: CreateSessionOptions): Promise
           : `Provider "${providerId}" unknown. Providers: ${modelRuntime.getProviders().map((p) => p.id).join(", ")}`),
     );
   }
+
+  // Extract PDF sources to readable .txt sidecars BEFORE building the prompt, so the prompt can
+  // inline their real text (the agent designs from facts instead of inventing them). Best-effort.
+  await ensurePdfSidecars(project.workspace.contextDir).catch(() => {});
 
   const settingsManager = SettingsManager.create(project.dir, getAgentDir());
   const resourceLoader = new DefaultResourceLoader({
