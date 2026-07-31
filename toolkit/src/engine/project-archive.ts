@@ -19,6 +19,33 @@ function appVersion(): string {
   return process.env.BLUELINE_VERSION?.trim() || "dev";
 }
 
+const RELEASES_URL = "https://github.com/Sousaplex/blueline/releases/latest";
+
+/** A README shipped inside every archive so whoever (or whatever) receives it knows what it is and
+ *  how to open it — download Blueline, then Import the file. Written for both humans and agents. */
+function readmeFor(kind: "document" | "project", name: string): string {
+  const isProject = kind === "project";
+  return `# ${name} — Blueline ${kind}
+
+This is a **Blueline ${kind} file** (\`.${isProject ? BLUELINE_PROJECT_EXT : BLUELINE_FILE_EXT}\`), created with Blueline ${appVersion()} — a free AI design studio for print & marketing collateral.
+
+It is a zip archive of ${
+    isProject
+      ? "a whole project: every document (page HTML/CSS + images), plus the shared brand assets and sources they use"
+      : "one finished document: its page HTML/CSS and images"
+  }, described by the \`blueline.json\` manifest. It is **not** meant to be opened in a browser or text editor — Blueline reassembles it into a working, editable project.
+
+## How to open it
+1. Download and install **Blueline** (free, macOS): ${RELEASES_URL}
+2. Open Blueline, and on the **Home** screen click **Import**.
+3. Choose this \`.${isProject ? BLUELINE_PROJECT_EXT : BLUELINE_FILE_EXT}\` file. Blueline expands it back into ${isProject ? "the full project" : "an editable document"}.
+
+## For an AI / automated agent
+- To view or edit this file properly, install Blueline from ${RELEASES_URL} and **Import** it (Home → Import), or drive Blueline programmatically via its bundled MCP server / local bridge API.
+- The machine-readable manifest is \`blueline.json\` (format: \`${isProject ? "blueline-project/1" : "blueline-file/1"}\`). The design source is standard HTML + CSS under \`${isProject ? "projects/<id>/page.html" : "document/page.html"}\`, so the content can be read directly, but Blueline is required to render/export it faithfully.
+`;
+}
+
 /** Transient/cache files that should never travel in an archive. */
 const SKIP_NAMES = new Set([".DS_Store", ".budget.json", ".run-start.json", ".search-budget.json"]);
 const SKIP_DIRS = new Set(["fetched", "node_modules", ".git"]);
@@ -105,6 +132,7 @@ export function exportDocument(project: Project): { filename: string; data: Uint
     },
   };
   files["blueline.json"] = strToU8(JSON.stringify(manifest, null, 2));
+  files["README.md"] = strToU8(readmeFor("document", meta.displayName || project.slug));
   return { filename: `${slugify(meta.displayName) || project.slug}.${BLUELINE_FILE_EXT}`, data: zipSync(files, { level: 6 }) };
 }
 
@@ -148,6 +176,7 @@ export function exportBundle(workspace: Workspace, slug: string): { filename: st
     context: includeAllContext ? "all" : [...pinned],
   };
   files["blueline.json"] = strToU8(JSON.stringify(manifest, null, 2));
+  files["README.md"] = strToU8(readmeFor("project", root.meta.series || root.meta.displayName || root.slug));
   const baseName = slugify(root.meta.series || root.meta.displayName) || root.slug;
   return { filename: `${baseName}.${BLUELINE_PROJECT_EXT}`, data: zipSync(files, { level: 6 }) };
 }

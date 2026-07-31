@@ -5,6 +5,15 @@ All notable user-facing changes to Blueline. Kept from v0.17.0 onward
 [Keep a Changelog](https://keepachangelog.com/); versions match `app/package.json`
 and the GitHub release tags.
 
+## [0.38.0]
+
+Shared project files now explain themselves.
+
+### Added
+- **Every `.blueline` / `.blueproject` includes a README.** When you share a project file, it now
+  contains a `README.md` explaining what it is and how to open it — download Blueline from the
+  GitHub releases link, then Import — written so both a person and an AI assistant can follow it.
+
 ## [0.37.0]
 
 Export is now a menu — PDF, PNG, JPEG, and shareable project files, all in one place.
