@@ -1,4 +1,11 @@
-import { Download, Play, RefreshCw, Square, Timer } from "lucide-react";
+import { Download, FileArchive, FileText, Image, Package, Play, RefreshCw, Square, Timer } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import logo from "./assets/logo.png";
 import { type FeedItem } from "./components/AgentPane";
@@ -242,6 +249,23 @@ export function App() {
     [client],
   );
 
+  const exportImage = useCallback(
+    (format: "png" | "jpeg") => {
+      void client
+        .exportImage(format)
+        .then(({ path, filename }) => {
+          if (path) {
+            setFeed((f) => [...f, { kind: "export", path, at: Date.now() }]);
+            toast(`${format.toUpperCase()} exported`, { description: filename });
+          } else {
+            toast("Downloaded", { description: filename });
+          }
+        })
+        .catch((e) => toast.error("Export failed", { description: String(e) }));
+    },
+    [client],
+  );
+
   const [aboutOpen, setAboutOpen] = useState(false);
 
   // Resizable left column — file names in Sources/Brand can be longer than the default width.
@@ -409,23 +433,45 @@ export function App() {
         <Button size="sm" variant="outline" disabled={!project.hasPage} onClick={() => void actions.render()}>
           <RefreshCw data-slot="icon" /> Re-render
         </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!project.hasProof}
-          onClick={() =>
-            void client.exportPdf().then((path) => {
-              if (!path) return;
-              setFeed((f) => [...f, { kind: "export", path, at: Date.now() }]);
-              toast("PDF exported", {
-                description: path.split("/").pop(),
-                action: window.blueline ? { label: "Show in Finder", onClick: () => void window.blueline!.revealInFinder(path) } : undefined,
-              });
-            })
-          }
-        >
-          <Download data-slot="icon" /> Export
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="sm" variant="outline">
+              <Download data-slot="icon" /> Export
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuItem
+              disabled={!project.hasProof}
+              onClick={() =>
+                void client.exportPdf().then((path) => {
+                  if (!path) return;
+                  setFeed((f) => [...f, { kind: "export", path, at: Date.now() }]);
+                  toast("PDF exported", {
+                    description: path.split("/").pop(),
+                    action: window.blueline ? { label: "Show in Finder", onClick: () => void window.blueline!.revealInFinder(path) } : undefined,
+                  });
+                })
+              }
+            >
+              <FileText /> PDF <span className="ml-auto text-[10px] text-muted-foreground">print-ready</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={!project.hasProof} onClick={() => exportImage("png")}>
+              <Image /> PNG image
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={!project.hasProof} onClick={() => exportImage("jpeg")}>
+              <Image /> JPEG image
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => exportArchive("file")}>
+              <FileArchive /> Share this document
+              <span className="ml-auto text-[10px] text-muted-foreground">.blueline</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => exportArchive("project")}>
+              <Package /> Share whole project
+              <span className="ml-auto text-[10px] text-muted-foreground">.blueproject</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <ThemeToggle />
         <SettingsDialog client={client} />
         <NewProjectDialog client={client} open={newProjectOpen} onOpenChange={setNewProjectOpen} />

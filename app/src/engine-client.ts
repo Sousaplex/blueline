@@ -322,6 +322,8 @@ export interface EngineClient {
   useDefaultWorkspace(): Promise<void>;
   /** Returns the saved path (Electron printToPDF) or null (browser fallback opened the proof). */
   exportPdf(): Promise<string | null>;
+  /** Export the rendered proof as an image (png/jpeg). Electron saves + returns the path. */
+  exportImage(format: "png" | "jpeg"): Promise<{ path: string | null; filename: string }>;
   getSettings(): Promise<EngineSettings>;
   /** Live model list from Google (fetched separately so Settings opens instantly). */
   listModels(): Promise<{ generate: string[]; image: string[]; error?: string }>;
@@ -544,6 +546,27 @@ export class BrowserEngineClient implements EngineClient {
     if (window.blueline) return window.blueline.exportPdf();
     window.open("/files/out/proof.pdf", "_blank"); // browser fallback: latest proof
     return null;
+  }
+
+  async exportImage(format: "png" | "jpeg"): Promise<{ path: string | null; filename: string }> {
+    const res = await fetch(`/api/export/image?format=${format}`);
+    if (!res.ok) throw new Error((await res.json().catch(() => ({})) as any).error ?? `export ${format}: HTTP ${res.status}`);
+    const disposition = res.headers.get("content-disposition") ?? "";
+    const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? `export.${format}`;
+    const buf = new Uint8Array(await res.arrayBuffer());
+    if (window.blueline?.saveBinaryFile) {
+      return { path: await window.blueline.saveBinaryFile(filename, bytesToBase64(buf)), filename };
+    }
+    const blob = new Blob([buf], { type: res.headers.get("content-type") ?? "application/octet-stream" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    return { path: null, filename };
   }
 
   updateSettings(patch: SettingsPatch) { return post("/api/settings", patch); }

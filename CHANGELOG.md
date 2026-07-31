@@ -5,6 +5,18 @@ All notable user-facing changes to Blueline. Kept from v0.17.0 onward
 [Keep a Changelog](https://keepachangelog.com/); versions match `app/package.json`
 and the GitHub release tags.
 
+## [0.37.0]
+
+Export is now a menu — PDF, PNG, JPEG, and shareable project files, all in one place.
+
+### Added
+- **Export as PNG or JPEG.** Alongside PDF, you can now export the rendered proof as a PNG or JPEG
+  image (rasterized from the real PDF at 2×, so it's crisp). Multi-page pieces come out as a zip of
+  per-page images.
+- **Share files are in the Export menu now.** The **.blueline** (one document) and **.blueproject**
+  (the whole project — the way to hand a project to someone) exports were tucked in the "+" menu;
+  they're now front-and-center under **Export**, next to PDF/PNG/JPEG.
+
 ## [0.36.0]
 
 The agent now designs from your sources — no more invented companies.

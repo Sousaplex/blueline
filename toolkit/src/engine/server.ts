@@ -45,6 +45,7 @@ import { extractStyleSpec, saveStyleSpec } from "./style-spec.ts";
 import { createBluelineSession, type BluelineSession } from "./session.ts";
 import { buildRawJsonl, buildSessionBundle } from "./session-export.ts";
 import { exportBundle, exportDocument, importArchive } from "./project-archive.ts";
+import { exportProofImages } from "./export-image.ts";
 import { listGoogleModels } from "./models.ts";
 import { ensurePdfSidecars } from "./pdf-text.ts";
 import { deleteTemplate, instantiateTemplate, listTemplates, saveTemplate, templateBrief } from "./templates.ts";
@@ -953,6 +954,25 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
           bridge.logSystem("api", "project_export", `${slug} (${kind})`);
           res.writeHead(200, {
             "content-type": "application/zip",
+            "content-disposition": `attachment; filename="${out.filename}"`,
+            "cache-control": "no-store",
+          });
+          return res.end(Buffer.from(out.data));
+        } catch (err) {
+          return json(res, 400, { error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+
+      // Export the rendered proof as an image: format=png|jpeg. One page → an image; many → a zip.
+      if (url.pathname === "/api/export/image") {
+        const project = bridge.requireProject();
+        if (!existsSync(project.proofPdf)) return json(res, 400, { error: "No rendered proof yet — hit Run or Re-render first." });
+        const format = url.searchParams.get("format") === "jpeg" ? "jpeg" : "png";
+        try {
+          const out = await exportProofImages(project.proofPdf, format, bridge.backend, project.meta().displayName || project.slug);
+          bridge.logSystem("api", "export_image", `${project.slug} (${format})`);
+          res.writeHead(200, {
+            "content-type": out.contentType,
             "content-disposition": `attachment; filename="${out.filename}"`,
             "cache-control": "no-store",
           });
