@@ -59,22 +59,16 @@ Download the latest `Blueline-<version>-arm64.dmg` from the
 **Blueline** to Applications. Apple-silicon Macs only. Once installed, the app **auto-updates**
 itself from new releases in the background (see [app/RELEASING.md](app/RELEASING.md)).
 
-**First launch.** Blueline is code-signed with a Developer ID but not yet notarized, so macOS
-stops the *first* open with *"Blueline can't be opened"* — it is **not** damaged. Clear it once
-and it opens normally forever after (background auto-updates then apply silently):
+**First launch.** Blueline is code-signed with a Developer ID **and notarized**, with the ticket
+stapled into the app — so it opens straight away. There is no Gatekeeper "Open Anyway" step and
+no `xattr` command to run.
 
-- **macOS 15 Sequoia / 14 Sonoma:** double-click Blueline (it gets blocked), then
-  **System Settings → Privacy & Security** → scroll to the bottom → **Open Anyway**, confirm
-  with Touch ID. *(The old right-click → Open trick no longer works on Sequoia.)*
-- **Any macOS, one command:** `xattr -dr com.apple.quarantine /Applications/Blueline.app`
-
-First run then walks you through picking a workspace folder and pasting a `GEMINI_API_KEY` (one
+First run walks you through picking a workspace folder and pasting a `GEMINI_API_KEY` (one
 free key powers design, imagery, review, and research; get one at aistudio.google.com). Keys are
 encrypted in your macOS **Keychain** — never written to disk in plaintext.
 
 > Sharing with teammates? Just send them the [Releases link](https://github.com/Sousaplex/blueline/releases/latest)
-> — no GitHub account needed to download. The one-time "Open Anyway" step disappears once the
-> build is notarized (see [app/SIGNING.md](app/SIGNING.md)).
+> — no GitHub account needed to download, and nothing to clear on first open.
 
 ### Workspace sync (share with your team)
 
@@ -155,7 +149,6 @@ lineage, page settings), `page.html` (the deliverable), `images/`, `out/proof.pd
 
 ## Status
 
-Working: everything above, verified end-to-end. Distributed as a **code-signed** (Developer ID,
-hardened runtime) build with **auto-update** from GitHub Releases. Not yet: **notarization** (so
-the first launch skips the Gatekeeper "Open Anyway" step — config is ready, see
-[app/SIGNING.md](app/SIGNING.md)), print-shop export marks (bleed/crop), per-engine eval harness.
+Working: everything above, verified end-to-end. Distributed as a **code-signed and notarized**
+(Developer ID, hardened runtime, stapled ticket) build with **auto-update** from GitHub Releases.
+Not yet: print-shop export marks (bleed/crop), per-engine eval harness.

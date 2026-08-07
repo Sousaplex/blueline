@@ -1,10 +1,17 @@
 # Signing & notarization
 
-Blueline currently ships **unsigned** — `npm run package` builds an unsigned dmg
-(teammates use the Gatekeeper "Open Anyway" step in the README). The signing config
-below is wired and ready; it activates the moment a Developer ID certificate is in
-your login Keychain, and full clean-open (no Gatekeeper prompt) turns on when you add
-notarization credentials.
+Blueline ships **signed and notarized**. Verified on the published v0.40.0:
+`Developer ID Application: Michael Sousa (6N5KDBX8RH)`, hardened runtime, notarization
+ticket stapled, `spctl` reports `source=Notarized Developer ID` — it opens with no
+Gatekeeper prompt.
+
+That comes from `npm run package:signed` / `npm run release:publish`, which need the
+Developer ID certificate in the *build machine's* login Keychain plus the `APPLE_*`
+notarization credentials below. `npm run package` remains deterministically **unsigned**
+(`CSC_IDENTITY_AUTO_DISCOVERY=false`) — it is for local testing and the isolated smoke
+test only, and **must not be used to publish**: electron-updater refuses an update that
+isn't signed by the same Developer ID, so an unsigned release would break auto-update for
+everyone already running Blueline.
 
 ## What's already set up
 

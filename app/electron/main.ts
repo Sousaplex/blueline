@@ -133,6 +133,74 @@ const SPLASH_URL =
 let bridgeChild: ChildProcess | undefined;
 let mainWindow: BrowserWindow | undefined;
 
+/** Push an event to the renderer, if there still is one. Shared by the real updater and the simulator. */
+function toRenderer(channel: string, payload: unknown): void {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
+}
+
+// ── Update-UI simulator ────────────────────────────────────────────────────────
+// BLUELINE_UPDATE_SIMULATE drives the whole update UI — availability prompt, byte-accurate
+// progress with a moving ETA, the silent unpack window, the restart — with NO download, NO
+// packaging and NO published release. Without it the only way to see this code run is to ship
+// a release, which is precisely how a 200 MB+ download with no progress detail went unnoticed.
+//
+//   BLUELINE_UPDATE_SIMULATE=1      npm run electron:app    # the happy path
+//   BLUELINE_UPDATE_SIMULATE=error  npm run electron:app    # the failure toast
+//
+// Tunables: ..._VERSION (default 9.9.9), ..._SECONDS (download duration, default 12),
+// ..._MB (payload size, default 223.3 — a real Blueline update).
+// Inert unless the variable is set, so it can never affect a shipped build.
+const SIMULATE_UPDATE = Boolean(process.env.BLUELINE_UPDATE_SIMULATE);
+
+function setupSimulatedUpdater(): void {
+  const mode = process.env.BLUELINE_UPDATE_SIMULATE === "error" ? "error" : "download";
+  const version = process.env.BLUELINE_UPDATE_SIMULATE_VERSION ?? "9.9.9";
+  const seconds = Math.max(1, Number(process.env.BLUELINE_UPDATE_SIMULATE_SECONDS ?? 12));
+  const total = Math.round(Number(process.env.BLUELINE_UPDATE_SIMULATE_MB ?? 223.3) * 1024 * 1024);
+  console.log(`[updater:simulated] mode=${mode} version=${version} ${seconds}s ${(total / 1048576).toFixed(1)}MB`);
+
+  ipcMain.handle("update-download", () => {
+    if (mode === "error") {
+      toRenderer("update-error", { message: "Simulated failure: net::ERR_CONNECTION_RESET" });
+      return;
+    }
+    const startedAt = Date.now();
+    const tick = setInterval(() => {
+      const elapsed = (Date.now() - startedAt) / 1000;
+      const fraction = Math.min(1, elapsed / seconds);
+      const transferred = Math.round(total * fraction);
+      // Jitter the rate so the ETA visibly moves — a constant rate would hide a bad estimate.
+      const jitter = 0.75 + Math.sin(elapsed * 1.7) * 0.25;
+      toRenderer("update-progress", {
+        percent: Math.round(fraction * 100),
+        transferred,
+        total,
+        bytesPerSecond: Math.round((total / seconds) * jitter),
+      });
+      if (fraction < 1) return;
+      clearInterval(tick);
+      // The real MacUpdater goes quiet here while Squirrel unpacks the zip; hold the
+      // "Preparing update…" state long enough to judge whether it reads as progress.
+      setTimeout(() => toRenderer("update-downloaded", { version }), 4000);
+    }, 400);
+  });
+
+  ipcMain.handle("update-install", async () => {
+    await dialog.showMessageBox(mainWindow!, {
+      type: "info",
+      message: "Simulated update",
+      detail: `A real build would quit and relaunch as ${version} now.`,
+      buttons: ["OK"],
+    });
+  });
+
+  // Let the UI settle first, exactly as a real launch-time check would.
+  setTimeout(() => {
+    if (mode === "error") toRenderer("update-error", { message: "Simulated failure: could not reach the update server" });
+    else toRenderer("update-available", { version });
+  }, 2000);
+}
+
 /** Main-process stdout is not reliably visible in packaged builds — log smoke steps to a file. */
 function smokeLog(msg: string): void {
   console.log(msg);
@@ -350,13 +418,12 @@ app.whenReady().then(async () => {
     // available — no silent download. The renderer shows a prompt; the download only
     // starts when the user approves (update-download), and installs on their command
     // (update-install). Never during smoke or dev.
-    if (PACKAGED && !SMOKE) {
+    if (SIMULATE_UPDATE) {
+      setupSimulatedUpdater();
+    } else if (PACKAGED && !SMOKE) {
       const { autoUpdater } = electronUpdater;
       autoUpdater.autoDownload = false; // wait for explicit user approval
       autoUpdater.autoInstallOnAppQuit = false;
-      const toRenderer = (channel: string, payload: unknown) => {
-        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
-      };
       // Surface errors to the UI — console.log is invisible in a packaged app, so a failed
       // download/install used to look like "nothing happened".
       autoUpdater.on("error", (e) => {

@@ -357,11 +357,15 @@ export function App() {
     const offs = [
       bl.onUpdateAvailable((version) =>
         toast(`Blueline ${version} is available`, {
+          // Needs an id so approving the download can DISMISS it — without one the prompt
+          // stays on screen through the whole download and a second click starts a second one.
+          id: "bl-update-available",
           description: "A new version is ready to download.",
           duration: Infinity,
           action: {
             label: "Download",
             onClick: () => {
+              toast.dismiss("bl-update-available");
               void bl.downloadUpdate();
               toast.loading("Downloading update…", {
                 id: "bl-update-dl",

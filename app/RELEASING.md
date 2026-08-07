@@ -55,6 +55,30 @@ Once a release is published, the newest installer is always at:
 https://github.com/Sousaplex/blueline/releases/latest
 ```
 
+## Testing the update UI without a release
+
+The update UI is otherwise unreachable without shipping — which is how a 200 MB+ download
+with no progress detail stayed unnoticed. `BLUELINE_UPDATE_SIMULATE` drives the whole
+sequence (availability prompt → byte-accurate progress with a moving ETA → the silent unpack
+window → restart) with **no download, no packaging and no release**:
+
+```bash
+cd app && BLUELINE_UPDATE_SIMULATE=1 npm run electron:app       # the happy path
+cd app && BLUELINE_UPDATE_SIMULATE=error npm run electron:app   # the failure toast
+```
+
+Tunables — useful for judging whether a slow download still reads as "working":
+
+| Variable | Default | What it does |
+|---|---|---|
+| `BLUELINE_UPDATE_SIMULATE_VERSION` | `9.9.9` | version offered in the prompt |
+| `BLUELINE_UPDATE_SIMULATE_SECONDS` | `12` | how long the fake download takes |
+| `BLUELINE_UPDATE_SIMULATE_MB` | `223.3` | payload size (a real Blueline update) |
+
+The simulator replaces the real updater while it's active and is inert unless the variable is
+set, so it cannot affect a shipped build. **Restart now** shows a dialog instead of relaunching —
+the actual bundle swap is Squirrel's job and only a signed build can prove it (below).
+
 ## Verifying an update end-to-end
 
 1. Publish version N.
