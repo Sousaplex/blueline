@@ -1,20 +1,24 @@
 // Chat as a bottom-right floating action button (docs/layer-model.md slice 5). Frees the
 // right rail for the property + layers panels; the agent chat opens on demand.
 import { MessageSquare, X } from "lucide-react";
-import { useState } from "react";
 import { cn } from "@/lib/utils";
 import type { ContextUsage, SystemEvent } from "../engine-client";
 import { AgentPane, type FeedItem } from "./AgentPane";
 
-export function ChatFab({ feed, systemFeed, running, onChat, contextUsage, onExportSession }: {
+// Open state is OWNED BY App, not this component: starting a run has to be able to pop
+// the panel open. When it lived here, a run produced no visible agent activity at all
+// unless the user happened to click the bubble.
+export function ChatFab({ feed, systemFeed, running, onChat, contextUsage, onExportSession, open, onOpenChange }: {
   feed: FeedItem[];
   systemFeed: SystemEvent[];
   running: boolean;
   onChat: (text: string) => void;
   contextUsage?: ContextUsage | null;
   onExportSession?: () => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const setOpen = (next: boolean) => onOpenChange(next);
 
   return (
     <>
@@ -35,7 +39,7 @@ export function ChatFab({ feed, systemFeed, running, onChat, contextUsage, onExp
         </div>
       )}
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpen(!open)}
         title={open ? "Hide agent chat" : "Open agent chat"}
         className={cn(
           "fixed bottom-4 right-4 z-50 flex size-12 items-center justify-center rounded-full text-primary-foreground shadow-lg transition-transform hover:scale-105",

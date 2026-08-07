@@ -31,6 +31,9 @@ print-ready PDF that is pixel-identical to the preview.
   wrong page counts force a revise verdict.
 - **True WYSIWYG export** — the preview window and the PDF exporter are the same Chromium
   (`printToPDF`), so what you see is literally what prints.
+- **Export to Figma** — hand a design to a designer as *editable layers*, not a flat image:
+  text stays text, images keep their crop, geometry matches the print layout. See
+  [figma-plugin/](figma-plugin/README.md).
 - **Live editing** — inline copy edits, image variant shuffle / upload / regenerate,
   crop pan + zoom, and a Nudge tool (arrow keys move blocks in mm; spacing steppers).
 - **Branching** — fork any review round to explore an alternate next round; fan an
@@ -105,6 +108,9 @@ cd app && npm run release:publish
 
 # engine guard tests
 cd toolkit && npm test
+
+# export a project as a Figma scene (figma-plugin/ imports it)
+cd toolkit && npm run export-figma -- projects/<slug>
 ```
 
 CLI loop without any UI:

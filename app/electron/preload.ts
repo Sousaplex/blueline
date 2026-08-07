@@ -1,5 +1,15 @@
 import { contextBridge, ipcRenderer } from "electron";
 
+/** Mirrors electron-updater's ProgressInfo. Structurally identical to the renderer's
+ *  UpdateProgress (app/src/lib/update.ts) — preload can't import from src/, so the shape
+ *  is restated here rather than shared. */
+interface UpdateProgress {
+  percent: number;
+  transferred: number;
+  total: number;
+  bytesPerSecond: number;
+}
+
 contextBridge.exposeInMainWorld("blueline", {
   isElectron: true as const,
   exportPdf: (): Promise<string | null> => ipcRenderer.invoke("export-pdf"),
@@ -22,8 +32,8 @@ contextBridge.exposeInMainWorld("blueline", {
     ipcRenderer.on("update-available", h);
     return () => ipcRenderer.removeListener("update-available", h);
   },
-  onUpdateProgress: (cb: (percent: number) => void): (() => void) => {
-    const h = (_e: unknown, p: { percent: number }) => cb(p.percent);
+  onUpdateProgress: (cb: (p: UpdateProgress) => void): (() => void) => {
+    const h = (_e: unknown, p: UpdateProgress) => cb(p);
     ipcRenderer.on("update-progress", h);
     return () => ipcRenderer.removeListener("update-progress", h);
   },

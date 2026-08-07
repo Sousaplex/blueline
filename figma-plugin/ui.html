@@ -1,0 +1,95 @@
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: Inter, system-ui, -apple-system, sans-serif;
+    font-size: 12px;
+    margin: 0;
+    padding: 16px;
+    color: #1a1a1a;
+    background: #fff;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { color: #e6e6e6; background: #2c2c2c; }
+    #drop { border-color: #555; }
+    #drop.over { border-color: #7cc4ff; background: #1e3a4d; }
+  }
+  h1 { font-size: 13px; margin: 0 0 4px; }
+  p.sub { margin: 0 0 12px; opacity: 0.7; line-height: 1.4; }
+  #drop {
+    border: 1.5px dashed #c4c4c4;
+    border-radius: 8px;
+    padding: 22px 12px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  #drop.over { border-color: #0d99ff; background: #eaf5ff; }
+  #status { margin-top: 12px; line-height: 1.5; white-space: pre-wrap; }
+  .err { color: #d33; }
+  .ok { color: #1a9c50; }
+  .note { opacity: 0.75; }
+  input[type="file"] { display: none; }
+</style>
+
+<h1>Import a Blueline document</h1>
+<p class="sub">In Blueline: <strong>Export → Figma scene</strong>. Drop the <code>scene.json</code> here.</p>
+
+<div id="drop">Drop <code>scene.json</code>, or click to choose</div>
+<input type="file" id="file" accept="application/json,.json" />
+<div id="status"></div>
+
+<script>
+  const drop = document.getElementById("drop");
+  const file = document.getElementById("file");
+  const status = document.getElementById("status");
+
+  const say = (msg, cls) => {
+    status.textContent = msg;
+    status.className = cls || "";
+  };
+
+  function load(f) {
+    if (!f) return;
+    say("Reading " + f.name + "…");
+    const reader = new FileReader();
+    reader.onload = () => {
+      say("Building layers… (large documents take a moment)");
+      parent.postMessage({ pluginMessage: { type: "import", json: reader.result } }, "*");
+    };
+    reader.onerror = () => say("Could not read that file.", "err");
+    reader.readAsText(f);
+  }
+
+  drop.onclick = () => file.click();
+  file.onchange = () => load(file.files[0]);
+
+  drop.ondragover = (e) => {
+    e.preventDefault();
+    drop.classList.add("over");
+  };
+  drop.ondragleave = () => drop.classList.remove("over");
+  drop.ondrop = (e) => {
+    e.preventDefault();
+    drop.classList.remove("over");
+    load(e.dataTransfer.files[0]);
+  };
+
+  onmessage = (event) => {
+    const msg = event.data.pluginMessage;
+    if (!msg) return;
+    if (msg.type === "error") {
+      say(msg.message, "err");
+      return;
+    }
+    if (msg.type === "done") {
+      status.className = "ok";
+      status.textContent = msg.message;
+      for (const note of msg.notes || []) {
+        const line = document.createElement("div");
+        line.className = "note";
+        line.textContent = "• " + note;
+        status.appendChild(line);
+      }
+    }
+  };
+</script>

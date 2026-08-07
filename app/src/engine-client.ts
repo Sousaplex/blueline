@@ -2,6 +2,8 @@
 // Browser mode: HTTP + WebSocket against the toolkit bridge (vite-proxied).
 // Electron mode (M3): an IPC-backed implementation with the same interface.
 
+import type { UpdateProgress } from "@/lib/update";
+
 export interface ReviewIssue {
   page: number;
   region: string;
@@ -247,7 +249,7 @@ declare global {
       downloadUpdate(): Promise<void>;
       installUpdate(): Promise<void>;
       onUpdateAvailable(cb: (version: string) => void): () => void;
-      onUpdateProgress(cb: (percent: number) => void): () => void;
+      onUpdateProgress(cb: (progress: UpdateProgress) => void): () => void;
       onUpdateDownloaded(cb: (version: string) => void): () => void;
       onUpdateError(cb: (message: string) => void): () => void;
       isElectron: true;
@@ -329,6 +331,8 @@ export interface EngineClient {
   exportPdf(): Promise<string | null>;
   /** Export the rendered proof as an image (png/jpeg). Electron saves + returns the path. */
   exportImage(format: "png" | "jpeg"): Promise<{ path: string | null; filename: string }>;
+  /** Scene graph for figma-plugin/ — text stays text, images stay images. */
+  exportFigmaScene(): Promise<{ path: string | null; filename: string; warnings: string[] }>;
   getSettings(): Promise<EngineSettings>;
   /** Live model list from Google (fetched separately so Settings opens instantly). */
   listModels(): Promise<{ generate: string[]; image: string[]; error?: string }>;
@@ -660,6 +664,34 @@ export class BrowserEngineClient implements EngineClient {
     a.remove();
     URL.revokeObjectURL(url);
     return { path: null };
+  }
+
+  async exportFigmaScene(): Promise<{ path: string | null; filename: string; warnings: string[] }> {
+    const res = await fetch("/api/export/figma");
+    if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as any).error ?? `figma export: HTTP ${res.status}`);
+    const disposition = res.headers.get("content-disposition") ?? "";
+    const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? "figma-scene.json";
+    const text = await res.text();
+    // Surface the extractor's own caveats (page splitting, unreadable assets) to the user.
+    let warnings: string[] = [];
+    try {
+      warnings = (JSON.parse(text).warnings as string[]) ?? [];
+    } catch {
+      /* the file still downloads even if we can't read its warnings */
+    }
+    if (window.blueline?.saveTextFile) {
+      const path = await window.blueline.saveTextFile(filename, text);
+      return { path, filename, warnings };
+    }
+    const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    return { path: null, filename, warnings };
   }
 
   async exportArchive(slug: string, kind: "file" | "project"): Promise<{ path: string | null; filename: string }> {

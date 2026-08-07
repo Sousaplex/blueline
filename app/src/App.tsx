@@ -1,4 +1,4 @@
-import { Download, FileArchive, FileText, Image, Package, Play, RefreshCw, Square, Timer } from "lucide-react";
+import { Download, FileArchive, FileText, Image, Package, PenTool, Play, RefreshCw, Square, Timer } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,7 +27,9 @@ import { VariantsDialog } from "./components/VariantsDialog";
 import { Toaster, toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { shouldAutoOpenChat } from "@/lib/chatAutoOpen";
 import { currentTheme } from "@/lib/theme";
+import { describeProgress, isUnpacking, progressTitle } from "@/lib/update";
 import {
   BrowserEngineClient,
   type ContextUsage,
@@ -213,10 +215,34 @@ export function App() {
   const currentRunState: RunState = project?.slug ? (runStates[project.slug] ?? "idle") : "idle";
   const running = currentRunState === "running";
 
+  // Pop the agent chat open when a run actually starts, so "I clicked Run" is followed by
+  // visible work instead of a silent progress bar. Fires on the idle -> active TRANSITION
+  // only: if the user closes the panel mid-run it stays closed, and switching to a project
+  // that is already running doesn't yank it open either.
+  const [chatOpen, setChatOpen] = useState(false);
+  const prevRunState = useRef<RunState>("idle");
+  useEffect(() => {
+    if (shouldAutoOpenChat(prevRunState.current, currentRunState)) setChatOpen(true);
+    prevRunState.current = currentRunState;
+  }, [currentRunState]);
+
+  // Switching documents resets the transition tracker — the new project's run state is a
+  // fresh observation, not a transition we should react to.
+  useEffect(() => {
+    prevRunState.current = project?.slug ? (runStates[project.slug] ?? "idle") : "idle";
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- slug change only; runStates is a snapshot read
+  }, [project?.slug]);
+
   const actions = useMemo(
     () => ({
-      run: (slug?: string) =>
-        client.run(slug).catch((e) => setFeed((f) => [...f, { kind: "error" as const, message: String(e), at: Date.now() }])),
+      run: (slug?: string) => {
+        // Open the chat on the CLICK as well as on the run-state transition. The click is
+        // instant (no bridge round-trip) and, more importantly, it still fires for a run that
+        // fails before it ever reports "running" — a missing/invalid API key surfaces ONLY in
+        // this feed, so the panel has to be open to show it.
+        setChatOpen(true);
+        return client.run(slug).catch((e) => setFeed((f) => [...f, { kind: "error" as const, message: String(e), at: Date.now() }]));
+      },
       chat: (text: string) => {
         setViewRound(null); // steering acts on the LATEST state — a historical proof would hide the result
         return client.chat(text);
@@ -248,6 +274,29 @@ export function App() {
     },
     [client],
   );
+
+  const exportFigmaScene = useCallback(() => {
+    toast.loading("Measuring the page…", { id: "bl-figma", duration: Infinity });
+    void client
+      .exportFigmaScene()
+      .then(({ path, filename, warnings }) => {
+        toast.dismiss("bl-figma");
+        if (path) setFeed((f) => [...f, { kind: "export", path, at: Date.now() }]);
+        toast.success("Figma scene exported", {
+          // The file is useless without the plugin, so say so at the moment of export.
+          description: warnings.length
+            ? `${filename} — ${warnings.join(" ")} Import it with the Blueline Import plugin.`
+            : `${filename} — import it with the Blueline Import plugin.`,
+          duration: warnings.length ? 12000 : 8000,
+          action:
+            path && window.blueline ? { label: "Show in Finder", onClick: () => void window.blueline!.revealInFinder(path) } : undefined,
+        });
+      })
+      .catch((e) => {
+        toast.dismiss("bl-figma");
+        toast.error("Figma export failed", { description: String(e) });
+      });
+  }, [client]);
 
   const exportImage = useCallback(
     (format: "png" | "jpeg") => {
@@ -314,25 +363,49 @@ export function App() {
             label: "Download",
             onClick: () => {
               void bl.downloadUpdate();
-              toast.loading("Downloading update…", { id: "bl-update-dl", duration: Infinity });
+              toast.loading("Downloading update…", {
+                id: "bl-update-dl",
+                description: "Starting download…",
+                duration: Infinity,
+              });
             },
           },
         }),
       ),
-      bl.onUpdateProgress((percent) =>
-        toast.loading(`Downloading update… ${percent}%`, { id: "bl-update-dl", duration: Infinity }),
+      bl.onUpdateProgress((progress) =>
+        // Once the bytes have landed Squirrel.Mac unpacks the zip and emits NOTHING for a
+        // while — say so, or a finished download reads exactly like a hang.
+        isUnpacking(progress)
+          ? toast.loading("Preparing update…", {
+              id: "bl-update-dl",
+              description: "Unpacking — this takes a moment and can't be interrupted.",
+              duration: Infinity,
+            })
+          : toast.loading(progressTitle(progress), {
+              id: "bl-update-dl",
+              description: describeProgress(progress),
+              duration: Infinity,
+            }),
       ),
       bl.onUpdateDownloaded((version) => {
         toast.dismiss("bl-update-dl");
         toast.success(`Blueline ${version} ready`, {
           description: "Restart to finish updating.",
           duration: Infinity,
-          action: { label: "Restart now", onClick: () => void bl.installUpdate() },
+          action: {
+            label: "Restart now",
+            onClick: () => {
+              void bl.installUpdate();
+              // The bundle swap takes a few seconds during which the UI is still up.
+              toast.loading("Restarting to install…", { id: "bl-update-install", duration: Infinity });
+            },
+          },
         });
       }),
       // Failures used to be silent (console-only) — now the user sees why nothing happened.
       bl.onUpdateError?.((message) => {
         toast.dismiss("bl-update-dl");
+        toast.dismiss("bl-update-install");
         toast.error("Update failed", { description: message, duration: 12000 });
       }) ?? (() => {}),
     ];
@@ -462,6 +535,11 @@ export function App() {
               <Image /> JPEG image
             </DropdownMenuItem>
             <DropdownMenuSeparator />
+            <DropdownMenuItem disabled={!project.hasPage} onClick={() => exportFigmaScene()}>
+              <PenTool /> Figma scene
+              <span className="ml-auto text-[10px] text-muted-foreground">editable layers</span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => exportArchive("file")}>
               <FileArchive /> Share this document
               <span className="ml-auto text-[10px] text-muted-foreground">.blueline</span>
@@ -562,6 +640,8 @@ export function App() {
         </div>
       </div>
       <ChatFab
+        open={chatOpen}
+        onOpenChange={setChatOpen}
         feed={feed}
         systemFeed={systemFeed}
         running={running}

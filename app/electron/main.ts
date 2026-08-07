@@ -367,7 +367,17 @@ app.whenReady().then(async () => {
         console.log("[updater] update available:", i.version);
         toRenderer("update-available", { version: i.version });
       });
-      autoUpdater.on("download-progress", (p) => toRenderer("update-progress", { percent: Math.round(p.percent) }));
+      // Forward the FULL ProgressInfo, not just percent: the mac payload is the whole app
+      // (~223 MB) with no reliable delta, so bytes + rate + ETA are what tell the user this
+      // is working rather than wedged. See app/src/lib/update.ts for the formatting.
+      autoUpdater.on("download-progress", (p) =>
+        toRenderer("update-progress", {
+          percent: Math.round(p.percent),
+          transferred: p.transferred,
+          total: p.total,
+          bytesPerSecond: p.bytesPerSecond,
+        }),
+      );
       autoUpdater.on("update-downloaded", (i) => {
         console.log("[updater] downloaded:", i.version);
         toRenderer("update-downloaded", { version: i.version });

@@ -22,11 +22,15 @@ plan for milestones (M1 engine ✓, M2 viewer, M3 Electron shell, M4 export/vari
   MOONSHOT_API_KEY exists; smoke-test config uses Gemini.
 - `projects/<slug>/` — one dir per deliverable (brief.md, page.html, images/, out/,
   review/, fetched/). `projects/demo/` is the e2e test project.
+- `figma-plugin/` — dependency-free Figma plugin that rebuilds a `scene.json` (from
+  `engine/figma-scene.ts`) as editable layers. Plain JS, no build step; the Plugin API is
+  the ONLY way to create Figma nodes — don't reach for `.fig` or the read-only REST API.
 - `context/`, `styles/` — repo-level source material and brand guides (agent-read-only).
 
 ## Dev commands (run from toolkit/)
 - `npm run agent -- projects/demo [--model provider/model]` — full loop
 - `npm run render|review|gen-images -- projects/<slug>` — individual steps
+- `npm run export-figma -- projects/<slug>` — write `out/scene.json` for the Figma plugin
 - `npm test` — guard tests (web_fetch SSRF/budget, review round cap)
 - `npm run typecheck`
 

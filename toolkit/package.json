@@ -6,6 +6,7 @@
   "scripts": {
     "agent": "tsx src/engine/run.ts",
     "typecheck": "tsc -p tsconfig.json",
+    "export-figma": "tsx src/commands/export-figma.ts",
     "gen-images": "tsx src/commands/gen-images.ts",
     "render": "tsx src/commands/render.ts",
     "review": "tsx src/commands/review.ts",

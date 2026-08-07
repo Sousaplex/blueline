@@ -47,6 +47,7 @@ import { createBluelineSession, type BluelineSession } from "./session.ts";
 import { buildRawJsonl, buildSessionBundle } from "./session-export.ts";
 import { exportBundle, exportDocument, importArchive } from "./project-archive.ts";
 import { exportProofImages } from "./export-image.ts";
+import { exportFigmaScene } from "./figma-scene.ts";
 import { listGoogleModels } from "./models.ts";
 import { ensurePdfSidecars } from "./pdf-text.ts";
 import { deleteTemplate, instantiateTemplate, listTemplates, saveTemplate, templateBrief } from "./templates.ts";
@@ -1009,6 +1010,27 @@ export async function startServer(projectDirArg: string | undefined, port: numbe
             "cache-control": "no-store",
           });
           return res.end(Buffer.from(out.data));
+        } catch (err) {
+          return json(res, 400, { error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+
+      // Export the page as a Figma scene graph (figma-plugin/ rebuilds it as real layers).
+      // Measures the live page.html rather than the proof PDF, so text stays text.
+      if (url.pathname === "/api/export/figma") {
+        const project = bridge.requireProject();
+        if (!existsSync(project.pageHtml)) return json(res, 400, { error: "No page yet — hit Run first." });
+        try {
+          const scene = await exportFigmaScene(project, bridge.backend);
+          const nodes = scene.pages.reduce((n, p) => n + p.nodes.length, 0);
+          bridge.logSystem("api", "export_figma", `${project.slug} (${scene.pages.length}p, ${nodes} nodes)`);
+          const safe = (project.meta().displayName || project.slug).replace(/[^a-zA-Z0-9._-]+/g, "-");
+          res.writeHead(200, {
+            "content-type": "application/json",
+            "content-disposition": `attachment; filename="${safe}-figma-scene.json"`,
+            "cache-control": "no-store",
+          });
+          return res.end(JSON.stringify(scene));
         } catch (err) {
           return json(res, 400, { error: err instanceof Error ? err.message : String(err) });
         }

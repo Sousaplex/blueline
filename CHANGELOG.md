@@ -5,6 +5,31 @@ All notable user-facing changes to Blueline. Kept from v0.17.0 onward
 [Keep a Changelog](https://keepachangelog.com/); versions match `app/package.json`
 and the GitHub release tags.
 
+## [0.41.0]
+
+Designs go to Figma as editable layers, and two "is anything happening?" blind spots close.
+
+### Added
+- **Export to Figma.** `Export → Figma scene` measures the live page in Chromium and writes a
+  scene file that the bundled **Blueline Import** plugin (`figma-plugin/`) rebuilds as real,
+  editable Figma layers — text stays text, images keep their crop, geometry matches the print
+  layout. One Figma frame per page. Fonts Figma doesn't have fall back to Inter at the matching
+  weight, and the plugin tells you which families it substituted. Also available from the CLI:
+  `npm run export-figma -- projects/<slug>`.
+- **The update download now tells you how it's going.** Instead of a bare percentage, the
+  progress toast shows bytes transferred against the total, the current transfer rate, and a
+  rough time remaining — so a 223 MB update reads as "47 MB of 223 MB · 2.1 MB/s · about
+  1 min left" rather than a number that appears stuck. After the bytes land, an explicit
+  **Preparing update…** state covers the stretch where macOS unpacks the download and reports
+  nothing, and choosing **Restart now** confirms the restart is under way.
+
+### Changed
+- **Clicking Run opens the agent chat.** Starting a run used to leave the agent panel shut, so
+  a run in progress looked identical to nothing happening. The panel now opens as the run
+  starts and streams the agent's work — including failures like a missing API key, which
+  previously only appeared in a panel nobody had opened. Closing it mid-run keeps it closed,
+  and switching to a document that is already running won't reopen it.
+
 ## [0.40.0]
 
 Shared Blueline files get an icon and open on double-click.
